@@ -40,7 +40,11 @@ public class Main {
         Path indexDir = projectDir.resolve("search-index");
 
         System.out.println("project : " + projectDir);
-        build(docsDir, outDir);
+        if (!Files.isDirectory(outDir)) {
+            build(docsDir, outDir);
+        } else {
+            System.out.println("  skip build (static-html exists)");
+        }
         reindex(docsDir, indexDir);
 
         if (serve) {
@@ -67,8 +71,14 @@ public class Main {
 
         for (Path p : projects) {
             System.out.println("  [" + p.getFileName() + "]");
-            build(p.resolve("docs"), p.resolve("static-html"));
-            reindex(p.resolve("docs"), p.resolve("search-index"));
+            Path outDir = p.resolve("static-html");
+            Path docsDir = p.resolve("docs");
+            if (!Files.isDirectory(outDir)) {
+                build(docsDir, outDir);
+            } else {
+                System.out.println("  skip build (static-html exists)");
+            }
+            reindex(docsDir, p.resolve("search-index"));
         }
 
         if (serve) {
