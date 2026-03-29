@@ -144,44 +144,87 @@ public class PortalServer {
               <title>Documentation Portal</title>
               <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAR4ElEQVR42u2beZQV1bXGv31OVd3bd+wRaGYFAQGRQRNEkwYMGjQOkdwGExN9QvAZE6MoMbyXpPpGxRhjzNOs5wOFmESj3uuACYkaUeggPBEQUSYHoJmhJ7r7zlV1zs4ft0FYJlkmjEnYa3X36mFVnf07+3x7167dwCk7ZafslB1FY2ZiZoolWMYSCQlmAjP9WziOBMu/+ge2LWrsxYZts/iXcz6WSMhDQASZucsXn1gV+3ZixY3M7GfmEnmSrp2OgvcSyVq1bvv28lv+uPNbzXnvWigV3ZUzyitkwdPg3ZZhyb5VJb81Lf+y00Pemp9dOnKDYlAskRDJ2lr1zwsglpAiWauue2LZlDf2OT9uzste2WwWpDUkKaVBUkoDDILwWRDSwOAwt10xoMvV379k8EtZV//zRoBts7gzTvqiOYtv3bhf/zTVngHAnhBSAIqYJAHMAJhAYDCDmZmEDAQCukd5yVt9o2LWIBlcugEb1ImKhE8EgAGqs20CgCEbNlBy8GD5DUA/N/ILl/72g+yCnfvTnmlaIgpHaBCU4QflMwADTAduQocKJufNIJ1V7Wv/aU3F6PMHDdpkM4s4kT6hAJiZ6urqCEuWCADYUF/PSUAXGXzcBvz41dfez1pjz82+pYa3vGW89vY+B6mUzl1wlT/d/xyIXAaCNUhrsCQQFy8kANYMZflMNaAqsvDaT/e9cerI6mZmgIj4eAIwDqNRvDmj6DQAQBgGlOv6X3zw8cpd7/2/PxSNVr9fv8K4/v4bely3bNvpl+9/kWb7XxYPbvHh6eahLREUHN8r8/uURwOcohBlQ6XI+0Ow8lkQazARNJiIhJHNOmJTWkx6etVml7n6mtraJACoEwKA2RYvJ3uWblrT1t3ds20AnNwoN53uT4XsabMnXNJV5dwquHnTb0mD0jnU/9+TmP/ZrmhZ9zZ+uTYgFuUGIi+M6nyOcLEFDErcS+2WhXygDFvOHI91Z40FM2vDdYiJiMEwDcGikFKuEmEsASUHrz/+R8C2bVFXF+d5N917zfaGVbfub24cwQUHjtLIuQpZBbhCIA+ChgGG55UIoJD2OBj1m327BXTfPe/B6siIdcHe7CiNSLqVUMjCkQIgAZ/rYVu/UXrF+OtFe0kUludoFkIQESutuaq8XHy+X/CqB68c8XwskZDHUxCNeDyu43Fg1ZzSp0zq9wcjWNKvuWnXGU5BD1OFwpkaZv9sLl1eAJeClC+n2SgoD7LUQNBsKrRSb98fz4mhoE2VMktluy8IVhr+dBN6bFmLvpvXImf50HfHOhF+8/F3l0z8dp/WvBEhN+cZIAEGO1pznlWfomQeXzt4BM654QYXQEvnx5sAnoAUYE+J/atXh9f/blHUTWeqm7c3mM27dtHIUX2NkVPHfn1204D2P6yjTxXyhZGFXFqZxJKZADEQDQPG8PbN7+C8tc+1VRp04333X/bcjG3hUa9uzc7fVwifWSg4YC/vuEpRKl3oDRA3rl9MJy4LgCkZqxXrGxsJ9QBQr+OHCOLH0qP7+uVo23M/KntePvFhfcXG/Zl7WjtSyhJCMmsAkgtWkEv9aJswuu/1j40/44Wi3rwdvOqR1KSGVOHWZkcOby146GLl99w9bvCIL593euPxzAafhDYxM+rq6mjIhg0EAMkkcMecMnHODXPd1KbHag3pPuDvXz107M+DUze16fvy6Q4lBaQGQbBmT/opHLIwsaeMPfrVcc8cuLAlgKnPr77qlQ2NdzhW+FNXD6sYd+/rT/2pZuxYUT9unHfSl8K8zrZoaNzJf/iLmWTJmVavr1b3sV96sQXmBENlldBK5uGDT7AmlSMzGOX+IeO7XxoUfvyi8/oXlq1t8100LJpbtKnp3MfWNj9fcJxFb9889koPtrC5DsejMDri88aLbYPGxT1n8yPrzMrS3d96oeTdX72+b4boaFMpIyqrqQV+M4OKIPPG4LlkhkII6Ww64pNppRF0NZcUNAwn72j2B8Q53Xw/WDjts3cREdfYi436+LGNhKMAoMagcfVeOjHle0Fv4507trrY0NCGZiMKWRJEqZHCzNw3sTM6EH7k2GXSICE1ALAull2sQSSgwDoQKRO9QmLJpKFl0+8YO+QD2IsNHEMIxhFfYUmRo+mmu2Dvbt0LrtdroLRArQA3YGL6h/jQNwQR7oDLggCSxJoFuMifUPwRGAYJketo8953I2PnrGxePvnxN6Y9fc3oFxBLSE7E9LEQxiPvzmyoLy7KzfWAlMKTlii4JrTjYFHH2ViaG4qQTsFj6qyxGQogDSINEAPEnY8amhlCkCHzKdXcnqlcviu/4JJ5y75rJGsVEXAsWmtHDiBWTKCUblFFdwAQQQgHu81eKJAAQRd3mxlgBnHxqYhw+GNW8XsGg6TJSqc60mpNK+658NEVDzEDqE0KPsoQjl5/TlNxi0EQgoG8QJW7D4bQUCj+ijslhw9+5sNU6CMWGgwWBrTI7W9117bqb178yLLfmMlaRbVJcTQj4cgBJItOc6iMAIIBgvAYyjFwprcdVWiHBxMS3Hkz+mi/mQ5yKEbG4RHBABkEM9/W5K5u0VOGP7joPiNZq1C3RJ48AAbXFL0IhhogJRQxlKuRh0RvoxFjzC1Iw4IgjaIGEiCK4ldsF3GRA+FjoXBAMyTBVOkOd4cTun383D/ZiI/zauzFxskBYGzn10DlBhg+aGZAeyAQhFa4IbAMVeVlUJDQSkMpDeVpeEoVXTyw+weDgg/rvhwICkls5Nta3HWtqIvNX3pt/VGCcOQAmroU19v/gpVK+VkKLclvwhAargjigvRyXOz7AKX9B6C6axm6VlWgqls5unSpgCABEgIMgtIMrTUECILo4FEhooPdKsmekUml9cpmNfe2he+Mqo+P8w5tyZ8YALVJzQBZg/5jkwpWbRIWEzMUC4YSAgY5uHHfbDituxDqVoHy6igqystQ2aUS1X27o0ef7ujWowt8PguhaBhKazhawdMaihlKqUOigchgF62ZgvXyxqYneR+HkuvX85GI4hEDIIBh10giclW45y9QEgGoGNMCCjnyY7T1Hq7b9jDWvrkTnMmASEBroCQQgN/vQyQaRq/Te6G6ZzW69uyGrl2rEAoE4DdNhCJhKE9Bq87WpBDCcPPeHsc84zO/eeV+EY/rmiMQxaOSTpiZiIhTe97u4v/d1zeLpu0B11VEpIghoEnAb3q4atu1WJA5GwP7ReCr6oGO1lZ069sbjqdAUoIACCkgiOF4CtrTkIZApj2DbM5BpqMdntaQQkIr9gKlYePC3tZlv776/IX/aCfpqCgpETEnYpKqRzS2PTV5bjS1bQZ5yiMI40C16ylgXp9n0b7ZwuKNPRHZshWKAvAUI9eRRqA0gqoeXZFqzSAYDUNKCcM0oBmIlIYRLCNEK6Jo2duETCoDU0qRSmd55bbcQ9zE9fRzZA5sxN+z9qOWT+sS61GHOpH7yrtvGO88eY1RaIxqMplQ7HspCAQ5h6vKPsRa1QvrU90RCQDK50NqbwtgSrTua0SqPYW2phZoT8Pw+ZDLpGAaFiAIhhCIRsLQWiOTy5JkVnkjUr5k25aSzbef/tL6IUPkhmSSj68IHtpSHxKj8nJqz/U+/z9FqJKIXc1CAFQk7cBCiFN4tkcC07uuQEuLgsp6KOtRBu0o+KLlgK8ERiCM5n2t2PJ+A3Zu2YF923aicfNOeAUPHiuUdy1HpKwMSmvpZlJqY5u+afar756drK3Vf29WOKqvqqk2qRbbNUZ00v/+Pl06/BEz4DNIKxdEnRAYHgQMlcGcHs/hiQELIPdugyMrUWIBuqMVoWAAWrnwhcMgZhi+INpSBbSkU9jZsAO7tm7Hjg8bEA4HQCRIaI/358l85t3GuyXAyeQJEMHDBRGEWoj1CZb9Hh232N/69hjXER6RNLjzaYBB8JhRYhWw3u2D/9p7CZaXTUQ+tQ9B4YGi5cjlHZA0odwCyDDBygNYIBQKorJHGSzDQKojh7bGFniuUr5wSEw8LTph/tWjXv17BPGYdGCZbUEU1+n0vm5WYvIyc+9bpzva5wnAKFb4xdu6TCgRCkyM+W3n4meRqViXKkcppxEKWkjlHEjTgvIcgAFVUJABH6IVpagsjQCGhHZcCGaVJUuWc3r5immfPl/ZLBD/ZO20YzKtQRTXiURMhkJd97aMjH/OqRq+1fJpg1m7IHGwrDFJw2EJVwlMjS7HK/xt/Hfk96gMWMj5KlFZHoR0MrAMC4IY0iJwJof2fc3Yu7sJhUwepmkChiFLhFIqWjHmpsWbv4A46djfmlY51gAAoLY2qTgRk9XDa7Zmzrt7bKF04AozCFOz8pjEgcYBBBiCCFkOoAsKuIsfxgLjNlxeWICmtiyaHQlSHvymBSEMCL8fwlVob2nF7j170dzcAqU0DGnAdYEtzZm7mJmS6+v4hB2Bw45DIiapNqk2NnH4tN9fPNeX2jTFa+9gJksXk8MBXSi2yBQAHxwAGn/MDsDd2YlYaV0An5QI+V24SsNVBHY9OIU8hCVhmhYiIT8CkagOl5eJi04Lj79zdPXiWIJlspbUCQVwqCYAFrLPXH2btWfFbJltshwXHpGUAkx8yGI0CzABluHCzefx5P6zMV+NxyrfcLihCgQFQ8KDcjw4uRy0VtCeB9NTnhWNGoO7BZ9bfsvnJunO8Z0TDuBAuYw6IopDZ5beM8ratPAhI7P9PE7n4AnpdTZL6aMVMRQIKOThy6eQVQG8XuiNZ70xWBQcj6ZQXwSkC+gCnHwOXt4BNHMuk0NlSGZnf3H4mdfXnLXDtm0Rj8f1cdeAv1QoURya7Roj+JlZq41pr3+m0H3sd7xIrxazxDCkdkh1Nk4P7I3BgLQsZBGG1MBF8kNvjvmYWmTcgZltD6A69R4c9oGNKHyRKPzhEvIHS1TKDAXnrd72lWLTeqw4KSLgLx8J4IM3n+/Vc/Ovb/e3vT8F6b1VWjGUZ4AlMzEJgFkrpZFxhY8laRDYzGppALvzpeKZwlA8Y1yMTcYAZP1RRH2snbaMCMr8hw13TTqLgELnDvBJAwAAErGYnJxMKgYAI4CffC0230qtum7y0Ba3i19ZYMB1FBsEorAEm6XIGafNFYXsYL/TcAGn28EKSkhFGc8UW7g7ni2Mxo/zE+BXOSWqussrRnabPv/KEY/8rTdMJ3SENXH//eWrX1s6ubWxZUZzS3v/cq3wpa4Ooj1dPfjTkffDfj2oEKpuleVVi/OhnvOin/vJizB98BZMnYyda38g2xsGo5BFQWntE8RAVn5jz5fxsLhUl5ZK6haytm787sTBVFfnoq6O/1IUHHcAxYmUOr7nmuk3bt2w3hb5dJdupNFTECqChhOo7P7CZtX9vsYX5675zvJ7RqgxsxoiJJsADbZhIA5FxUEzy/vDNy/DjjW3G5mdo1FIIeM4TBTUlzVNl0uNkaqiKiDPKjO//8o3Lrzrr0XBcQcQQ0wmOKHvq73+uXfXrL7SE262qsQX6BopeykwdNiMW+f+fCPU4ZmLbQgMiRHVJtWhtQUAwAwgt2DaBHPXOzPQse3z0kljS65CX9w8jXcFB1L3Sl9u2qg+w2ZNGLjVtpnicTrh05mCiPDl4ecundRvkL5m0BC+aeIVSWYOAIANGGzbggFKJGLyr70JYgZxInZIueuD+6o93pn3hRf5p9158feHsX/qo4WyHy7hcx56+TWTABxhA/XI1b8z4h6dObP7DRdduvJrIz/VMu3c0Zs6naRELPYPLZATMckHU7qJloW31fK8EXvmzLqcMfWpfO976/mLc5bcDACf9Bnh2BVDAObaP+qZ/Nkjw26fcu0tN0+aMgwAYv+g8x8DYRdBZJq39+DE5b+7cdYMpulPO4MfWJr/0atrhhQhJE664fWjqkVs1xgHgK9Kfucnfb56L5fcskCPmVv/BjMbiCXkiZhIO8xh27aFDQj7GFWjbNviQKU78Qe/vLP02rlcOmsBT3l25bcA4Gi9WjupjZnJtm3DFIQLv/frmdHp87j7rY83MnMUxeGvf/1/5elMvlIAmPI/C2t73vyrzAV1T91HAFDzbxAFHzEoCt/3nlhyxqQHFnz9ZKiETxiEf2uzbVucjGnwlJ2yU3Zi7M/UuO7lcCk38wAAAABJRU5ErkJggg==">
               <style>
+                :root, [data-theme="dark-catppuccin"] {
+                  --bg-primary:#1e1e2e; --bg-secondary:#313244; --bg-tertiary:#45475a;
+                  --text-primary:#cdd6f4; --text-secondary:#a6adc8;
+                  --accent-green:#a6e3a1; --border-color:#585b70; }
+                [data-theme="dark-nord"] {
+                  --bg-primary:#2e3440; --bg-secondary:#3b4252; --bg-tertiary:#434c5e;
+                  --text-primary:#eceff4; --text-secondary:#d8dee9;
+                  --accent-green:#a3be8c; --border-color:#4c566a; }
+                [data-theme="dark-blue"] {
+                  --bg-primary:#0d1b2a; --bg-secondary:#1b2838; --bg-tertiary:#2a3a4e;
+                  --text-primary:#d4dce8; --text-secondary:#8a9bb5;
+                  --accent-green:#6ec87a; --border-color:#3a4e68; }
+                [data-theme="dark-green"] {
+                  --bg-primary:#0f1e14; --bg-secondary:#1a2e20; --bg-tertiary:#2a4030;
+                  --text-primary:#d0e4d4; --text-secondary:#88a890;
+                  --accent-green:#5ec87a; --border-color:#3a5842; }
+                [data-theme="dark-red"] {
+                  --bg-primary:#1e0f0f; --bg-secondary:#2e1a1a; --bg-tertiary:#402a2a;
+                  --text-primary:#e4d0d0; --text-secondary:#a88888;
+                  --accent-green:#68b870; --border-color:#583a3a; }
+                [data-theme="light-clean"] {
+                  --bg-primary:#ffffff; --bg-secondary:#f0f2f5; --bg-tertiary:#e4e6eb;
+                  --text-primary:#1c1e21; --text-secondary:#606770;
+                  --accent-green:#31a24c; --border-color:#ced0d4; }
+                [data-theme="light-warm"] {
+                  --bg-primary:#faf6f0; --bg-secondary:#f0ebe3; --bg-tertiary:#e6dfd5;
+                  --text-primary:#3d3529; --text-secondary:#7a6f60;
+                  --accent-green:#6a8f5e; --border-color:#d5cec4; }
+                [data-theme="light-blue"] {
+                  --bg-primary:#eef4fb; --bg-secondary:#dce8f5; --bg-tertiary:#c8d9ed;
+                  --text-primary:#1a2a40; --text-secondary:#4a6080;
+                  --accent-green:#3a9e50; --border-color:#b0c8e4; }
+                [data-theme="light-green"] {
+                  --bg-primary:#f0f8f0; --bg-secondary:#e0f0e0; --bg-tertiary:#cce4cc;
+                  --text-primary:#1a301a; --text-secondary:#4a704a;
+                  --accent-green:#2e8b48; --border-color:#a8cca8; }
+                [data-theme="light-red"] {
+                  --bg-primary:#fbf0f0; --bg-secondary:#f5dce0; --bg-tertiary:#ecc8cc;
+                  --text-primary:#401a1e; --text-secondary:#804a50;
+                  --accent-green:#3a9850; --border-color:#e0b0b8; }
                 * { box-sizing: border-box; margin: 0; padding: 0; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                       background: #f6f7f8; min-height: 100vh; }
-                header { background: #1c1e21; color: #fff; padding: 1rem 2rem;
-                         display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
-                header h1 { font-size: 1.3rem; font-weight: 700; }
-                header p { font-size: 0.85rem; color: #aaa; }
-                form.portal-search { display: flex; gap: 0.5rem; margin-left: auto; }
+                       background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
+                header { background: var(--bg-secondary); color: var(--text-primary);
+                         padding: 0.75rem 2rem; display: flex; align-items: center;
+                         gap: 1.5rem; flex-wrap: wrap; border-bottom: 1px solid var(--border-color); }
+                header h1 { font-size: 1.15rem; font-weight: 700; }
+                header p { font-size: 0.82rem; color: var(--text-secondary); }
+                .header-right { display: flex; gap: 1rem; align-items: center; margin-left: auto; }
+                select#theme-select { padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.8rem;
+                  border: 1px solid var(--border-color); background: var(--bg-tertiary);
+                  color: var(--text-primary); cursor: pointer; }
+                form.portal-search { display: flex; gap: 0.5rem; }
                 form.portal-search input[type=search] { padding: 0.35rem 0.8rem; border-radius: 4px;
-                  border: 1px solid #666; background: rgba(255,255,255,0.12); color: #fff;
-                  font-size: 0.875rem; width: 240px; outline: none; }
-                form.portal-search input[type=search]::placeholder { color: #aaa; }
-                form.portal-search input[type=search]:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
+                  border: 1px solid var(--border-color); background: var(--bg-primary);
+                  color: var(--text-primary); font-size: 0.875rem; width: 220px; outline: none; }
+                form.portal-search input[type=search]::placeholder { color: var(--text-secondary); }
                 form.portal-search button { padding: 0.35rem 0.9rem; border-radius: 4px; border: none;
-                  background: #2e8555; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.875rem; }
-                form.portal-search button:hover { background: #267a4e; }
+                  background: var(--accent-green); color: #fff; font-weight: 600; cursor: pointer; font-size: 0.875rem; }
                 main { max-width: 960px; margin: 2rem auto; padding: 0 1.5rem; }
-                h2 { font-size: 1rem; color: #555; font-weight: 600;
-                     text-transform: uppercase; letter-spacing: 0.05em;
-                     margin-bottom: 1rem; border-bottom: 1px solid #ddd; padding-bottom: 0.5rem; }
-                .project-list { background: #fff; border: 1px solid #e3e4e5; border-radius: 8px;
-                                overflow: hidden; }
-                .project-row { display: flex; align-items: center; gap: 14px; padding: 10px 16px;
-                               border-bottom: 1px solid #e3e4e5; }
+                h2 { font-size: 0.8rem; color: var(--text-secondary); font-weight: 600;
+                     text-transform: uppercase; letter-spacing: 0.06em;
+                     margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; }
+                .project-list { background: var(--bg-secondary); border: 1px solid var(--border-color);
+                                border-radius: 8px; overflow: hidden; }
+                .project-row { display: flex; align-items: center; gap: 14px; padding: 9px 16px;
+                               border-bottom: 1px solid var(--border-color); }
                 .project-row:last-child { border-bottom: none; }
-                .project-name { font-size: 0.95rem; font-weight: 700; min-width: 180px; }
-                .project-name a { color: #1c1e21; text-decoration: none; }
-                .project-name a:hover { color: #2e8555; text-decoration: underline; }
+                .project-name { font-size: 0.92rem; font-weight: 700; min-width: 180px; }
+                .project-name a { color: var(--text-primary); text-decoration: none; }
+                .project-name a:hover { color: var(--accent-green); text-decoration: underline; }
                 .project-labels { flex: 1; display: flex; flex-wrap: wrap; gap: 0.5rem; }
-                .project-label { font-size: 0.78rem; color: #888; }
+                .project-label { font-size: 0.78rem; color: var(--text-secondary); }
                 .project-actions { display: flex; gap: 0.5rem; align-items: center; }
-                .btn { padding: 0.3rem 0.85rem; border-radius: 5px; font-size: 0.82rem;
-                       font-weight: 600; cursor: pointer; border: none; text-decoration: none;
-                       display: inline-flex; align-items: center; }
-                .btn-build { background: #e8eaf0; color: #333; }
-                .btn-build:hover { background: #d5d8e0; }
-                .btn-build:disabled { opacity: 0.5; cursor: not-allowed; }
-                .build-status { font-size: 0.75rem; color: #888; }
+                .btn { padding: 0.28rem 0.8rem; border-radius: 5px; font-size: 0.8rem;
+                       font-weight: 600; cursor: pointer; border: 1px solid var(--border-color);
+                       background: var(--bg-tertiary); color: var(--text-primary);
+                       text-decoration: none; display: inline-flex; align-items: center; }
+                .btn:hover { border-color: var(--accent-green); color: var(--accent-green); }
+                .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+                .build-status { font-size: 0.75rem; color: var(--text-secondary); }
               </style>
             </head>
             <body>
@@ -190,10 +233,26 @@ public class PortalServer {
                 <h1>Documentation Portal</h1>
                 <p>%d project(s)</p>
               </div>
-              <form class="portal-search" action="/search" method="get">
-                <input type="search" name="q" placeholder="Search all docs...">
-                <button type="submit">Search</button>
-              </form>
+              <div class="header-right">
+                <label style="font-size:0.8rem;color:var(--text-secondary)">Theme:
+                  <select id="theme-select">
+                    <option value="dark-catppuccin">Dark Catppuccin</option>
+                    <option value="dark-nord">Dark Nord</option>
+                    <option value="dark-blue">Dark Blue</option>
+                    <option value="dark-green">Dark Green</option>
+                    <option value="dark-red">Dark Red</option>
+                    <option value="light-clean">Light Clean</option>
+                    <option value="light-warm">Light Warm</option>
+                    <option value="light-blue">Light Blue</option>
+                    <option value="light-green">Light Green</option>
+                    <option value="light-red">Light Red</option>
+                  </select>
+                </label>
+                <form class="portal-search" action="/search" method="get">
+                  <input type="search" name="q" placeholder="Search all docs...">
+                  <button type="submit">Search</button>
+                </form>
+              </div>
             </header>
             <main>
               <h2>Projects</h2>
@@ -220,6 +279,16 @@ public class PortalServer {
               </div>
             </main>
             <script>
+            (function() {
+              const sel = document.getElementById('theme-select');
+              const saved = localStorage.getItem('portal-theme') || 'dark-catppuccin';
+              document.documentElement.setAttribute('data-theme', saved);
+              sel.value = saved;
+              sel.addEventListener('change', function() {
+                document.documentElement.setAttribute('data-theme', this.value);
+                localStorage.setItem('portal-theme', this.value);
+              });
+            })();
             async function doBuild(name, btn) {
               const status = document.getElementById('status-' + name);
               btn.disabled = true;
@@ -230,14 +299,14 @@ public class PortalServer {
                 const j = await r.json();
                 if (j.status === 'ok') {
                   status.textContent = 'Done (' + j.ms + 'ms)';
-                  status.style.color = '#2e8555';
+                  status.style.color = 'var(--accent-green)';
                 } else {
                   status.textContent = 'Error: ' + (j.error || 'unknown');
-                  status.style.color = '#e13238';
+                  status.style.color = '#e06060';
                 }
               } catch (e) {
                 status.textContent = 'Error: ' + e.message;
-                status.style.color = '#e13238';
+                status.style.color = '#e06060';
               }
               btn.disabled = false;
               btn.textContent = 'Build';
