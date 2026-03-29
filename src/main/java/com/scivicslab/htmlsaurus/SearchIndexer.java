@@ -1,4 +1,4 @@
-package com.scivicslab.yadoc;
+package com.scivicslab.htmlsaurus;
 
 import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
 import org.apache.lucene.document.*;

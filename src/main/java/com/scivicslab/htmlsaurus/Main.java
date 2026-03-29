@@ -1,4 +1,4 @@
-package com.scivicslab.yadoc;
+package com.scivicslab.htmlsaurus;
 
 import java.io.IOException;
 import java.nio.file.*;

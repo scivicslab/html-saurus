@@ -1,4 +1,4 @@
-package com.scivicslab.yadoc;
+package com.scivicslab.htmlsaurus;
 
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension;
 import org.commonmark.ext.gfm.tables.TablesExtension;

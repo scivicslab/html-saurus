@@ -1,6 +1,6 @@
-# yadoc
+# html-saurus
 
-**yadoc** (Yet Another DOCumentation server) is a lightweight static site generator and documentation server for [Docusaurus](https://docusaurus.io/)-style Markdown projects, written in pure Java with no external server dependencies.
+**html-saurus** is a lightweight static site generator and documentation server for [Docusaurus](https://docusaurus.io/)-style Markdown projects, written in pure Java with no external server dependencies. Unlike Docusaurus itself, it generates plain static HTML — no SPA, no Node.js required.
 
 ## Features
 
@@ -21,11 +21,11 @@
 ## Build
 
 ```bash
-cd yadoc
+cd html-saurus
 mvn install
 ```
 
-The fat JAR is produced at `target/yadoc.jar`.
+The fat JAR is produced at `target/html-saurus.jar`.
 
 ## Usage
 
@@ -33,19 +33,19 @@ The fat JAR is produced at `target/yadoc.jar`.
 
 ```bash
 # Build and serve the docs/ directory in the current directory
-java -jar yadoc.jar --serve
+java -jar html-saurus.jar --serve
 
 # Specify a project directory explicitly
-java -jar yadoc.jar /path/to/my-docusaurus-project --serve
+java -jar html-saurus.jar /path/to/my-docusaurus-project --serve
 
 # Build only (no server)
-java -jar yadoc.jar /path/to/my-docusaurus-project
+java -jar html-saurus.jar /path/to/my-docusaurus-project
 
 # Watch for changes and rebuild automatically
-java -jar yadoc.jar --serve --watch
+java -jar html-saurus.jar --serve --watch
 
 # Use a custom port (default: 8080)
-java -jar yadoc.jar --serve --port 3000
+java -jar html-saurus.jar --serve --port 3000
 ```
 
 Generated HTML is written to `<project>/static-html/`.
@@ -58,10 +58,10 @@ Portal mode discovers every Docusaurus project (directories containing `docs/` a
 ```bash
 # Run from the parent directory that contains multiple Docusaurus projects
 cd ~/works
-java -jar yadoc.jar --portal-mode --serve --port 3100
+java -jar html-saurus.jar --portal-mode --serve --port 3100
 
 # With file watching
-java -jar yadoc.jar --portal-mode --serve --watch --port 3100
+java -jar html-saurus.jar --portal-mode --serve --watch --port 3100
 ```
 
 The portal is accessible at `http://localhost:<port>/`.
@@ -80,7 +80,7 @@ Full-text search across all projects: `http://localhost:<port>/search?q=<query>`
 
 ## Project conventions
 
-yadoc follows Docusaurus v2/v3 documentation conventions:
+html-saurus follows Docusaurus v2/v3 documentation conventions:
 
 - **Numeric prefixes** — directories and files may be prefixed with `NNN_` for ordering (e.g., `010_Introduction/`); prefixes are stripped from display labels
 - **`_category_.json`** — used for category labels (`{"label": "My Section"}`)
@@ -97,7 +97,7 @@ yadoc follows Docusaurus v2/v3 documentation conventions:
 ## Architecture
 
 ```
-src/main/java/com/scivicslab/yadoc/
+src/main/java/com/scivicslab/htmlsaurus/
 ├── Main.java          # Entry point, CLI parsing, single/portal mode dispatch
 ├── SiteBuilder.java   # Markdown → HTML conversion, tree building, CSS/JS embedding
 ├── SearchIndexer.java # Lucene index writer

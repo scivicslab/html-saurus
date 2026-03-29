@@ -1,4 +1,4 @@
-package com.scivicslab.yadoc;
+package com.scivicslab.htmlsaurus;
 
 import com.microsoft.playwright.*;
 import com.sun.net.httpserver.HttpServer;

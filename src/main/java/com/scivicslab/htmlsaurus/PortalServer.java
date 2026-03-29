@@ -1,4 +1,4 @@
-package com.scivicslab.yadoc;
+package com.scivicslab.htmlsaurus;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;

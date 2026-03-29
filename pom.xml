@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.scivicslab</groupId>
-    <artifactId>yadoc</artifactId>
+    <artifactId>html-saurus</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
@@ -82,7 +82,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.scivicslab.yadoc.Main</mainClass>
+                            <mainClass>com.scivicslab.htmlsaurus.Main</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -96,7 +96,7 @@
                         <phase>package</phase>
                         <goals><goal>shade</goal></goals>
                         <configuration>
-                            <finalName>yadoc</finalName>
+                            <finalName>html-saurus</finalName>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
@@ -110,7 +110,7 @@
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.scivicslab.yadoc.Main</mainClass>
+                                    <mainClass>com.scivicslab.htmlsaurus.Main</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>
