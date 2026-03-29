@@ -37,13 +37,14 @@ public class PortalServer {
         }
     }
 
-    public void start() throws IOException {
+    public HttpServer start() throws IOException {
         var server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/", this::handleAll);
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
-        System.out.println("Portal at http://localhost:" + port);
+        System.out.println("Portal at http://localhost:" + server.getAddress().getPort());
         System.out.println("Press Ctrl+C to stop.");
+        return server;
     }
 
     // ---- Routing ------------------------------------------------
@@ -203,7 +204,7 @@ public class PortalServer {
             sb.append("      <div class=\"card-name\">").append(escHtml(p.name())).append("</div>\n");
             sb.append("      <div class=\"card-path\">").append(escHtml(p.projectDir().toString())).append("</div>\n");
             sb.append("      <div class=\"card-actions\">\n");
-            sb.append("        <a class=\"btn btn-open\" href=\"/").append(escHtml(p.name())).append("/\">Open</a>\n");
+            sb.append("        <a class=\"btn btn-open\" href=\"/").append(escHtml(p.name())).append("/\" target=\"_blank\" rel=\"noopener noreferrer\">Open</a>\n");
             sb.append("        <button class=\"btn btn-build\" onclick=\"doBuild('").append(escHtml(p.name())).append("', this)\">Build</button>\n");
             sb.append("        <span class=\"build-status\" id=\"status-").append(escHtml(p.name())).append("\"></span>\n");
             sb.append("      </div>\n");
