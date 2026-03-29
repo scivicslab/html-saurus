@@ -1,3 +1,5 @@
+[![Sponsor](https://img.shields.io/github/sponsors/scivicslab)](https://github.com/sponsors/scivicslab)
+
 # html-saurus
 
 **Official Website: [scivicslab.com](https://scivicslab.com)**
