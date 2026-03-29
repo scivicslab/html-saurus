@@ -1,5 +1,7 @@
 # html-saurus
 
+**Official Website: [scivicslab.com](https://scivicslab.com)**
+
 **html-saurus** serves your [Docusaurus](https://docusaurus.io/) `docs/` folder as static HTML — with no Node.js, no npm, no build step.
 
 If you already have a Docusaurus project and want to browse it in environments where Node.js is unavailable, restricted, or simply overkill, html-saurus reads the same Markdown files and directory conventions and serves them directly.
