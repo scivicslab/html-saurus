@@ -552,9 +552,15 @@ public class PortalServer {
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i).trim();
                 if (line.contains("position: 'left'") || line.contains("position: \"left\"")) {
-                    int start = Math.max(0, i - 5);
-                    int end = Math.min(lines.size() - 1, i + 5);
-                    for (int j = start; j <= end; j++) {
+                    // Inline form: {to: '/blog', label: 'Blog', position: 'left'}
+                    if (line.contains("label:")) {
+                        String label = line.replaceFirst(".*label:\\s*['\"]", "").replaceFirst("['\"],?.*$", "");
+                        if (!label.isBlank()) labels.add(label);
+                        continue;
+                    }
+                    // Multi-line form: look forward only to avoid picking up previous item's label
+                    int end = Math.min(lines.size() - 1, i + 3);
+                    for (int j = i + 1; j <= end; j++) {
                         String ll = lines.get(j).trim();
                         if (ll.startsWith("label:")) {
                             String label = ll.replaceFirst("^label:\\s*['\"]", "").replaceFirst("['\"],?\\s*$", "");
