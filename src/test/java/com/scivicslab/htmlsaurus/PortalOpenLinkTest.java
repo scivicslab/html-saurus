@@ -12,7 +12,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Verifies that clicking "Open" on a portal project card opens the project
+ * Verifies that clicking the project name link on a portal row opens the project
  * in a NEW tab, not in the same tab (which would hide the portal).
  */
 class PortalOpenLinkTest {
@@ -45,17 +45,17 @@ class PortalOpenLinkTest {
             Page portalPage = context.newPage();
             portalPage.navigate(portalUrl);
 
-            // Verify the portal loaded and shows the project card
-            portalPage.waitForSelector(".btn-open");
-            assertEquals(1, portalPage.locator(".btn-open").count(),
-                    "Expected exactly one Open button on the portal");
+            // Verify the portal loaded and shows the project row with a clickable name
+            portalPage.waitForSelector(".project-name a");
+            assertEquals(1, portalPage.locator(".project-name a").count(),
+                    "Expected exactly one project name link on the portal");
 
-            // Click "Open" and expect a NEW tab to appear
+            // Click the project name and expect a NEW tab to appear
             // If target="_blank" is missing, the current page navigates away
             // and waitForPage() will throw (timeout) — causing the test to fail.
             Page newTab = context.waitForPage(
                     new BrowserContext.WaitForPageOptions().setTimeout(3000),
-                    () -> portalPage.locator(".btn-open").first().click());
+                    () -> portalPage.locator(".project-name a").first().click());
 
             // Portal page must still show the portal (not navigated away)
             assertEquals(portalUrl, portalPage.url(),

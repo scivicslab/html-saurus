@@ -169,16 +169,15 @@ public class PortalServer {
                 .project-row { display: flex; align-items: center; gap: 14px; padding: 10px 16px;
                                border-bottom: 1px solid #e3e4e5; }
                 .project-row:last-child { border-bottom: none; }
-                .project-name { font-size: 0.95rem; font-weight: 700; color: #1c1e21; min-width: 180px; }
-                .project-labels { flex: 1; display: flex; flex-wrap: wrap; gap: 0.35rem; }
-                .project-label { font-size: 0.72rem; background: #e8eaf0; color: #444;
-                                 padding: 2px 8px; border-radius: 12px; }
+                .project-name { font-size: 0.95rem; font-weight: 700; min-width: 180px; }
+                .project-name a { color: #1c1e21; text-decoration: none; }
+                .project-name a:hover { color: #2e8555; text-decoration: underline; }
+                .project-labels { flex: 1; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+                .project-label { font-size: 0.78rem; color: #888; }
                 .project-actions { display: flex; gap: 0.5rem; align-items: center; }
                 .btn { padding: 0.3rem 0.85rem; border-radius: 5px; font-size: 0.82rem;
                        font-weight: 600; cursor: pointer; border: none; text-decoration: none;
                        display: inline-flex; align-items: center; }
-                .btn-open { background: #2e8555; color: #fff; }
-                .btn-open:hover { background: #267a4e; }
                 .btn-build { background: #e8eaf0; color: #333; }
                 .btn-build:hover { background: #d5d8e0; }
                 .btn-build:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -204,14 +203,13 @@ public class PortalServer {
         for (Project p : projects) {
             List<String> labels = readNavbarLabels(p.projectDir());
             sb.append("    <div class=\"project-row\">\n");
-            sb.append("      <div class=\"project-name\">").append(escHtml(p.name())).append("</div>\n");
+            sb.append("      <div class=\"project-name\"><a href=\"/").append(escHtml(p.name())).append("/\" target=\"_blank\" rel=\"noopener noreferrer\">").append(escHtml(p.name())).append("</a></div>\n");
             sb.append("      <div class=\"project-labels\">\n");
             for (String label : labels) {
                 sb.append("        <span class=\"project-label\">").append(escHtml(label)).append("</span>\n");
             }
             sb.append("      </div>\n");
             sb.append("      <div class=\"project-actions\">\n");
-            sb.append("        <a class=\"btn btn-open\" href=\"/").append(escHtml(p.name())).append("/\" target=\"_blank\" rel=\"noopener noreferrer\">Open</a>\n");
             sb.append("        <button class=\"btn btn-build\" onclick=\"doBuild('").append(escHtml(p.name())).append("', this)\">Build</button>\n");
             sb.append("        <span class=\"build-status\" id=\"status-").append(escHtml(p.name())).append("\"></span>\n");
             sb.append("      </div>\n");
