@@ -164,15 +164,17 @@ public class PortalServer {
                 h2 { font-size: 1rem; color: #555; font-weight: 600;
                      text-transform: uppercase; letter-spacing: 0.05em;
                      margin-bottom: 1rem; border-bottom: 1px solid #ddd; padding-bottom: 0.5rem; }
-                .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-                        gap: 1rem; }
-                .card { background: #fff; border: 1px solid #e3e4e5; border-radius: 8px;
-                        padding: 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 0.6rem; }
-                .card-name { font-size: 1rem; font-weight: 700; color: #1c1e21; }
-                .card-path { font-size: 0.75rem; color: #999; font-family: monospace;
-                             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                .card-actions { display: flex; gap: 0.5rem; margin-top: 0.25rem; }
-                .btn { padding: 0.35rem 0.9rem; border-radius: 5px; font-size: 0.82rem;
+                .project-list { background: #fff; border: 1px solid #e3e4e5; border-radius: 8px;
+                                overflow: hidden; }
+                .project-row { display: flex; align-items: center; gap: 14px; padding: 10px 16px;
+                               border-bottom: 1px solid #e3e4e5; }
+                .project-row:last-child { border-bottom: none; }
+                .project-name { font-size: 0.95rem; font-weight: 700; color: #1c1e21; min-width: 180px; }
+                .project-labels { flex: 1; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+                .project-label { font-size: 0.72rem; background: #e8eaf0; color: #444;
+                                 padding: 2px 8px; border-radius: 12px; }
+                .project-actions { display: flex; gap: 0.5rem; align-items: center; }
+                .btn { padding: 0.3rem 0.85rem; border-radius: 5px; font-size: 0.82rem;
                        font-weight: 600; cursor: pointer; border: none; text-decoration: none;
                        display: inline-flex; align-items: center; }
                 .btn-open { background: #2e8555; color: #fff; }
@@ -180,7 +182,7 @@ public class PortalServer {
                 .btn-build { background: #e8eaf0; color: #333; }
                 .btn-build:hover { background: #d5d8e0; }
                 .btn-build:disabled { opacity: 0.5; cursor: not-allowed; }
-                .build-status { font-size: 0.75rem; color: #888; align-self: center; }
+                .build-status { font-size: 0.75rem; color: #888; }
               </style>
             </head>
             <body>
@@ -196,14 +198,19 @@ public class PortalServer {
             </header>
             <main>
               <h2>Projects</h2>
-              <div class="grid">
+              <div class="project-list">
             """.formatted(projects.size()));
 
         for (Project p : projects) {
-            sb.append("    <div class=\"card\">\n");
-            sb.append("      <div class=\"card-name\">").append(escHtml(p.name())).append("</div>\n");
-            sb.append("      <div class=\"card-path\">").append(escHtml(p.projectDir().toString())).append("</div>\n");
-            sb.append("      <div class=\"card-actions\">\n");
+            List<String> labels = readNavbarLabels(p.projectDir());
+            sb.append("    <div class=\"project-row\">\n");
+            sb.append("      <div class=\"project-name\">").append(escHtml(p.name())).append("</div>\n");
+            sb.append("      <div class=\"project-labels\">\n");
+            for (String label : labels) {
+                sb.append("        <span class=\"project-label\">").append(escHtml(label)).append("</span>\n");
+            }
+            sb.append("      </div>\n");
+            sb.append("      <div class=\"project-actions\">\n");
             sb.append("        <a class=\"btn btn-open\" href=\"/").append(escHtml(p.name())).append("/\" target=\"_blank\" rel=\"noopener noreferrer\">Open</a>\n");
             sb.append("        <button class=\"btn btn-build\" onclick=\"doBuild('").append(escHtml(p.name())).append("', this)\">Build</button>\n");
             sb.append("        <span class=\"build-status\" id=\"status-").append(escHtml(p.name())).append("\"></span>\n");
@@ -535,6 +542,33 @@ public class PortalServer {
         if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
         if (path.endsWith(".svg"))  return "image/svg+xml";
         return "application/octet-stream";
+    }
+
+    private List<String> readNavbarLabels(Path projectDir) {
+        Path config = projectDir.resolve("docusaurus.config.js");
+        if (!Files.exists(config)) return List.of();
+        try {
+            List<String> lines = Files.readAllLines(config, StandardCharsets.UTF_8);
+            List<String> labels = new ArrayList<>();
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i).trim();
+                if (line.contains("position: 'left'") || line.contains("position: \"left\"")) {
+                    int start = Math.max(0, i - 5);
+                    int end = Math.min(lines.size() - 1, i + 5);
+                    for (int j = start; j <= end; j++) {
+                        String ll = lines.get(j).trim();
+                        if (ll.startsWith("label:")) {
+                            String label = ll.replaceFirst("^label:\\s*['\"]", "").replaceFirst("['\"],?\\s*$", "");
+                            if (!label.isBlank()) labels.add(label);
+                            break;
+                        }
+                    }
+                }
+            }
+            return labels;
+        } catch (IOException e) {
+            return List.of();
+        }
     }
 
     private String escHtml(String s) {
