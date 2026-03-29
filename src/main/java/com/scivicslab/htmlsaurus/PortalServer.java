@@ -543,7 +543,8 @@ public class PortalServer {
     }
 
     private List<String> readNavbarLabels(Path projectDir) {
-        Path config = projectDir.resolve("docusaurus.config.js");
+        Path config = projectDir.resolve("docusaurus.config.ts");
+        if (!Files.exists(config)) config = projectDir.resolve("docusaurus.config.js");
         if (!Files.exists(config)) return List.of();
         try {
             List<String> lines = Files.readAllLines(config, StandardCharsets.UTF_8);
