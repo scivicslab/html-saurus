@@ -320,7 +320,7 @@ public class SiteBuilder {
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>%s</title>
-              <link rel="icon" type="image/png" href="data:image/png;base64,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">
+              <link rel="icon" type="image/png" href="data:image/png;base64,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">
               <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
               <style>
                 /* ---- Themes (CSS variables) ---- */
@@ -428,7 +428,29 @@ public class SiteBuilder {
                                 margin-left: 8px; display: none; }
                 .cat-children.open { display: block; }
                 /* ---- Main ---- */
-                main { flex: 1; padding: 2rem 3rem; max-width: 900px; overflow-y: auto; }
+                main { flex: 1; padding: 2rem 3rem; max-width: 900px; overflow-y: auto; min-width: 0; }
+                /* ---- Right-side TOC ---- */
+                aside.toc { width: 220px; min-width: 220px; position: sticky; top: 60px;
+                            height: calc(100vh - 60px); overflow-y: auto; padding: 1.5rem 0.5rem 1rem 0;
+                            border-left: 1px solid var(--c-border); font-size: 0.8rem; }
+                aside.toc .toc-title { font-weight: 600; font-size: 0.75rem; text-transform: uppercase;
+                                       letter-spacing: 0.05em; color: var(--c-cat-label);
+                                       padding: 0 0.75rem; margin-bottom: 0.5rem; }
+                aside.toc ul { list-style: none; }
+                aside.toc li { margin: 0; }
+                aside.toc a { display: block; padding: 3px 0.75rem; color: var(--c-text); opacity: 0.7;
+                              text-decoration: none; border-left: 2px solid transparent; line-height: 1.4; }
+                aside.toc a:hover { opacity: 1; }
+                aside.toc a.toc-active { opacity: 1; border-left-color: var(--c-act-text); color: var(--c-act-text); font-weight: 600; }
+                aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
+                @media (max-width: 1100px) { aside.toc { display: none; } }
+                /* ---- Copy buttons ---- */
+                .copy-bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+                .copy-btn { background: var(--c-sidebar-bg); border: 1px solid var(--c-border); border-radius: 4px;
+                            padding: 4px 10px; font-size: 0.75rem; cursor: pointer; color: var(--c-text);
+                            transition: background 0.15s; }
+                .copy-btn:hover { background: var(--c-hover); }
+                .copy-btn.copied { background: #2e8555; color: #fff; border-color: #2e8555; }
                 main h1 { font-size: 2rem; margin-bottom: 1rem; }
                 main h2 { font-size: 1.5rem; margin: 1.5rem 0 0.75rem; border-bottom: 1px solid var(--c-h2-border); padding-bottom: 0.25rem; }
                 main h3 { font-size: 1.2rem; margin: 1.25rem 0 0.5rem; }
@@ -507,8 +529,16 @@ public class SiteBuilder {
 
         // Main content
         sb.append("<main>\n<h1>").append(title).append("</h1>\n");
+        sb.append("<div class=\"copy-bar\">");
+        sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
+        sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
+        sb.append("</div>\n");
         sb.append(content);
-        sb.append("</main>\n</div>\n");
+        sb.append("</main>\n");
+
+        // Right-side TOC: extract h2/h3 headings from content HTML
+        sb.append(buildToc(content));
+        sb.append("</div>\n");
 
         sb.append("""
             <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
@@ -605,6 +635,174 @@ public class SiteBuilder {
                 }).filter(function(s) { return s.length > 0; }).join(' \u203a ');
               }
             })();
+            // Copy buttons
+            (function() {
+              function flash(btn, label) {
+                btn.classList.add('copied');
+                var orig = btn.innerHTML;
+                btn.innerHTML = '&#x2713; Copied';
+                setTimeout(function() { btn.classList.remove('copied'); btn.innerHTML = orig; }, 1500);
+              }
+              function getContent() {
+                var main = document.querySelector('main');
+                var clone = main.cloneNode(true);
+                // Remove h1 and copy-bar from clone
+                var h1 = clone.querySelector('h1');
+                if (h1) h1.remove();
+                var bar = clone.querySelector('.copy-bar');
+                if (bar) bar.remove();
+                return clone;
+              }
+              // Plain text copy
+              document.getElementById('copy-text-btn').addEventListener('click', function() {
+                var btn = this;
+                var clone = getContent();
+                var text = clone.innerText || clone.textContent;
+                navigator.clipboard.writeText(text.trim()).then(function() { flash(btn); });
+              });
+              // Markdown copy
+              document.getElementById('copy-md-btn').addEventListener('click', function() {
+                var btn = this;
+                var clone = getContent();
+                var md = htmlToMd(clone);
+                navigator.clipboard.writeText(md.trim()).then(function() { flash(btn); });
+              });
+              function htmlToMd(el) {
+                var out = '';
+                var children = el.childNodes;
+                for (var i = 0; i < children.length; i++) {
+                  var n = children[i];
+                  if (n.nodeType === 3) { out += n.textContent; continue; }
+                  if (n.nodeType !== 1) continue;
+                  var tag = n.tagName;
+                  if (tag === 'H2') { out += '\\n## ' + n.textContent.trim() + '\\n\\n'; }
+                  else if (tag === 'H3') { out += '\\n### ' + n.textContent.trim() + '\\n\\n'; }
+                  else if (tag === 'H4') { out += '\\n#### ' + n.textContent.trim() + '\\n\\n'; }
+                  else if (tag === 'P') { out += mdInline(n) + '\\n\\n'; }
+                  else if (tag === 'PRE') {
+                    var code = n.querySelector('code');
+                    var lang = '';
+                    if (code && code.className) {
+                      var m = code.className.match(/language-(\\S+)/);
+                      if (m) lang = m[1];
+                    }
+                    out += '```' + lang + '\\n' + (code || n).textContent + '```\\n\\n';
+                  }
+                  else if (tag === 'UL') { out += mdList(n, '- ', 0) + '\\n'; }
+                  else if (tag === 'OL') { out += mdOList(n, 0) + '\\n'; }
+                  else if (tag === 'BLOCKQUOTE') { out += n.textContent.trim().split('\\n').map(function(l) { return '> ' + l; }).join('\\n') + '\\n\\n'; }
+                  else if (tag === 'TABLE') { out += mdTable(n) + '\\n'; }
+                  else if (tag === 'DIV' && n.classList.contains('admonition')) {
+                    var title = n.querySelector('.admonition-title');
+                    var body = n.querySelector('.admonition-body');
+                    var type = 'note';
+                    n.classList.forEach(function(c) { if (c.startsWith('admonition-') && c !== 'admonition-title' && c !== 'admonition-body') type = c.replace('admonition-', ''); });
+                    out += ':::' + type + (title ? '[' + title.textContent.trim() + ']' : '') + '\\n';
+                    if (body) out += body.textContent.trim();
+                    out += '\\n:::\\n\\n';
+                  }
+                  else { out += htmlToMd(n); }
+                }
+                return out;
+              }
+              function mdInline(el) {
+                var r = '';
+                el.childNodes.forEach(function(n) {
+                  if (n.nodeType === 3) { r += n.textContent; }
+                  else if (n.nodeType === 1) {
+                    var t = n.tagName;
+                    if (t === 'CODE') r += '`' + n.textContent + '`';
+                    else if (t === 'STRONG' || t === 'B') r += '**' + n.textContent + '**';
+                    else if (t === 'EM' || t === 'I') r += '*' + n.textContent + '*';
+                    else if (t === 'A') r += '[' + n.textContent + '](' + n.getAttribute('href') + ')';
+                    else if (t === 'IMG') r += '![' + (n.getAttribute('alt')||'') + '](' + n.getAttribute('src') + ')';
+                    else r += n.textContent;
+                  }
+                });
+                return r;
+              }
+              function mdList(ul, marker, depth) {
+                var r = '';
+                var items = ul.children;
+                for (var i = 0; i < items.length; i++) {
+                  if (items[i].tagName !== 'LI') continue;
+                  var indent = '  '.repeat(depth);
+                  var sub = items[i].querySelector('ul,ol');
+                  var text = '';
+                  items[i].childNodes.forEach(function(c) {
+                    if (c === sub) return;
+                    if (c.nodeType === 1 && (c.tagName === 'UL' || c.tagName === 'OL')) return;
+                    text += c.textContent;
+                  });
+                  r += indent + marker + text.trim() + '\\n';
+                  if (sub) {
+                    if (sub.tagName === 'OL') r += mdOList(sub, depth + 1);
+                    else r += mdList(sub, '- ', depth + 1);
+                  }
+                }
+                return r;
+              }
+              function mdOList(ol, depth) {
+                var r = '';
+                var items = ol.children;
+                var num = 1;
+                for (var i = 0; i < items.length; i++) {
+                  if (items[i].tagName !== 'LI') continue;
+                  var indent = '  '.repeat(depth);
+                  var sub = items[i].querySelector('ul,ol');
+                  var text = '';
+                  items[i].childNodes.forEach(function(c) {
+                    if (c.nodeType === 1 && (c.tagName === 'UL' || c.tagName === 'OL')) return;
+                    text += c.textContent;
+                  });
+                  r += indent + (num++) + '. ' + text.trim() + '\\n';
+                  if (sub) {
+                    if (sub.tagName === 'OL') r += mdOList(sub, depth + 1);
+                    else r += mdList(sub, '- ', depth + 1);
+                  }
+                }
+                return r;
+              }
+              function mdTable(table) {
+                var rows = table.querySelectorAll('tr');
+                if (!rows.length) return '';
+                var r = '';
+                rows.forEach(function(row, ri) {
+                  var cells = row.querySelectorAll('th,td');
+                  var line = '|';
+                  cells.forEach(function(c) { line += ' ' + c.textContent.trim() + ' |'; });
+                  r += line + '\\n';
+                  if (ri === 0) {
+                    var sep = '|';
+                    cells.forEach(function() { sep += ' --- |'; });
+                    r += sep + '\\n';
+                  }
+                });
+                return r;
+              }
+            })();
+            // Right-side TOC: scroll-spy highlight
+            (function() {
+              var tocLinks = document.querySelectorAll('aside.toc a');
+              if (!tocLinks.length) return;
+              var headings = [];
+              tocLinks.forEach(function(a) {
+                var id = a.getAttribute('href').substring(1);
+                var el = document.getElementById(id);
+                if (el) headings.push({el: el, link: a});
+              });
+              function updateToc() {
+                var scrollTop = window.scrollY + 80;
+                var current = null;
+                for (var i = 0; i < headings.length; i++) {
+                  if (headings[i].el.offsetTop <= scrollTop) current = headings[i];
+                }
+                tocLinks.forEach(function(a) { a.classList.remove('toc-active'); });
+                if (current) current.link.classList.add('toc-active');
+              }
+              window.addEventListener('scroll', updateToc);
+              updateToc();
+            })();
             var active = document.querySelector('nav.side a.active');
             if (active) {
               var el = active.parentElement;
@@ -657,6 +855,35 @@ public class SiteBuilder {
             }
         }
         sb.append("</ul>\n");
+    }
+
+    private static final Pattern HEADING_PATTERN = Pattern.compile(
+        "<h([23])\\s[^>]*id=\"([^\"]+)\"[^>]*>(.*?)</h[23]>", Pattern.DOTALL);
+
+    private String buildToc(String contentHtml) {
+        var matcher = HEADING_PATTERN.matcher(contentHtml);
+        List<String[]> entries = new ArrayList<>(); // [level, id, text]
+        while (matcher.find()) {
+            String level = matcher.group(1);
+            String id = matcher.group(2);
+            String text = matcher.group(3).replaceAll("<[^>]+>", "").trim(); // strip inner HTML tags
+            entries.add(new String[]{level, id, text});
+        }
+        if (entries.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<aside class=\"toc\">\n");
+        sb.append("  <div class=\"toc-title\">On this page</div>\n");
+        sb.append("  <ul>\n");
+        for (String[] e : entries) {
+            String cls = e[0].equals("3") ? " class=\"toc-h3\"" : "";
+            sb.append("    <li").append(cls).append("><a href=\"#")
+              .append(escapeHtml(e[1])).append("\">")
+              .append(escapeHtml(e[2])).append("</a></li>\n");
+        }
+        sb.append("  </ul>\n");
+        sb.append("</aside>\n");
+        return sb.toString();
     }
 
     private String escapeHtml(String s) {
