@@ -16,6 +16,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
+/**
+ * HTTP development server for a single Docusaurus project.
+ *
+ * <p>Serves static HTML files, provides a full-text search API endpoint ({@code /search?q=...}),
+ * and exposes a build trigger endpoint ({@code POST /api/build}) for on-demand rebuilds.
+ */
 public class SearchServer {
 
     private final Path staticDir;
@@ -23,6 +29,12 @@ public class SearchServer {
     private final int port;
     private final Runnable rebuild;
 
+    /**
+     * @param staticDir directory containing the generated static HTML files
+     * @param indexDir  directory containing the Lucene search index
+     * @param port      HTTP port to listen on
+     * @param rebuild   callback to trigger a full rebuild (build + reindex)
+     */
     public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild) {
         this.staticDir = staticDir;
         this.indexDir = indexDir;
@@ -30,6 +42,12 @@ public class SearchServer {
         this.rebuild = rebuild;
     }
 
+    /**
+     * Creates and starts the HTTP server, registering handlers for build, search,
+     * and static file endpoints.
+     *
+     * @throws IOException if the server socket cannot be opened
+     */
     public void start() throws IOException {
         var server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/api/build", this::handleBuild);
@@ -43,6 +61,10 @@ public class SearchServer {
 
     // ---- Build endpoint -----------------------------------------
 
+    /**
+     * Handles {@code POST /api/build} requests. Triggers a full rebuild and returns
+     * the elapsed time in a JSON response. Non-POST requests receive a 405 response.
+     */
     private void handleBuild(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
@@ -56,6 +78,10 @@ public class SearchServer {
 
     // ---- Search endpoint ----------------------------------------
 
+    /**
+     * Handles {@code GET /search?q=...} requests. Extracts the query string from the
+     * URL parameters and returns search results as a JSON array with CORS headers.
+     */
     private void handleSearch(HttpExchange ex) throws IOException {
         String q = "";
         String raw = ex.getRequestURI().getRawQuery();
@@ -74,6 +100,14 @@ public class SearchServer {
         try (var out = ex.getResponseBody()) { out.write(body); }
     }
 
+    /**
+     * Executes a Lucene full-text search against the index directory.
+     * Searches across title, document ID, and body fields with boosted weighting.
+     * Returns up to 20 results as a JSON array of objects with title, path, and summary.
+     *
+     * @param queryStr the user's search query; blank returns an empty array
+     * @return JSON array string of search results
+     */
     private String search(String queryStr) {
         if (queryStr.isBlank()) return "[]";
         try (var dir = new NIOFSDirectory(indexDir);
@@ -111,6 +145,11 @@ public class SearchServer {
 
     // ---- Static file endpoint -----------------------------------
 
+    /**
+     * Serves static files from the output directory. Maps the request path to a local file,
+     * validates that it does not escape the static directory (path traversal protection),
+     * and returns the file content with an appropriate Content-Type header.
+     */
     private void handleStatic(HttpExchange ex) throws IOException {
         String path = ex.getRequestURI().getPath();
         if (path.equals("/")) path = "/index.html";
@@ -126,6 +165,7 @@ public class SearchServer {
         try (var out = ex.getResponseBody()) { out.write(body); }
     }
 
+    /** Sends an HTTP response with the given status code, content type, and UTF-8 body. */
     private void respond(HttpExchange ex, int code, String ct, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", ct);
@@ -133,6 +173,7 @@ public class SearchServer {
         try (var out = ex.getResponseBody()) { out.write(bytes); }
     }
 
+    /** Maps a file path's extension to the corresponding MIME type for the HTTP Content-Type header. */
     private String contentType(String path) {
         if (path.endsWith(".html")) return "text/html; charset=UTF-8";
         if (path.endsWith(".css"))  return "text/css";
@@ -144,6 +185,7 @@ public class SearchServer {
         return "application/octet-stream";
     }
 
+    /** Wraps a string in JSON double quotes, escaping backslashes, quotes, and newlines. */
     private String jsonStr(String s) {
         if (s == null) s = "";
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")

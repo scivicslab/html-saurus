@@ -5,8 +5,26 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 
+/**
+ * Entry point for html-saurus. Supports two modes of operation:
+ *
+ * <ul>
+ *   <li><b>Single-project mode</b> (default): converts one Docusaurus project's
+ *       {@code docs/} directory into static HTML, optionally serving and watching for changes.</li>
+ *   <li><b>Portal mode</b> ({@code --portal-mode}): discovers all Docusaurus projects
+ *       under a root directory and serves them through a unified portal with cross-project search.</li>
+ * </ul>
+ *
+ * <p>Usage: {@code java -jar html-saurus.jar [path] [--serve] [--watch] [--portal-mode] [--port N]}
+ */
 public class Main {
 
+    /**
+     * Parses command-line arguments and launches either single-project or portal mode.
+     *
+     * @param args command-line arguments
+     * @throws Exception if an I/O error or build failure occurs
+     */
     public static void main(String[] args) throws Exception {
         Path rootDir = null;
         boolean watch = false;
@@ -31,8 +49,15 @@ public class Main {
         }
     }
 
-    // ---- Single project mode ------------------------------------
-
+    /**
+     * Runs in single-project mode: builds, indexes, and optionally serves one Docusaurus project.
+     *
+     * @param projectDir root directory of the Docusaurus project (must contain {@code docs/})
+     * @param port       HTTP port for the development server
+     * @param serve      whether to start a development server
+     * @param watch      whether to watch for file changes and rebuild automatically
+     * @throws Exception if an I/O error occurs
+     */
     private static void runSingle(Path projectDir, int port, boolean serve, boolean watch)
             throws Exception {
         Path docsDir  = projectDir.resolve("docs");
@@ -56,8 +81,16 @@ public class Main {
         }
     }
 
-    // ---- Portal mode --------------------------------------------
-
+    /**
+     * Runs in portal mode: discovers all Docusaurus projects under {@code worksDir},
+     * builds them, and optionally serves them through a unified portal.
+     *
+     * @param worksDir root directory containing multiple Docusaurus projects
+     * @param port     HTTP port for the portal server
+     * @param serve    whether to start the portal server
+     * @param watch    whether to watch for file changes across all projects
+     * @throws Exception if an I/O error occurs
+     */
     private static void runPortal(Path worksDir, int port, boolean serve, boolean watch)
             throws Exception {
         List<Path> projects = findProjects(worksDir);
@@ -89,7 +122,15 @@ public class Main {
         }
     }
 
-    // Detect Docusaurus projects: direct subdirs of worksDir that contain docs/
+    /**
+     * Discovers Docusaurus projects under the given directory.
+     * A directory is considered a Docusaurus project if it contains both a {@code docs/}
+     * subdirectory and a {@code docusaurus.config.js} or {@code docusaurus.config.ts} file.
+     *
+     * @param worksDir the parent directory to scan
+     * @return sorted list of paths to detected Docusaurus project directories
+     * @throws IOException if the directory cannot be listed
+     */
     static List<Path> findProjects(Path worksDir) throws IOException {
         List<Path> result = new ArrayList<>();
         try (var stream = Files.list(worksDir)) {
@@ -103,8 +144,12 @@ public class Main {
         return result;
     }
 
-    // ---- Build & index ------------------------------------------
-
+    /**
+     * Builds static HTML from Markdown files in the docs directory.
+     *
+     * @param docsDir source directory containing Markdown files
+     * @param outDir  target directory for generated HTML files
+     */
     static void build(Path docsDir, Path outDir) {
         try {
             new SiteBuilder(docsDir, outDir).build();
@@ -114,6 +159,12 @@ public class Main {
         }
     }
 
+    /**
+     * Builds a Lucene full-text search index from Markdown files.
+     *
+     * @param docsDir  source directory containing Markdown files
+     * @param indexDir target directory for the Lucene index
+     */
     static void reindex(Path docsDir, Path indexDir) {
         try {
             Files.createDirectories(indexDir);

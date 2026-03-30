@@ -9,16 +9,33 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 
+/**
+ * Builds a Lucene full-text search index from Markdown files in a Docusaurus {@code docs/} directory.
+ *
+ * <p>Uses a {@link org.apache.lucene.analysis.ja.JapaneseAnalyzer} to support Japanese text search.
+ * Each Markdown file is indexed with its title, document ID (from frontmatter), body text,
+ * and a summary snippet for display in search results.
+ */
 public class SearchIndexer {
 
     private final Path docsDir;
     private final Path indexDir;
 
+    /**
+     * @param docsDir source directory containing Markdown files to index
+     * @param indexDir target directory for the Lucene index
+     */
     public SearchIndexer(Path docsDir, Path indexDir) {
         this.docsDir = docsDir;
         this.indexDir = indexDir;
     }
 
+    /**
+     * Rebuilds the search index from scratch. Walks all {@code .md} files in the docs directory
+     * and creates a Lucene index with fields: path, title, title_idx, body, summary, doc_id.
+     *
+     * @throws IOException if file I/O or index writing fails
+     */
     public void index() throws IOException {
         var config = new IndexWriterConfig(new JapaneseAnalyzer());
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
@@ -38,6 +55,10 @@ public class SearchIndexer {
         }
     }
 
+    /**
+     * Indexes a single Markdown file. Extracts title and doc ID from YAML frontmatter,
+     * strips Markdown formatting from the body, and adds the document to the index.
+     */
     private void indexFile(IndexWriter writer, Path mdFile) throws IOException {
         String source = Files.readString(mdFile);
 
@@ -88,6 +109,7 @@ public class SearchIndexer {
         writer.addDocument(doc);
     }
 
+    /** Strips Markdown formatting (code blocks, links, emphasis, headings, etc.) to produce plain text for indexing. */
     private String stripMarkdown(String md) {
         String s = md;
         s = s.replaceAll("(?s)```.*?```", " ");                    // fenced code blocks

@@ -17,14 +17,26 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * HTTP server that hosts a unified documentation portal for multiple Docusaurus projects.
+ *
+ * <p>Provides a portal index page listing all discovered projects, cross-project full-text search
+ * (both JSON API and server-side rendered HTML), per-project search endpoints, per-project
+ * static file serving, and on-demand build triggers via REST API.
+ */
 public class PortalServer {
 
+    /** Represents a single Docusaurus project with its name, root directory, static output, and search index paths. */
     record Project(String name, Path projectDir, Path staticDir, Path indexDir) {}
 
     private final List<Project> projects;
     private final Map<String, Project> projectMap;
     private final int port;
 
+    /**
+     * @param projectDirs list of Docusaurus project root directories to serve
+     * @param port        HTTP port to listen on (0 for a system-assigned port)
+     */
     public PortalServer(List<Path> projectDirs, int port) {
         this.port = port;
         this.projects = new ArrayList<>();
@@ -37,6 +49,12 @@ public class PortalServer {
         }
     }
 
+    /**
+     * Creates and starts the portal HTTP server with a cached thread pool executor.
+     *
+     * @return the running {@link HttpServer} instance
+     * @throws IOException if the server socket cannot be opened
+     */
     public HttpServer start() throws IOException {
         var server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/", this::handleAll);
@@ -49,6 +67,10 @@ public class PortalServer {
 
     // ---- Routing ------------------------------------------------
 
+    /**
+     * Central request router. Dispatches incoming requests to the appropriate handler based on
+     * the URL path: portal index, build API, global search API/page, or per-project routes.
+     */
     private void handleAll(HttpExchange ex) throws IOException {
         String path = ex.getRequestURI().getPath();
 
@@ -106,6 +128,10 @@ public class PortalServer {
 
     // ---- Build API endpoint -------------------------------------
 
+    /**
+     * Handles {@code POST /api/build/<project>} requests. Triggers a rebuild and reindex
+     * for the named project and returns the elapsed time as JSON.
+     */
     private void handleBuild(HttpExchange ex, String name) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
@@ -133,6 +159,12 @@ public class PortalServer {
 
     // ---- Portal index page --------------------------------------
 
+    /**
+     * Renders and serves the portal index page listing all registered projects.
+     * Each project row shows the project name (opening in a new tab), navbar labels
+     * extracted from the Docusaurus config, and a build trigger button.
+     * Supports multiple color themes via CSS custom properties.
+     */
     private void servePortalIndex(HttpExchange ex) throws IOException {
         var sb = new StringBuilder();
         sb.append("""
@@ -321,8 +353,13 @@ public class PortalServer {
 
     // ---- Search results page (SSR) ------------------------------
 
+    /** Number of search results displayed per page. */
     private static final int PAGE_SIZE = 100;
 
+    /**
+     * Handles {@code GET /search?q=...&page=N} requests. Performs a cross-project search
+     * and renders the results as a server-side rendered HTML page with pagination.
+     */
     private void handleSearchPage(HttpExchange ex) throws IOException {
         String q = queryParam(ex, "q");
         String pageStr = queryParam(ex, "page");
@@ -442,6 +479,10 @@ public class PortalServer {
 
     // ---- Cross-project search -----------------------------------
 
+    /**
+     * Handles {@code GET /api/search?q=...} requests. Returns cross-project search results
+     * as a JSON array with CORS headers for client-side consumption.
+     */
     private void handleGlobalSearch(HttpExchange ex) throws IOException {
         String q = queryParam(ex, "q");
         List<Map<String, String>> hits = globalSearch(q);
@@ -465,7 +506,12 @@ public class PortalServer {
         try (var out = ex.getResponseBody()) { out.write(body); }
     }
 
-    // Returns merged search results across all projects
+    /**
+     * Performs a full-text search across all project indexes and merges the results.
+     *
+     * @param q the search query string
+     * @return list of result maps, each containing project, title, pagePath, and summary
+     */
     private List<Map<String, String>> globalSearch(String q) {
         var results = new ArrayList<Map<String, String>>();
         if (q.isBlank()) return results;
@@ -476,6 +522,7 @@ public class PortalServer {
         return results;
     }
 
+    /** Queries a single project's Lucene index and appends matching results to the output list. */
     private void collectHits(String queryStr, Project proj, List<Map<String, String>> out) {
         try (var dir = new NIOFSDirectory(proj.indexDir());
              var reader = DirectoryReader.open(dir)) {
@@ -501,6 +548,10 @@ public class PortalServer {
 
     // ---- Per-project search endpoint ----------------------------
 
+    /**
+     * Handles per-project search requests ({@code GET /<project>/search?q=...}).
+     * Returns results from a single project's index as a JSON array.
+     */
     private void handleSearch(HttpExchange ex, Project proj) throws IOException {
         String q = "";
         String raw = ex.getRequestURI().getRawQuery();
@@ -519,10 +570,15 @@ public class PortalServer {
         try (var out = ex.getResponseBody()) { out.write(body); }
     }
 
+    /** Convenience overload that searches an index directory without project context. */
     private String search(String queryStr, Path indexDir) {
         return searchWithProject(queryStr, new Project("", null, null, indexDir));
     }
 
+    /**
+     * Executes a Lucene search within a single project's index, returning up to 20 results
+     * as a JSON array. Each result includes title, path (prefixed with project name), and summary.
+     */
     private String searchWithProject(String queryStr, Project proj) {
         if (queryStr.isBlank()) return "[]";
         try (var dir = new NIOFSDirectory(proj.indexDir());
@@ -558,6 +614,10 @@ public class PortalServer {
 
     // ---- Static file endpoint -----------------------------------
 
+    /**
+     * Serves a static file from the project's output directory. Validates against path traversal
+     * and returns 404 for missing files.
+     */
     private void handleStatic(HttpExchange ex, Project proj, String rest) throws IOException {
         Path file = proj.staticDir().resolve(rest.replaceFirst("^/", "")).normalize();
         if (!file.startsWith(proj.staticDir())) { respond(ex, 403, "text/plain", "Forbidden"); return; }
@@ -574,6 +634,7 @@ public class PortalServer {
 
     // ---- Helpers ------------------------------------------------
 
+    /** Converts a page path like {@code /01_intro/setup.html} to a breadcrumb string like {@code intro › setup}. */
     private String pathToBreadcrumb(String path) {
         if (path == null || path.isEmpty()) return "";
         return Arrays.stream(path.replaceFirst("^/", "").split("/"))
@@ -582,6 +643,7 @@ public class PortalServer {
             .collect(java.util.stream.Collectors.joining(" › "));
     }
 
+    /** Extracts a single query parameter value from the request URL, returning empty string if absent. */
     private String queryParam(HttpExchange ex, String key) {
         String raw = ex.getRequestURI().getRawQuery();
         if (raw == null) return "";
@@ -593,6 +655,7 @@ public class PortalServer {
         return "";
     }
 
+    /** Sends an HTTP response with the given status code, content type, and UTF-8 body. */
     private void respond(HttpExchange ex, int code, String ct, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", ct);
@@ -600,6 +663,7 @@ public class PortalServer {
         try (var out = ex.getResponseBody()) { out.write(bytes); }
     }
 
+    /** Maps a file path's extension to the corresponding MIME type for the HTTP Content-Type header. */
     private String contentType(String path) {
         if (path.endsWith(".html")) return "text/html; charset=UTF-8";
         if (path.endsWith(".css"))  return "text/css";
@@ -611,6 +675,13 @@ public class PortalServer {
         return "application/octet-stream";
     }
 
+    /**
+     * Reads the Docusaurus configuration file and extracts left-positioned navbar labels.
+     * These labels are displayed on the portal index page to describe each project's content.
+     *
+     * @param projectDir root directory of the Docusaurus project
+     * @return list of navbar label strings, or an empty list if the config is missing or unreadable
+     */
     private List<String> readNavbarLabels(Path projectDir) {
         Path config = projectDir.resolve("docusaurus.config.ts");
         if (!Files.exists(config)) config = projectDir.resolve("docusaurus.config.js");
@@ -645,10 +716,12 @@ public class PortalServer {
         }
     }
 
+    /** Escapes HTML special characters ({@code &}, {@code <}, {@code >}) in a string. */
     private String escHtml(String s) {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
+    /** Wraps a string in JSON double quotes, escaping backslashes, quotes, and newlines. */
     private String jsonStr(String s) {
         if (s == null) s = "";
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")

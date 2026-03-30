@@ -13,6 +13,17 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Converts a Docusaurus-compatible {@code docs/} directory into a static HTML site.
+ *
+ * <p>Produces a self-contained set of HTML files with a left navigation sidebar,
+ * top navbar, right-side table of contents, full-text search integration,
+ * and copy-to-clipboard buttons (plain text and Markdown).
+ *
+ * <p>Supports CommonMark with GFM extensions (tables, strikethrough), heading anchors,
+ * Docusaurus-style admonitions ({@code :::note}), Mermaid diagrams, KaTeX math,
+ * and theme switching.
+ */
 public class SiteBuilder {
 
     private final Path docsDir;
@@ -20,19 +31,42 @@ public class SiteBuilder {
     private final Parser parser;
     private final HtmlRenderer renderer;
 
+    /** Matches numeric prefix patterns like {@code 01_getting-started}. */
     private static final Pattern NUM_PREFIX       = Pattern.compile("^(\\d+)_(.*)$");
+    /** Matches the opening line of a Docusaurus admonition (e.g., {@code :::note[Title]}). */
     private static final Pattern ADMONITION_START = Pattern.compile("^:::(\\w+)(?:\\[([^\\]]*)])?\\s*$");
+    /** Matches the closing line of a Docusaurus admonition ({@code :::}). */
     private static final Pattern ADMONITION_END   = Pattern.compile("^:::\\s*$");
 
-    // href: first reachable page link (for directories), or page link (for files)
+    /**
+     * Represents a node in the site navigation tree.
+     *
+     * @param label    display label for this node
+     * @param href     URL path to the first reachable page (for directories) or the page itself
+     * @param isDir    {@code true} if this node represents a category (directory)
+     * @param children child nodes (empty for leaf pages)
+     */
     record SiteNode(String label, String href, boolean isDir, List<SiteNode> children) {}
 
     private final String siteName;
 
+    /**
+     * Creates a SiteBuilder using the parent directory name as the site name.
+     *
+     * @param docsDir source directory containing Markdown files
+     * @param outDir  target directory for generated HTML
+     */
     public SiteBuilder(Path docsDir, Path outDir) {
         this(docsDir, outDir, docsDir.getParent().getFileName().toString());
     }
 
+    /**
+     * Creates a SiteBuilder with an explicit site name.
+     *
+     * @param docsDir  source directory containing Markdown files
+     * @param outDir   target directory for generated HTML
+     * @param siteName display name shown in the top navbar
+     */
     public SiteBuilder(Path docsDir, Path outDir, String siteName) {
         this.docsDir = docsDir;
         this.outDir = outDir;
@@ -46,6 +80,13 @@ public class SiteBuilder {
         this.renderer = HtmlRenderer.builder().extensions(extensions).build();
     }
 
+    /**
+     * Builds the entire static site. Walks the docs directory, converts each Markdown file
+     * to HTML, copies non-Markdown assets, and generates an {@code index.html} that redirects
+     * to the first page.
+     *
+     * @throws IOException if file I/O fails
+     */
     public void build() throws IOException {
         SiteNode root = buildTree(docsDir);
 
@@ -83,6 +124,15 @@ public class SiteBuilder {
         }
     }
 
+    /**
+     * Recursively builds the navigation tree from the docs directory structure.
+     * Handles Docusaurus conventions: numeric prefixes for ordering, {@code _category_.json}
+     * for category labels, and same-name Markdown files as category index pages.
+     *
+     * @param dir the directory to scan
+     * @return root {@link SiteNode} representing the directory
+     * @throws IOException if file I/O fails
+     */
     private SiteNode buildTree(Path dir) throws IOException {
         List<Path> entries;
         try (var stream = Files.list(dir)) {
@@ -148,7 +198,13 @@ public class SiteBuilder {
         return new SiteNode(label, firstHref, true, children);
     }
 
-    // Find the first page href in a subtree
+    /**
+     * Finds the href of the first leaf page in a subtree (depth-first).
+     * Used to determine the landing page for category nodes.
+     *
+     * @param nodes list of child nodes to search
+     * @return the href of the first leaf page, or {@code null} if none found
+     */
     private String firstHref(List<SiteNode> nodes) {
         for (SiteNode n : nodes) {
             if (!n.isDir()) return n.href();
@@ -158,17 +214,23 @@ public class SiteBuilder {
         return null;
     }
 
+    /** Generates a zero-padded sort key from a numeric prefix (e.g., {@code 3_foo} → {@code 0000000003_foo}). */
     private String sortKey(String name) {
         var m = NUM_PREFIX.matcher(name);
         if (m.matches()) return String.format("%010d_%s", Long.parseLong(m.group(1)), m.group(2));
         return name;
     }
 
+    /** Strips a leading numeric prefix (e.g., {@code 01_intro} → {@code intro}). */
     private String stripNumericPrefix(String name) {
         var m = NUM_PREFIX.matcher(name);
         return m.matches() ? m.group(2) : name;
     }
 
+    /**
+     * Reads a category label from a Docusaurus {@code _category_.json} file,
+     * falling back to the directory name with its numeric prefix stripped.
+     */
     private String readCategoryLabel(Path dir) {
         Path cat = dir.resolve("_category_.json");
         if (Files.exists(cat)) {
@@ -181,6 +243,14 @@ public class SiteBuilder {
         return stripNumericPrefix(dir.getFileName().toString());
     }
 
+    /**
+     * Converts a single Markdown file to a full HTML page with navbar, sidebar, and TOC.
+     *
+     * @param mdFile the source Markdown file
+     * @param rel    relative path from the docs root
+     * @param root   the site navigation tree
+     * @throws IOException if file I/O fails
+     */
     private void convertPage(Path mdFile, Path rel, SiteNode root) throws IOException {
         String source = Files.readString(mdFile);
         String[] fm = parseFrontmatter(source);
@@ -207,6 +277,10 @@ public class SiteBuilder {
         System.out.println("  " + outFile);
     }
 
+    /**
+     * Converts Markdown to HTML, handling Docusaurus-style admonitions ({@code :::note ... :::})
+     * as a pre-processing step before passing through the CommonMark parser.
+     */
     private String convertMarkdown(String markdown) {
         StringBuilder result = new StringBuilder();
         StringBuilder normalBuffer = new StringBuilder();
@@ -240,6 +314,7 @@ public class SiteBuilder {
         return result.toString();
     }
 
+    /** Renders a block of Markdown to HTML, converting fenced mermaid code blocks to {@code <div class="mermaid">}. */
     private String renderMarkdown(String markdown) {
         var doc = parser.parse(markdown);
         String html = renderer.render(doc);
@@ -251,6 +326,10 @@ public class SiteBuilder {
         return html;
     }
 
+    /**
+     * Renders a Docusaurus-style admonition as a styled HTML block.
+     * Supports types: note, info, tip, warning, caution, danger.
+     */
     private String renderAdmonition(String type, String customTitle, String innerMarkdown) {
         Map<String, String[]> types = Map.of(
             "note",    new String[]{"Note",    "#4cb3d4", "#eef9fd"},
@@ -279,6 +358,14 @@ public class SiteBuilder {
         return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 
+    /**
+     * Extracts YAML frontmatter and body from a Markdown source.
+     * If a leading {@code # heading} is present, it is used as the title (when not set in frontmatter)
+     * and stripped from the body to avoid duplication with the rendered {@code <h1>}.
+     *
+     * @param source the raw Markdown source
+     * @return a two-element array: {@code [title, body]}
+     */
     private String[] parseFrontmatter(String source) {
         String title = "";
         String body = source;
@@ -310,6 +397,18 @@ public class SiteBuilder {
         return dot >= 0 ? filename.substring(0, dot) : filename;
     }
 
+    /**
+     * Renders a complete HTML page including header, sidebar, main content, right-side TOC,
+     * copy buttons, theme switcher, search bar, and all supporting CSS/JS.
+     *
+     * @param title       page title (shown in {@code <h1>} and {@code <title>})
+     * @param content     HTML content rendered from Markdown
+     * @param root        the site navigation tree
+     * @param prefix      relative path prefix for resolving asset URLs (e.g., {@code "../"})
+     * @param currentPath absolute URL path of the current page (for active-link highlighting)
+     * @param topSection  the top-level section this page belongs to (for navbar highlighting)
+     * @return the complete HTML string
+     */
     private String renderPage(String title, String content, SiteNode root,
                                String prefix, String currentPath, String topSection) {
         StringBuilder sb = new StringBuilder();
@@ -824,8 +923,10 @@ public class SiteBuilder {
             .replace("YADOC_PROJECT", siteName);
     }
 
-    // Map a top-level SiteNode back to the actual directory name on disk.
-    // We derive it from the first href segment of the section.
+    /**
+     * Derives the on-disk directory name for a top-level navigation section
+     * by extracting the first path segment from the section's href.
+     */
     private String dirNameForSection(SiteNode section, SiteNode root) {
         // The first segment of the section's href is the directory name
         if (section.href() == null) return "";
@@ -834,6 +935,7 @@ public class SiteBuilder {
         return slash >= 0 ? h.substring(0, slash) : h.replace(".html", "");
     }
 
+    /** Recursively renders the left navigation sidebar as nested HTML lists with collapsible categories. */
     private void renderSidebar(StringBuilder sb, List<SiteNode> nodes, String prefix, String currentPath) {
         sb.append("<ul>\n");
         for (SiteNode node : nodes) {
@@ -857,9 +959,17 @@ public class SiteBuilder {
         sb.append("</ul>\n");
     }
 
+    /** Matches {@code <h2>} and {@code <h3>} elements with {@code id} attributes for TOC extraction. */
     private static final Pattern HEADING_PATTERN = Pattern.compile(
         "<h([23])\\s[^>]*id=\"([^\"]+)\"[^>]*>(.*?)</h[23]>", Pattern.DOTALL);
 
+    /**
+     * Builds a right-side table of contents by extracting h2/h3 headings from the rendered HTML.
+     * Returns an empty string if no headings are found.
+     *
+     * @param contentHtml the rendered page content HTML
+     * @return HTML string for the {@code <aside class="toc">} element
+     */
     private String buildToc(String contentHtml) {
         var matcher = HEADING_PATTERN.matcher(contentHtml);
         List<String[]> entries = new ArrayList<>(); // [level, id, text]
