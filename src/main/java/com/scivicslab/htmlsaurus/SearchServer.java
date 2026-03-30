@@ -118,6 +118,7 @@ public class SearchServer {
                 new String[]{"title_idx", "doc_id_idx", "body"},
                 new JapaneseAnalyzer(),
                 Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
+            parser.setDefaultOperator(MultiFieldQueryParser.AND_OPERATOR);
 
             var q = parser.parse(queryStr);
             var hits = searcher.search(q, 20);

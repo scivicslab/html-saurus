@@ -448,7 +448,7 @@ public class PortalServer {
             } else {
                 for (var hit : hits) {
                     String href = "/" + hit.get("project") + hit.get("pagePath");
-                    sb.append("<a class=\"result\" href=\"").append(escHtml(href)).append("\">\n");
+                    sb.append("<a class=\"result\" href=\"").append(escHtml(href)).append("\" target=\"_blank\" rel=\"noopener noreferrer\">\n");
                     sb.append("  <div class=\"result-project\">").append(escHtml(hit.get("project"))).append("</div>\n");
                     sb.append("  <div class=\"result-title\">").append(escHtml(hit.get("title"))).append("</div>\n");
                     sb.append("  <div class=\"result-breadcrumb\">").append(escHtml(pathToBreadcrumb(hit.get("pagePath")))).append("</div>\n");
@@ -530,6 +530,7 @@ public class PortalServer {
             var parser = new MultiFieldQueryParser(
                 new String[]{"title_idx", "doc_id_idx", "body"}, new JapaneseAnalyzer(),
                 Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
+            parser.setDefaultOperator(MultiFieldQueryParser.AND_OPERATOR);
             var hits = searcher.search(parser.parse(queryStr), 1000);
             var stored = searcher.storedFields();
             for (var hit : hits.scoreDocs) {
@@ -588,6 +589,7 @@ public class PortalServer {
                 new String[]{"title_idx", "body"},
                 new JapaneseAnalyzer(),
                 Map.of("title_idx", 3.0f, "body", 1.0f));
+            parser.setDefaultOperator(MultiFieldQueryParser.AND_OPERATOR);
             var q = parser.parse(queryStr);
             var hits = searcher.search(q, 20);
             var stored = searcher.storedFields();

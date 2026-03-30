@@ -712,7 +712,7 @@ public class SiteBuilder {
                     } else {
                       data.forEach(function(item) {
                         var a = document.createElement('a');
-                        a.className = 'sr-item'; a.href = item.path;
+                        a.className = 'sr-item'; a.href = item.path; a.target = '_blank';
                         a.innerHTML = '<div class="sr-title">' + esc(item.title) + '</div>' +
                                       '<div class="sr-breadcrumb">' + esc(breadcrumb(item.pagePath || item.path)) + '</div>' +
                                       '<div class="sr-summary">' + esc(item.summary) + '</div>';
