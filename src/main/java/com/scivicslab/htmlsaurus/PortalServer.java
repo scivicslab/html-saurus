@@ -531,7 +531,7 @@ public class PortalServer {
                 new String[]{"title_idx", "doc_id_idx", "body"}, new JapaneseAnalyzer(),
                 Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
             parser.setDefaultOperator(MultiFieldQueryParser.AND_OPERATOR);
-            var hits = searcher.search(parser.parse(queryStr), 1000);
+            var hits = searcher.search(parser.parse(MultiFieldQueryParser.escape(queryStr)), 1000);
             var stored = searcher.storedFields();
             for (var hit : hits.scoreDocs) {
                 var doc = stored.document(hit.doc);
@@ -590,7 +590,7 @@ public class PortalServer {
                 new JapaneseAnalyzer(),
                 Map.of("title_idx", 3.0f, "body", 1.0f));
             parser.setDefaultOperator(MultiFieldQueryParser.AND_OPERATOR);
-            var q = parser.parse(queryStr);
+            var q = parser.parse(MultiFieldQueryParser.escape(queryStr));
             var hits = searcher.search(q, 20);
             var stored = searcher.storedFields();
             var sb = new StringBuilder("[");

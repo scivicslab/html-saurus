@@ -120,7 +120,7 @@ public class SearchServer {
                 Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
             parser.setDefaultOperator(MultiFieldQueryParser.AND_OPERATOR);
 
-            var q = parser.parse(queryStr);
+            var q = parser.parse(MultiFieldQueryParser.escape(queryStr));
             var hits = searcher.search(q, 20);
             var stored = searcher.storedFields();
 
