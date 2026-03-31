@@ -28,18 +28,21 @@ public class SearchServer {
     private final Path indexDir;
     private final int port;
     private final Runnable rebuild;
+    private final String buildToken;
 
     /**
-     * @param staticDir directory containing the generated static HTML files
-     * @param indexDir  directory containing the Lucene search index
-     * @param port      HTTP port to listen on
-     * @param rebuild   callback to trigger a full rebuild (build + reindex)
+     * @param staticDir  directory containing the generated static HTML files
+     * @param indexDir   directory containing the Lucene search index
+     * @param port       HTTP port to listen on
+     * @param rebuild    callback to trigger a full rebuild (build + reindex)
+     * @param buildToken secret token required for {@code POST /api/build}; {@code null} disables the endpoint
      */
-    public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild) {
+    public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild, String buildToken) {
         this.staticDir = staticDir;
         this.indexDir = indexDir;
         this.port = port;
         this.rebuild = rebuild;
+        this.buildToken = buildToken;
     }
 
     /**
@@ -66,8 +69,17 @@ public class SearchServer {
      * the elapsed time in a JSON response. Non-POST requests receive a 405 response.
      */
     private void handleBuild(HttpExchange ex) throws IOException {
+        if (buildToken == null) {
+            respond(ex, 404, "text/plain", "Not Found");
+            return;
+        }
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        String token = ex.getRequestHeaders().getFirst("X-Build-Token");
+        if (!buildToken.equals(token)) {
+            respond(ex, 401, "text/plain", "Unauthorized");
             return;
         }
         long start = System.currentTimeMillis();
@@ -158,7 +170,7 @@ public class SearchServer {
         Path file = staticDir.resolve(path.replaceFirst("^/", "")).normalize();
         if (!file.startsWith(staticDir)) { respond(ex, 403, "text/plain", "Forbidden"); return; }
         if (!Files.exists(file) || Files.isDirectory(file)) { respond(ex, 404, "text/html",
-            "<html><body><h1>404 Not Found</h1><p>" + path + "</p></body></html>"); return; }
+            "<html><body><h1>404 Not Found</h1><p>" + escapeHtml(path) + "</p></body></html>"); return; }
 
         byte[] body = Files.readAllBytes(file);
         ex.getResponseHeaders().set("Content-Type", contentType(file.toString()));
@@ -170,8 +182,17 @@ public class SearchServer {
     private void respond(HttpExchange ex, int code, String ct, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", ct);
+        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
         ex.sendResponseHeaders(code, bytes.length);
         try (var out = ex.getResponseBody()) { out.write(bytes); }
+    }
+
+    /** HTML-escapes {@code <}, {@code >}, {@code &}, {@code "}, and {@code '} in the given string. */
+    private String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&#x27;");
     }
 
     /** Maps a file path's extension to the corresponding MIME type for the HTTP Content-Type header. */

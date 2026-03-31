@@ -75,7 +75,7 @@ public class Main {
         if (serve) {
             if (watch) startWatchThread(docsDir, outDir, indexDir);
             Runnable rebuild = () -> { build(docsDir, outDir); reindex(docsDir, indexDir); };
-            new SearchServer(outDir, indexDir, port, rebuild).start();
+            new SearchServer(outDir, indexDir, port, rebuild, buildToken()).start();
         } else if (watch) {
             watchAndRebuild(docsDir, outDir, indexDir);
         }
@@ -116,7 +116,7 @@ public class Main {
 
         if (serve) {
             if (watch) startPortalWatchThread(projects);
-            new PortalServer(projects, port).start();
+            new PortalServer(projects, port, buildToken()).start();
         } else if (watch) {
             portalWatchAndRebuild(projects);
         }
@@ -173,6 +173,21 @@ public class Main {
         } catch (IOException e) {
             System.err.println("Index failed: " + e.getMessage());
         }
+    }
+
+    // ---- Build token --------------------------------------------
+
+    /**
+     * Returns the build token from the {@code BUILD_TOKEN} environment variable.
+     * If not set, the {@code /api/build} endpoint will be disabled.
+     */
+    static String buildToken() {
+        String token = System.getenv("BUILD_TOKEN");
+        if (token == null || token.isBlank()) {
+            System.out.println("WARNING: BUILD_TOKEN not set. /api/build endpoint is disabled.");
+            return null;
+        }
+        return token;
     }
 
     // ---- Watch helpers ------------------------------------------

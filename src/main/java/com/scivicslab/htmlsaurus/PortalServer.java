@@ -32,13 +32,16 @@ public class PortalServer {
     private final List<Project> projects;
     private final Map<String, Project> projectMap;
     private final int port;
+    private final String buildToken;
 
     /**
      * @param projectDirs list of Docusaurus project root directories to serve
      * @param port        HTTP port to listen on (0 for a system-assigned port)
+     * @param buildToken  secret token required for {@code POST /api/build/<project>}; {@code null} disables the endpoint
      */
-    public PortalServer(List<Path> projectDirs, int port) {
+    public PortalServer(List<Path> projectDirs, int port, String buildToken) {
         this.port = port;
+        this.buildToken = buildToken;
         this.projects = new ArrayList<>();
         this.projectMap = new LinkedHashMap<>();
         for (Path p : projectDirs) {
@@ -133,8 +136,17 @@ public class PortalServer {
      * for the named project and returns the elapsed time as JSON.
      */
     private void handleBuild(HttpExchange ex, String name) throws IOException {
+        if (buildToken == null) {
+            respond(ex, 404, "text/plain", "Not Found");
+            return;
+        }
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        String token = ex.getRequestHeaders().getFirst("X-Build-Token");
+        if (!buildToken.equals(token)) {
+            respond(ex, 401, "text/plain", "Unauthorized");
             return;
         }
         Project proj = projectMap.get(name);
@@ -152,8 +164,7 @@ public class PortalServer {
                 "{\"status\":\"ok\",\"project\":\"" + name + "\",\"ms\":" + elapsed + "}");
         } catch (Exception e) {
             System.err.println("Build error for " + name + ": " + e.getMessage());
-            respond(ex, 500, "application/json",
-                "{\"error\":" + jsonStr(e.getMessage()) + "}");
+            respond(ex, 500, "application/json", "{\"error\":\"Build failed\"}");
         }
     }
 
@@ -661,6 +672,8 @@ public class PortalServer {
     private void respond(HttpExchange ex, int code, String ct, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", ct);
+        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
         ex.sendResponseHeaders(code, bytes.length);
         try (var out = ex.getResponseBody()) { out.write(bytes); }
     }

@@ -115,10 +115,11 @@ public class SiteBuilder {
         String firstHref = root.href(); // e.g. "/Cluster-IaC/foo.html"
         if (firstHref != null) {
             String target = firstHref.startsWith("/") ? firstHref.substring(1) : firstHref;
+            String targetEsc = escapeHtml(target);
             String indexHtml = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
-                + "<meta http-equiv=\"refresh\" content=\"0;url=" + target + "\">"
+                + "<meta http-equiv=\"refresh\" content=\"0;url=" + targetEsc + "\">"
                 + "<title>Redirecting...</title></head><body>"
-                + "<p>Redirecting to <a href=\"" + target + "\">" + target + "</a>...</p>"
+                + "<p>Redirecting to <a href=\"" + targetEsc + "\">" + targetEsc + "</a>...</p>"
                 + "</body></html>\n";
             Files.writeString(outDir.resolve("index.html"), indexHtml);
         }
@@ -724,7 +725,7 @@ public class SiteBuilder {
         sb.append("</nav>\n");
 
         // Main content
-        sb.append("<main>\n<h1>").append(title).append("</h1>\n");
+        sb.append("<main>\n<h1>").append(escapeHtml(title)).append("</h1>\n");
         sb.append("<div class=\"copy-bar\">");
         sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
         sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
