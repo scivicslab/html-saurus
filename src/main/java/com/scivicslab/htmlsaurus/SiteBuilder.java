@@ -50,6 +50,8 @@ public class SiteBuilder {
 
     private final String siteName;
     private final boolean production;
+    /** Custom CSS loaded from {@code html-saurus.css} in the project root; null if absent. */
+    private final String customCss;
 
     /**
      * Creates a SiteBuilder using the parent directory name as the site name (development mode).
@@ -85,6 +87,13 @@ public class SiteBuilder {
         this.outDir = outDir;
         this.siteName = siteName;
         this.production = production;
+        Path cssFile = docsDir.getParent().resolve("html-saurus.css");
+        String loaded = null;
+        if (production && Files.exists(cssFile)) {
+            try { loaded = Files.readString(cssFile); }
+            catch (IOException e) { System.err.println("Warning: could not read " + cssFile + ": " + e.getMessage()); }
+        }
+        this.customCss = loaded;
         var extensions = List.of(
             TablesExtension.create(),
             StrikethroughExtension.create(),
@@ -685,13 +694,20 @@ public class SiteBuilder {
                                  font-size: 0.75rem; color: var(--c-arrow);
                                  font-family: 'SFMono-Regular', Consolas, monospace; }
               </style>
+              """.formatted(title));
+        if (customCss != null) {
+            sb.append("<style id=\"html-saurus-custom\">\n")
+              .append(customCss)
+              .append("\n</style>\n");
+        }
+        sb.append("""
               <script>(function(){
                 var t=localStorage.getItem('md2html-theme');
                 if(t&&t!=='default') document.documentElement.setAttribute('data-theme',t);
               })();</script>
             </head>
             <body>
-            """.formatted(title));
+            """);
 
         // Top navbar
         sb.append("<header>\n");
