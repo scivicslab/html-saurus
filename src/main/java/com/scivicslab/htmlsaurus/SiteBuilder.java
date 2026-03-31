@@ -49,28 +49,42 @@ public class SiteBuilder {
     record SiteNode(String label, String href, boolean isDir, List<SiteNode> children) {}
 
     private final String siteName;
+    private final boolean production;
 
     /**
-     * Creates a SiteBuilder using the parent directory name as the site name.
+     * Creates a SiteBuilder using the parent directory name as the site name (development mode).
      *
      * @param docsDir source directory containing Markdown files
      * @param outDir  target directory for generated HTML
      */
     public SiteBuilder(Path docsDir, Path outDir) {
-        this(docsDir, outDir, docsDir.getParent().getFileName().toString());
+        this(docsDir, outDir, docsDir.getParent().getFileName().toString(), false);
     }
 
     /**
-     * Creates a SiteBuilder with an explicit site name.
+     * Creates a SiteBuilder with an explicit site name and production flag.
      *
-     * @param docsDir  source directory containing Markdown files
-     * @param outDir   target directory for generated HTML
-     * @param siteName display name shown in the top navbar
+     * @param docsDir    source directory containing Markdown files
+     * @param outDir     target directory for generated HTML
+     * @param production {@code true} to omit copy buttons and source path footer
      */
-    public SiteBuilder(Path docsDir, Path outDir, String siteName) {
+    public SiteBuilder(Path docsDir, Path outDir, boolean production) {
+        this(docsDir, outDir, docsDir.getParent().getFileName().toString(), production);
+    }
+
+    /**
+     * Creates a SiteBuilder with an explicit site name and production flag.
+     *
+     * @param docsDir    source directory containing Markdown files
+     * @param outDir     target directory for generated HTML
+     * @param siteName   display name shown in the top navbar
+     * @param production {@code true} to omit copy buttons and source path footer
+     */
+    public SiteBuilder(Path docsDir, Path outDir, String siteName, boolean production) {
         this.docsDir = docsDir;
         this.outDir = outDir;
         this.siteName = siteName;
+        this.production = production;
         var extensions = List.of(
             TablesExtension.create(),
             StrikethroughExtension.create(),
@@ -726,16 +740,20 @@ public class SiteBuilder {
 
         // Main content
         sb.append("<main>\n<h1>").append(escapeHtml(title)).append("</h1>\n");
-        sb.append("<div class=\"copy-bar\">");
-        sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
-        sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
-        String mdSourcePath = (siteName + "/docs" + currentPath.replaceAll("\\.html$", ".md"))
-            .replaceAll("\\.md\\.md$", ".md");
-        sb.append("<button class=\"copy-btn\" id=\"copy-path-btn\" data-path=\"").append(escapeHtml(mdSourcePath))
-          .append("\" title=\"Copy file path\">&#x1F4C2; Path</button>");
-        sb.append("</div>\n");
-        sb.append(content);
-        sb.append("<footer class=\"source-footer\">").append(escapeHtml(mdSourcePath)).append("</footer>\n");
+        if (!production) {
+            String mdSourcePath = (siteName + "/docs" + currentPath.replaceAll("\\.html$", ".md"))
+                .replaceAll("\\.md\\.md$", ".md");
+            sb.append("<div class=\"copy-bar\">");
+            sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
+            sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
+            sb.append("<button class=\"copy-btn\" id=\"copy-path-btn\" data-path=\"").append(escapeHtml(mdSourcePath))
+              .append("\" title=\"Copy file path\">&#x1F4C2; Path</button>");
+            sb.append("</div>\n");
+            sb.append(content);
+            sb.append("<footer class=\"source-footer\">").append(escapeHtml(mdSourcePath)).append("</footer>\n");
+        } else {
+            sb.append(content);
+        }
         sb.append("</main>\n");
 
         // Right-side TOC: extract h2/h3 headings from content HTML

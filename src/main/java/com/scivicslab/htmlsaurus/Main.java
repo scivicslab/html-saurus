@@ -30,6 +30,7 @@ public class Main {
         boolean watch = false;
         boolean serve = false;
         boolean portalMode = false;
+        boolean production = false;
         int port = 8080;
 
         for (int i = 0; i < args.length; i++) {
@@ -37,15 +38,19 @@ public class Main {
             else if (args[i].equals("--watch")) watch = true;
             else if (args[i].equals("--serve")) serve = true;
             else if (args[i].equals("--portal-mode")) portalMode = true;
+            else if (args[i].equals("--production")) production = true;
             else if (!args[i].startsWith("--")) rootDir = Path.of(args[i]).toAbsolutePath();
         }
+
+        // --production implies --serve and disables --watch
+        if (production) { serve = true; watch = false; }
 
         if (rootDir == null) rootDir = Path.of("").toAbsolutePath();
 
         if (portalMode) {
-            runPortal(rootDir, port, serve, watch);
+            runPortal(rootDir, port, serve, watch, production);
         } else {
-            runSingle(rootDir, port, serve, watch);
+            runSingle(rootDir, port, serve, watch, production);
         }
     }
 
@@ -58,24 +63,20 @@ public class Main {
      * @param watch      whether to watch for file changes and rebuild automatically
      * @throws Exception if an I/O error occurs
      */
-    private static void runSingle(Path projectDir, int port, boolean serve, boolean watch)
-            throws Exception {
+    private static void runSingle(Path projectDir, int port, boolean serve, boolean watch,
+                                   boolean production) throws Exception {
         Path docsDir  = projectDir.resolve("docs");
         Path outDir   = projectDir.resolve("static-html");
         Path indexDir = projectDir.resolve("search-index");
 
         System.out.println("project : " + projectDir);
-        if (!Files.isDirectory(outDir)) {
-            build(docsDir, outDir);
-        } else {
-            System.out.println("  skip build (static-html exists)");
-        }
+        build(docsDir, outDir, production);
         reindex(docsDir, indexDir);
 
         if (serve) {
             if (watch) startWatchThread(docsDir, outDir, indexDir);
-            Runnable rebuild = () -> { build(docsDir, outDir); reindex(docsDir, indexDir); };
-            new SearchServer(outDir, indexDir, port, rebuild, buildToken()).start();
+            Runnable rebuild = () -> { build(docsDir, outDir, false); reindex(docsDir, indexDir); };
+            new SearchServer(outDir, indexDir, port, rebuild, production).start();
         } else if (watch) {
             watchAndRebuild(docsDir, outDir, indexDir);
         }
@@ -91,8 +92,8 @@ public class Main {
      * @param watch    whether to watch for file changes across all projects
      * @throws Exception if an I/O error occurs
      */
-    private static void runPortal(Path worksDir, int port, boolean serve, boolean watch)
-            throws Exception {
+    private static void runPortal(Path worksDir, int port, boolean serve, boolean watch,
+                                   boolean production) throws Exception {
         List<Path> projects = findProjects(worksDir);
         if (projects.isEmpty()) {
             System.err.println("No Docusaurus projects found under " + worksDir);
@@ -104,19 +105,13 @@ public class Main {
 
         for (Path p : projects) {
             System.out.println("  [" + p.getFileName() + "]");
-            Path outDir = p.resolve("static-html");
-            Path docsDir = p.resolve("docs");
-            if (!Files.isDirectory(outDir)) {
-                build(docsDir, outDir);
-            } else {
-                System.out.println("  skip build (static-html exists)");
-            }
-            reindex(docsDir, p.resolve("search-index"));
+            build(p.resolve("docs"), p.resolve("static-html"), production);
+            reindex(p.resolve("docs"), p.resolve("search-index"));
         }
 
         if (serve) {
             if (watch) startPortalWatchThread(projects);
-            new PortalServer(projects, port, buildToken()).start();
+            new PortalServer(projects, port, production).start();
         } else if (watch) {
             portalWatchAndRebuild(projects);
         }
@@ -150,9 +145,9 @@ public class Main {
      * @param docsDir source directory containing Markdown files
      * @param outDir  target directory for generated HTML files
      */
-    static void build(Path docsDir, Path outDir) {
+    static void build(Path docsDir, Path outDir, boolean production) {
         try {
-            new SiteBuilder(docsDir, outDir).build();
+            new SiteBuilder(docsDir, outDir, production).build();
             System.out.println("  build done : " + docsDir);
         } catch (IOException e) {
             System.err.println("Build failed: " + e.getMessage());
@@ -173,21 +168,6 @@ public class Main {
         } catch (IOException e) {
             System.err.println("Index failed: " + e.getMessage());
         }
-    }
-
-    // ---- Build token --------------------------------------------
-
-    /**
-     * Returns the build token from the {@code BUILD_TOKEN} environment variable.
-     * If not set, the {@code /api/build} endpoint will be disabled.
-     */
-    static String buildToken() {
-        String token = System.getenv("BUILD_TOKEN");
-        if (token == null || token.isBlank()) {
-            System.out.println("WARNING: BUILD_TOKEN not set. /api/build endpoint is disabled.");
-            return null;
-        }
-        return token;
     }
 
     // ---- Watch helpers ------------------------------------------
@@ -243,7 +223,7 @@ public class Main {
             if (changed) {
                 Thread.sleep(200);
                 System.out.println("\nChange detected in " + dirs[0].getParent().getFileName());
-                build(dirs[0], dirs[1]);
+                build(dirs[0], dirs[1], false);
                 reindex(dirs[0], dirs[2]);
             }
             if (!key.reset()) { keyToProject.remove(key); if (keyToProject.isEmpty()) break; }
@@ -281,7 +261,7 @@ public class Main {
             if (changed) {
                 Thread.sleep(200);
                 System.out.println("\nChange detected, rebuilding...");
-                build(docsDir, outDir);
+                build(docsDir, outDir, false);
                 reindex(docsDir, indexDir);
             }
             if (!key.reset()) { keys.remove(key); if (keys.isEmpty()) break; }

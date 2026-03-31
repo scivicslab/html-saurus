@@ -28,21 +28,21 @@ public class SearchServer {
     private final Path indexDir;
     private final int port;
     private final Runnable rebuild;
-    private final String buildToken;
+    private final boolean production;
 
     /**
      * @param staticDir  directory containing the generated static HTML files
      * @param indexDir   directory containing the Lucene search index
      * @param port       HTTP port to listen on
      * @param rebuild    callback to trigger a full rebuild (build + reindex)
-     * @param buildToken secret token required for {@code POST /api/build}; {@code null} disables the endpoint
+     * @param production {@code true} to disable the {@code /api/build} endpoint
      */
-    public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild, String buildToken) {
+    public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild, boolean production) {
         this.staticDir = staticDir;
         this.indexDir = indexDir;
         this.port = port;
         this.rebuild = rebuild;
-        this.buildToken = buildToken;
+        this.production = production;
     }
 
     /**
@@ -53,7 +53,7 @@ public class SearchServer {
      */
     public void start() throws IOException {
         var server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/api/build", this::handleBuild);
+        if (!production) server.createContext("/api/build", this::handleBuild);
         server.createContext("/search", this::handleSearch);
         server.createContext("/", this::handleStatic);
         server.setExecutor(null);
@@ -69,17 +69,8 @@ public class SearchServer {
      * the elapsed time in a JSON response. Non-POST requests receive a 405 response.
      */
     private void handleBuild(HttpExchange ex) throws IOException {
-        if (buildToken == null) {
-            respond(ex, 404, "text/plain", "Not Found");
-            return;
-        }
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
-            return;
-        }
-        String token = ex.getRequestHeaders().getFirst("X-Build-Token");
-        if (!buildToken.equals(token)) {
-            respond(ex, 401, "text/plain", "Unauthorized");
             return;
         }
         long start = System.currentTimeMillis();

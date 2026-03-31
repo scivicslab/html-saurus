@@ -32,16 +32,16 @@ public class PortalServer {
     private final List<Project> projects;
     private final Map<String, Project> projectMap;
     private final int port;
-    private final String buildToken;
+    private final boolean production;
 
     /**
      * @param projectDirs list of Docusaurus project root directories to serve
      * @param port        HTTP port to listen on (0 for a system-assigned port)
-     * @param buildToken  secret token required for {@code POST /api/build/<project>}; {@code null} disables the endpoint
+     * @param production  {@code true} to disable the {@code /api/build} endpoint
      */
-    public PortalServer(List<Path> projectDirs, int port, String buildToken) {
+    public PortalServer(List<Path> projectDirs, int port, boolean production) {
         this.port = port;
-        this.buildToken = buildToken;
+        this.production = production;
         this.projects = new ArrayList<>();
         this.projectMap = new LinkedHashMap<>();
         for (Path p : projectDirs) {
@@ -82,8 +82,8 @@ public class PortalServer {
             return;
         }
 
-        // Build API: POST /api/build/<project>
-        if (path.startsWith("/api/build/")) {
+        // Build API: POST /api/build/<project> (development mode only)
+        if (!production && path.startsWith("/api/build/")) {
             String name = path.substring("/api/build/".length());
             handleBuild(ex, name);
             return;
@@ -136,17 +136,8 @@ public class PortalServer {
      * for the named project and returns the elapsed time as JSON.
      */
     private void handleBuild(HttpExchange ex, String name) throws IOException {
-        if (buildToken == null) {
-            respond(ex, 404, "text/plain", "Not Found");
-            return;
-        }
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
-            return;
-        }
-        String token = ex.getRequestHeaders().getFirst("X-Build-Token");
-        if (!buildToken.equals(token)) {
-            respond(ex, 401, "text/plain", "Unauthorized");
             return;
         }
         Project proj = projectMap.get(name);
@@ -157,7 +148,7 @@ public class PortalServer {
         long start = System.currentTimeMillis();
         System.out.println("Build requested: " + name);
         try {
-            Main.build(proj.projectDir().resolve("docs"), proj.staticDir());
+            Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
             Main.reindex(proj.projectDir().resolve("docs"), proj.indexDir());
             long elapsed = System.currentTimeMillis() - start;
             respond(ex, 200, "application/json",
