@@ -98,7 +98,8 @@ public class SearchServer {
         }
         byte[] body = search(q).getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-        ex.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
         ex.sendResponseHeaders(200, body.length);
         try (var out = ex.getResponseBody()) { out.write(body); }
     }
@@ -164,7 +165,20 @@ public class SearchServer {
             "<html><body><h1>404 Not Found</h1><p>" + escapeHtml(path) + "</p></body></html>"); return; }
 
         byte[] body = Files.readAllBytes(file);
-        ex.getResponseHeaders().set("Content-Type", contentType(file.toString()));
+        String ct = contentType(file.toString());
+        ex.getResponseHeaders().set("Content-Type", ct);
+        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
+        if (ct.startsWith("text/html")) {
+            ex.getResponseHeaders().set("Content-Security-Policy",
+                "default-src 'self'; " +
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
+                "img-src 'self' data:; " +
+                "font-src 'self' https://cdn.jsdelivr.net; " +
+                "connect-src 'self'; " +
+                "frame-ancestors 'none';");
+        }
         ex.sendResponseHeaders(200, body.length);
         try (var out = ex.getResponseBody()) { out.write(body); }
     }
@@ -175,6 +189,16 @@ public class SearchServer {
         ex.getResponseHeaders().set("Content-Type", ct);
         ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         ex.getResponseHeaders().set("X-Frame-Options", "DENY");
+        if (ct.startsWith("text/html")) {
+            ex.getResponseHeaders().set("Content-Security-Policy",
+                "default-src 'self'; " +
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
+                "img-src 'self' data:; " +
+                "font-src 'self' https://cdn.jsdelivr.net; " +
+                "connect-src 'self'; " +
+                "frame-ancestors 'none';");
+        }
         ex.sendResponseHeaders(code, bytes.length);
         try (var out = ex.getResponseBody()) { out.write(bytes); }
     }
