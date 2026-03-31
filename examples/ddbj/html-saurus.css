@@ -1,0 +1,138 @@
+/* DDBJ theme for html-saurus --production mode
+ * Copy html-saurus.css, html-saurus-header.html, html-saurus-footer.html
+ * to your project root (next to docusaurus.config.js).
+ */
+
+/* ============================================================
+   Brand header (hs-brand-header)
+   ============================================================ */
+.hs-brand-header {
+  display: flex;
+  align-items: center;
+  background: #303846;
+  padding: 0 1.5rem;
+  height: 52px;
+  gap: 2rem;
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+
+.hs-brand-link {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.hs-brand-logo {
+  height: 34px;
+  width: auto;
+}
+
+.hs-brand-nav {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  gap: 0;
+}
+
+.hs-brand-nav a {
+  color: #ccc;
+  text-decoration: none;
+  font-size: 0.875rem;
+  padding: 0 0.875rem;
+  line-height: 52px;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+
+.hs-brand-nav a:hover {
+  color: #fff;
+}
+
+/* ============================================================
+   html-saurus native header — keep but make secondary
+   ============================================================ */
+header {
+  top: 52px !important;   /* offset by brand header height */
+  position: sticky;
+  z-index: 100;
+}
+
+/* ============================================================
+   Page layout — push content down so both headers fit
+   ============================================================ */
+.content-wrap {
+  padding-top: 0;
+}
+
+/* ============================================================
+   Primary color overrides (DDBJ blue)
+   ============================================================ */
+:root {
+  --c-nav-accent: #3578e5;
+  --c-act-text:   #3578e5;
+  --c-act-bg:     #ebf2fd;
+}
+
+/* ============================================================
+   DDBJ footer (hs-ddbj-footer)
+   ============================================================ */
+.hs-ddbj-footer {
+  background: #303846;
+  color: #ebedf0;
+  margin-top: 4rem;
+}
+
+.hs-footer-inner {
+  display: flex;
+  gap: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 2rem 1.5rem;
+  flex-wrap: wrap;
+}
+
+.hs-footer-col {
+  flex: 1;
+  min-width: 170px;
+}
+
+.hs-footer-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #fff;
+  margin-bottom: 0.75rem;
+}
+
+.hs-footer-col ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.hs-footer-col li {
+  margin-bottom: 0.4rem;
+}
+
+.hs-footer-col a {
+  color: #b0b8c8;
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: color 0.15s;
+}
+
+.hs-footer-col a:hover {
+  color: #fff;
+}
+
+.hs-footer-bottom {
+  background: #1d2330;
+  text-align: center;
+  padding: 0.875rem 1rem;
+  font-size: 0.8rem;
+  color: #888;
+}

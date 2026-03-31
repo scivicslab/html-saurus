@@ -52,6 +52,10 @@ public class SiteBuilder {
     private final boolean production;
     /** Custom CSS loaded from {@code html-saurus.css} in the project root; null if absent. */
     private final String customCss;
+    /** Custom header HTML injected at the top of {@code <body>}; null if absent. */
+    private final String customHeader;
+    /** Custom footer HTML injected before {@code </body>}; null if absent. */
+    private final String customFooter;
 
     /**
      * Creates a SiteBuilder using the parent directory name as the site name (development mode).
@@ -87,13 +91,10 @@ public class SiteBuilder {
         this.outDir = outDir;
         this.siteName = siteName;
         this.production = production;
-        Path cssFile = docsDir.getParent().resolve("html-saurus.css");
-        String loaded = null;
-        if (production && Files.exists(cssFile)) {
-            try { loaded = Files.readString(cssFile); }
-            catch (IOException e) { System.err.println("Warning: could not read " + cssFile + ": " + e.getMessage()); }
-        }
-        this.customCss = loaded;
+        Path projectRoot = docsDir.getParent();
+        this.customCss    = production ? readOptional(projectRoot.resolve("html-saurus.css"))    : null;
+        this.customHeader = production ? readOptional(projectRoot.resolve("html-saurus-header.html")) : null;
+        this.customFooter = production ? readOptional(projectRoot.resolve("html-saurus-footer.html")) : null;
         var extensions = List.of(
             TablesExtension.create(),
             StrikethroughExtension.create(),
@@ -709,6 +710,8 @@ public class SiteBuilder {
             <body>
             """);
 
+        if (customHeader != null) sb.append(customHeader).append("\n");
+
         // Top navbar
         sb.append("<header>\n");
         sb.append("  <a class=\"site-title\" href=\"").append(prefix).append("index.html\">").append(escapeHtml(siteName)).append("</a>\n");
@@ -1065,8 +1068,11 @@ public class SiteBuilder {
               }
             }
             </script>
-            </body></html>
             """);
+
+        if (customFooter != null) sb.append(customFooter).append("\n");
+
+        sb.append("</body></html>\n");
 
         return sb.toString()
             .replace("YADOC_SEARCH_URL", prefix + "search")
@@ -1148,5 +1154,12 @@ public class SiteBuilder {
 
     private String escapeHtml(String s) {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    /** Reads a file to a String, or returns null if the file does not exist. */
+    private static String readOptional(Path p) {
+        if (!Files.exists(p)) return null;
+        try { return Files.readString(p); }
+        catch (IOException e) { System.err.println("Warning: could not read " + p + ": " + e.getMessage()); return null; }
     }
 }
