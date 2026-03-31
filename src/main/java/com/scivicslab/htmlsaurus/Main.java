@@ -111,7 +111,7 @@ public class Main {
 
         if (serve) {
             if (watch) startPortalWatchThread(projects);
-            new PortalServer(projects, port, production).start();
+            new PortalServer(worksDir, projects, port, production).start();
         } else if (watch) {
             portalWatchAndRebuild(projects);
         }

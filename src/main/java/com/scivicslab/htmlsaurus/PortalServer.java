@@ -33,13 +33,16 @@ public class PortalServer {
     private final Map<String, Project> projectMap;
     private final int port;
     private final boolean production;
+    private final Path worksDir;
 
     /**
+     * @param worksDir    root directory containing all Docusaurus projects (used for reload)
      * @param projectDirs list of Docusaurus project root directories to serve
      * @param port        HTTP port to listen on (0 for a system-assigned port)
      * @param production  {@code true} to disable the {@code /api/build} endpoint
      */
-    public PortalServer(List<Path> projectDirs, int port, boolean production) {
+    public PortalServer(Path worksDir, List<Path> projectDirs, int port, boolean production) {
+        this.worksDir = worksDir;
         this.port = port;
         this.production = production;
         this.projects = new ArrayList<>();
@@ -79,6 +82,12 @@ public class PortalServer {
 
         if (path.equals("/") || path.isEmpty()) {
             servePortalIndex(ex);
+            return;
+        }
+
+        // Reload API: POST /api/reload — rescans worksDir and refreshes the project list
+        if (path.equals("/api/reload")) {
+            handleReload(ex);
             return;
         }
 
@@ -126,6 +135,43 @@ public class PortalServer {
             handleSearch(ex, proj);
         } else {
             handleStatic(ex, proj, rest);
+        }
+    }
+
+    // ---- Reload API endpoint ------------------------------------
+
+    /**
+     * Handles {@code POST /api/reload} requests. Rescans the works directory, rebuilds
+     * and reindexes any new projects, and refreshes the in-memory project list.
+     */
+    private synchronized void handleReload(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        long start = System.currentTimeMillis();
+        System.out.println("Reload requested: rescanning " + worksDir);
+        try {
+            List<Path> found = Main.findProjects(worksDir);
+            int added = 0;
+            for (Path p : found) {
+                String name = p.getFileName().toString();
+                if (!projectMap.containsKey(name)) {
+                    Main.build(p.resolve("docs"), p.resolve("static-html"), production);
+                    Main.reindex(p.resolve("docs"), p.resolve("search-index"));
+                    Project proj = new Project(name, p, p.resolve("static-html"), p.resolve("search-index"));
+                    projects.add(proj);
+                    projectMap.put(name, proj);
+                    System.out.println("  Added: " + name);
+                    added++;
+                }
+            }
+            long elapsed = System.currentTimeMillis() - start;
+            respond(ex, 200, "application/json",
+                "{\"status\":\"ok\",\"total\":" + projects.size() + ",\"added\":" + added + ",\"ms\":" + elapsed + "}");
+        } catch (Exception e) {
+            System.err.println("Reload error: " + e.getMessage());
+            respond(ex, 500, "application/json", "{\"error\":\"Reload failed\"}");
         }
     }
 
@@ -282,6 +328,8 @@ public class PortalServer {
                     <option value="light-red">Light Red</option>
                   </select>
                 </label>
+                <button class="btn btn-reload" id="reload-btn" onclick="doReload(this)">Reload</button>
+                <span class="build-status" id="reload-status"></span>
                 <form class="portal-search" action="/search" method="get">
                   <input type="search" name="q" placeholder="Search all docs...">
                   <button type="submit">Search</button>
@@ -344,6 +392,34 @@ public class PortalServer {
               }
               btn.disabled = false;
               btn.textContent = 'Build';
+            }
+            async function doReload(btn) {
+              const status = document.getElementById('reload-status');
+              btn.disabled = true;
+              btn.textContent = 'Reloading...';
+              status.textContent = '';
+              try {
+                const r = await fetch('/api/reload', {method: 'POST'});
+                const j = await r.json();
+                if (j.status === 'ok') {
+                  if (j.added > 0) {
+                    status.textContent = '+' + j.added + ' project(s) (' + j.ms + 'ms)';
+                    status.style.color = 'var(--accent-green)';
+                    setTimeout(() => location.reload(), 800);
+                  } else {
+                    status.textContent = 'No new projects';
+                    status.style.color = 'var(--text-secondary)';
+                  }
+                } else {
+                  status.textContent = 'Error: ' + (j.error || 'unknown');
+                  status.style.color = '#e06060';
+                }
+              } catch (e) {
+                status.textContent = 'Error: ' + e.message;
+                status.style.color = '#e06060';
+              }
+              btn.disabled = false;
+              btn.textContent = 'Reload';
             }
             </script>
             </body>
