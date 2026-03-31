@@ -1,0 +1,194 @@
+/* Scivics Lab theme for html-saurus --production mode
+ *
+ * Copy these three files to your project root (next to docusaurus.config.js):
+ *   html-saurus.css
+ *   html-saurus-header.html
+ *   html-saurus-footer.html
+ */
+
+/* ============================================================
+   Google Fonts — Inter + JetBrains Mono
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ============================================================
+   Color overrides — dark-first, blue/purple accent
+   ============================================================ */
+:root {
+  --c-bg:         #0f172a;
+  --c-text:       #cbd5e1;
+  --c-sidebar-bg: #1e293b;
+  --c-border:     #334155;
+  --c-hover:      #1e293b;
+  --c-nav-bg:     rgba(15, 23, 42, 0.95);
+  --c-nav-border: #1e293b;
+  --c-nav-accent: #60a5fa;
+  --c-act-bg:     rgba(59, 130, 246, 0.1);
+  --c-act-text:   #60a5fa;
+  --c-cat-label:  #94a3b8;
+  --c-arrow:      #64748b;
+  --c-pre-bg:     #1e293b;
+  --c-code-bg:    #1e293b;
+  --c-th-bg:      #1e293b;
+  --c-bq-border:  #334155;
+  --c-bq-text:    #94a3b8;
+  --c-h2-border:  #1e293b;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+code, pre, .source-footer {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+}
+
+/* ============================================================
+   Brand header
+   ============================================================ */
+.hs-brand-header {
+  display: flex;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid #1e293b;
+  padding: 0 1.5rem;
+  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  gap: 1.5rem;
+}
+
+.hs-brand-link {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.hs-brand-logo {
+  height: 32px;
+  width: auto;
+}
+
+.hs-brand-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  letter-spacing: -0.01em;
+}
+
+.hs-brand-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.hs-brand-nav a {
+  color: #94a3b8;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0 0.875rem;
+  line-height: 64px;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+
+.hs-brand-nav a:hover {
+  color: #e2e8f0;
+}
+
+.hs-brand-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.hs-brand-github {
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+  text-decoration: none;
+}
+
+.hs-brand-github:hover {
+  color: #e2e8f0;
+}
+
+/* ============================================================
+   html-saurus native header — sits below brand header
+   ============================================================ */
+header {
+  top: 64px !important;
+  position: sticky;
+  z-index: 100;
+  background: #1e293b !important;
+  border-bottom: 1px solid #334155 !important;
+}
+
+/* ============================================================
+   Brand footer
+   ============================================================ */
+.hs-brand-footer {
+  background: #0f172a;
+  border-top: 1px solid #1e293b;
+  margin-top: 4rem;
+}
+
+.hs-footer-inner {
+  display: flex;
+  gap: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2.5rem 2rem 2rem;
+  flex-wrap: wrap;
+}
+
+.hs-footer-col {
+  flex: 1;
+  min-width: 160px;
+}
+
+.hs-footer-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #e2e8f0;
+  margin-bottom: 0.875rem;
+}
+
+.hs-footer-col ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.hs-footer-col li {
+  margin-bottom: 0.5rem;
+}
+
+.hs-footer-col a {
+  color: #64748b;
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: color 0.15s;
+}
+
+.hs-footer-col a:hover {
+  color: #cbd5e1;
+}
+
+.hs-footer-bottom {
+  border-top: 1px solid #1e293b;
+  text-align: center;
+  padding: 1rem;
+  font-size: 0.8rem;
+  color: #475569;
+}
