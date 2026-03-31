@@ -728,10 +728,12 @@ public class SiteBuilder {
         sb.append("<div class=\"copy-bar\">");
         sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
         sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
-        sb.append("</div>\n");
-        sb.append(content);
         String mdSourcePath = (siteName + "/docs" + currentPath.replaceAll("\\.html$", ".md"))
             .replaceAll("\\.md\\.md$", ".md");
+        sb.append("<button class=\"copy-btn\" id=\"copy-path-btn\" data-path=\"").append(escapeHtml(mdSourcePath))
+          .append("\" title=\"Copy file path\">&#x1F4C2; Path</button>");
+        sb.append("</div>\n");
+        sb.append(content);
         sb.append("<footer class=\"source-footer\">").append(escapeHtml(mdSourcePath)).append("</footer>\n");
         sb.append("</main>\n");
 
@@ -865,6 +867,11 @@ public class SiteBuilder {
                 var clone = getContent();
                 var md = htmlToMd(clone);
                 navigator.clipboard.writeText(md.trim()).then(function() { flash(btn); });
+              });
+              // Path copy
+              document.getElementById('copy-path-btn').addEventListener('click', function() {
+                var btn = this;
+                navigator.clipboard.writeText(btn.dataset.path).then(function() { flash(btn); });
               });
               function htmlToMd(el) {
                 var out = '';
