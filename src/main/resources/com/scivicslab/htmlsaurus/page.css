@@ -142,7 +142,8 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
                   border-top: 1px solid var(--c-border); }
 .feed-link { display: inline-flex; align-items: center; justify-content: center;
              gap: 4px; width: 82px; height: 26px; border-radius: 4px;
-             font-size: 0.72rem; font-weight: 700; text-decoration: none; color: #fff;
+             font-size: 0.72rem; font-weight: 700; text-decoration: none;
+             color: #fff !important; opacity: 1 !important;
              flex-shrink: 0; white-space: nowrap; }
 .rss-link  { background: #f26522; }
 .rss-link:hover  { background: #d4541a; }
