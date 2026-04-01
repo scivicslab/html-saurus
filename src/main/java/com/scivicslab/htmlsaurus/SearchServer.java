@@ -49,17 +49,19 @@ public class SearchServer {
      * Creates and starts the HTTP server, registering handlers for build, search,
      * and static file endpoints.
      *
+     * @return the started {@link HttpServer} instance (caller may call {@code stop(0)} when done)
      * @throws IOException if the server socket cannot be opened
      */
-    public void start() throws IOException {
+    public HttpServer start() throws IOException {
         var server = HttpServer.create(new InetSocketAddress(port), 0);
         if (!production) server.createContext("/api/build", this::handleBuild);
         server.createContext("/search", this::handleSearch);
         server.createContext("/", this::handleStatic);
         server.setExecutor(null);
         server.start();
-        System.out.println("Serving at http://localhost:" + port);
+        System.out.println("Serving at http://localhost:" + server.getAddress().getPort());
         System.out.println("Press Ctrl+C to stop.");
+        return server;
     }
 
     // ---- Build endpoint -----------------------------------------
