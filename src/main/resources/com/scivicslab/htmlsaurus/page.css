@@ -187,3 +187,18 @@ main img { max-width: 100%; }
 .source-footer { margin-top: 3rem; padding-top: 0.75rem; border-top: 1px solid var(--c-border);
                  font-size: 0.75rem; color: var(--c-arrow);
                  font-family: 'SFMono-Regular', Consolas, monospace; }
+/* ---- Last updated ---- */
+.page-last-updated { margin-top: 2rem; font-size: 0.8rem; color: var(--c-arrow); }
+/* ---- Prev/Next navigation ---- */
+.page-nav { display: flex; justify-content: space-between; gap: 1rem;
+            margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid var(--c-border); }
+.page-nav a { display: flex; flex-direction: column; gap: 0.25rem;
+              padding: 0.75rem 1rem; border: 1px solid var(--c-border); border-radius: 6px;
+              text-decoration: none; color: var(--c-act-text); max-width: 46%;
+              transition: background 0.15s, border-color 0.15s; }
+.page-nav a:hover { background: var(--c-act-bg); border-color: var(--c-act-text); }
+.page-nav-prev { align-items: flex-start; }
+.page-nav-next { align-items: flex-end; margin-left: auto; }
+.page-nav-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+                  letter-spacing: 0.05em; color: var(--c-arrow); }
+.page-nav-title { font-size: 0.9rem; font-weight: 600; color: var(--c-text); }

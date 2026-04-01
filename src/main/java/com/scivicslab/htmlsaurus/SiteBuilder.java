@@ -5,7 +5,11 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.ZonedDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Pattern;
 
 /**
@@ -55,6 +59,13 @@ public class SiteBuilder {
     private final String defaultLocale;
     /** All available locale codes in display order (including currentLocale); empty if i18n is not configured. */
     private final List<String> allLocales;
+    /** Site URL (e.g. "https://example.com") read from docusaurus.config; null if not found. Used for feeds/sitemap. */
+    private final String siteUrl;
+    /** Pages collected during build for feed and sitemap generation. Thread-safe for parallelStream. */
+    private final List<PageInfo> builtPages = new CopyOnWriteArrayList<>();
+
+    /** Holds metadata about each built page for feed and sitemap generation. */
+    private record PageInfo(String title, String absoluteUrl, String rawMarkdown) {}
 
     /**
      * Creates a SiteBuilder using the parent directory name as the site name (development mode, no i18n).
@@ -123,6 +134,7 @@ public class SiteBuilder {
         String[] logoInfo = readLogoInfo(projectRoot);
         this.logoDataUrl = logoInfo[0];
         this.logoAlt     = logoInfo[1];
+        this.siteUrl     = readSiteUrl(projectRoot);
         this.converter = new MarkdownConverter();
         this.navBuilder = new NavTreeBuilder(docsDir, production, converter, currentLocale, defaultLocale);
     }
@@ -168,6 +180,7 @@ public class SiteBuilder {
         Files.createDirectories(outDir);
 
         SiteNode root = navBuilder.build();
+        List<SiteNode> pageOrder = flattenOrder(root.children());
 
         // Collect all source files; copy non-Markdown assets and create directories immediately.
         List<Path[]> mdFiles = new ArrayList<>(); // [mdFile, rel]
@@ -195,7 +208,7 @@ public class SiteBuilder {
         // Convert Markdown files in parallel; output directories already exist from above.
         mdFiles.parallelStream().forEach(pair -> {
             try {
-                convertPage(pair[0], pair[1], root);
+                convertPage(pair[0], pair[1], root, pageOrder);
             } catch (IOException e) {
                 throw new java.io.UncheckedIOException(e);
             }
@@ -228,6 +241,12 @@ public class SiteBuilder {
                 + "</body></html>\n";
             Files.writeString(outDir.resolve("index.html"), indexHtml);
         }
+
+        if (siteUrl != null && !builtPages.isEmpty()) {
+            generateSitemap();
+            generateRssFeed();
+            generateJsonFeed();
+        }
     }
 
     /**
@@ -238,7 +257,7 @@ public class SiteBuilder {
      * @param root   the site navigation tree
      * @throws IOException if file I/O fails
      */
-    private void convertPage(Path mdFile, Path rel, SiteNode root) throws IOException {
+    private void convertPage(Path mdFile, Path rel, SiteNode root, List<SiteNode> pageOrder) throws IOException {
         String source = Files.readString(mdFile);
         String[] fm = converter.parseFrontmatter(source);
         String title = fm[0].isBlank()
@@ -277,7 +296,44 @@ public class SiteBuilder {
             ? "/" + stripNumericPrefix(rel.getName(0).toString()) : null;
 
         String rawRelPath = rel.toString().replace('\\', '/');
-        String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath);
+
+        // Compute prev/next navigation from DFS page order
+        String prevHref = null, prevLabel = null, nextHref = null, nextLabel = null;
+        int pageIdx = -1;
+        for (int i = 0; i < pageOrder.size(); i++) {
+            SiteNode n = pageOrder.get(i);
+            String nUrl = n.isDir() ? n.catLink() : n.href();
+            if (currentPath.equals(nUrl)) { pageIdx = i; break; }
+        }
+        if (pageIdx > 0) {
+            SiteNode prev = pageOrder.get(pageIdx - 1);
+            String prevUrl = prev.isDir() ? prev.catLink() : prev.href();
+            if (prevUrl != null) {
+                prevHref = prefix + prevUrl.replaceFirst("^/", "");
+                prevLabel = prev.label();
+            }
+        }
+        if (pageIdx >= 0 && pageIdx < pageOrder.size() - 1) {
+            SiteNode next = pageOrder.get(pageIdx + 1);
+            String nextUrl = next.isDir() ? next.catLink() : next.href();
+            if (nextUrl != null) {
+                nextHref = prefix + nextUrl.replaceFirst("^/", "");
+                nextLabel = next.label();
+            }
+        }
+
+        // Git last-modified date
+        String lastUpdated = gitLastModified(mdFile);
+
+        // Collect page info for feeds/sitemap
+        if (siteUrl != null) {
+            boolean isNonDefaultLocale = currentLocale != null && !currentLocale.equals(defaultLocale);
+            String absUrl = siteUrl + (isNonDefaultLocale ? "/" + currentLocale : "") + currentPath;
+            builtPages.add(new PageInfo(title, absUrl, body));
+        }
+
+        String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath,
+                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated);
         Files.writeString(outFile, html);
         System.out.println("  " + outFile);
     }
@@ -329,7 +385,10 @@ public class SiteBuilder {
      */
     private String renderPage(String title, String content, SiteNode root,
                                String prefix, String currentPath, String topSection,
-                               String rawRelPath) {
+                               String rawRelPath,
+                               String prevHref, String prevLabel,
+                               String nextHref, String nextLabel,
+                               String lastUpdated) {
         StringBuilder sb = new StringBuilder();
         sb.append("""
             <!DOCTYPE html>
@@ -469,6 +528,31 @@ public class SiteBuilder {
         } else {
             sb.append(content);
         }
+
+        // Last updated from git history
+        if (lastUpdated != null) {
+            sb.append("<div class=\"page-last-updated\">Last updated: ")
+              .append(escapeHtml(lastUpdated)).append("</div>\n");
+        }
+
+        // Previous / Next page navigation
+        if (prevHref != null || nextHref != null) {
+            sb.append("<nav class=\"page-nav\">\n");
+            if (prevHref != null) {
+                sb.append("  <a href=\"").append(prevHref).append("\" class=\"page-nav-prev\">\n");
+                sb.append("    <span class=\"page-nav-label\">\u2190 Previous</span>\n");
+                sb.append("    <span class=\"page-nav-title\">").append(escapeHtml(prevLabel)).append("</span>\n");
+                sb.append("  </a>\n");
+            }
+            if (nextHref != null) {
+                sb.append("  <a href=\"").append(nextHref).append("\" class=\"page-nav-next\">\n");
+                sb.append("    <span class=\"page-nav-label\">Next \u2192</span>\n");
+                sb.append("    <span class=\"page-nav-title\">").append(escapeHtml(nextLabel)).append("</span>\n");
+                sb.append("  </a>\n");
+            }
+            sb.append("</nav>\n");
+        }
+
         sb.append("</main>\n");
 
         // Right-side TOC: extract h2/h3 headings from content HTML
@@ -1126,5 +1210,159 @@ public class SiteBuilder {
         if (!Files.exists(p)) return null;
         try { return Files.readString(p); }
         catch (IOException e) { System.err.println("Warning: could not read " + p + ": " + e.getMessage()); return null; }
+    }
+
+    /**
+     * Reads the site URL from {@code url:} in {@code docusaurus.config.ts/js}.
+     * Returns {@code null} if not found. Trailing slashes are stripped.
+     */
+    private static String readSiteUrl(Path projectRoot) {
+        for (String name : new String[]{"docusaurus.config.ts", "docusaurus.config.js"}) {
+            Path cfg = projectRoot.resolve(name);
+            if (!Files.exists(cfg)) continue;
+            try {
+                String content = Files.readString(cfg);
+                var m = java.util.regex.Pattern.compile("url:\\s*['\"]([^'\"]+)['\"]").matcher(content);
+                if (m.find()) return m.group(1).replaceAll("/+$", "");
+            } catch (IOException ignored) {}
+        }
+        return null;
+    }
+
+    /**
+     * Returns a DFS-ordered flat list of navigable page nodes from the nav tree.
+     * For directory nodes with a category link page, the dir node itself is added first (representing
+     * its intro/category page), then its children are recursed. Leaf nodes are added directly.
+     */
+    private static List<SiteNode> flattenOrder(List<SiteNode> nodes) {
+        List<SiteNode> result = new ArrayList<>();
+        for (SiteNode node : nodes) {
+            if (node.isDir()) {
+                if (node.catLink() != null) result.add(node);
+                result.addAll(flattenOrder(node.children()));
+            } else {
+                result.add(node);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Returns the date of the last git commit that touched {@code filePath},
+     * formatted as {@code YYYY-MM-DD}, or {@code null} if not tracked or git is unavailable.
+     */
+    private static String gitLastModified(Path filePath) {
+        try {
+            var pb = new ProcessBuilder(
+                "git", "log", "-1", "--format=%ad", "--date=short", "--",
+                filePath.toAbsolutePath().toString());
+            pb.directory(filePath.getParent().toFile());
+            pb.redirectErrorStream(true);
+            var proc = pb.start();
+            String out = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            proc.waitFor();
+            return out.isEmpty() ? null : out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Generates {@code sitemap.xml} in the output directory listing all built pages. */
+    private void generateSitemap() throws IOException {
+        var sb = new StringBuilder();
+        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        sb.append("<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+        List<PageInfo> sorted = new ArrayList<>(builtPages);
+        sorted.sort(Comparator.comparing(PageInfo::absoluteUrl));
+        for (PageInfo p : sorted) {
+            sb.append("  <url><loc>").append(escapeHtml(p.absoluteUrl())).append("</loc></url>\n");
+        }
+        sb.append("</urlset>\n");
+        Path out = outDir.resolve("sitemap.xml");
+        Files.writeString(out, sb.toString());
+        System.out.println("  " + out);
+    }
+
+    /** Generates {@code rss.xml} (RSS 2.0) in the output directory. */
+    private void generateRssFeed() throws IOException {
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        String buildDate = now.format(DateTimeFormatter.ofPattern(
+            "EEE, dd MMM yyyy HH:mm:ss z", java.util.Locale.ENGLISH));
+        String lang = currentLocale != null ? currentLocale : (defaultLocale != null ? defaultLocale : "ja");
+        var sb = new StringBuilder();
+        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        sb.append("<rss version=\"2.0\">\n<channel>\n");
+        sb.append("  <title>").append(escapeHtml(siteName)).append("</title>\n");
+        sb.append("  <link>").append(escapeHtml(siteUrl)).append("</link>\n");
+        sb.append("  <description>").append(escapeHtml(siteName)).append("</description>\n");
+        sb.append("  <language>").append(escapeHtml(lang)).append("</language>\n");
+        sb.append("  <lastBuildDate>").append(escapeHtml(buildDate)).append("</lastBuildDate>\n");
+        List<PageInfo> sorted = new ArrayList<>(builtPages);
+        sorted.sort(Comparator.comparing(PageInfo::absoluteUrl));
+        for (PageInfo p : sorted) {
+            sb.append("  <item>\n");
+            sb.append("    <title>").append(escapeHtml(p.title())).append("</title>\n");
+            sb.append("    <link>").append(escapeHtml(p.absoluteUrl())).append("</link>\n");
+            sb.append("    <guid>").append(escapeHtml(p.absoluteUrl())).append("</guid>\n");
+            sb.append("    <pubDate>").append(escapeHtml(buildDate)).append("</pubDate>\n");
+            sb.append("    <description>").append(escapeHtml(truncate(p.rawMarkdown(), 300))).append("</description>\n");
+            sb.append("  </item>\n");
+        }
+        sb.append("</channel>\n</rss>\n");
+        Path out = outDir.resolve("rss.xml");
+        Files.writeString(out, sb.toString());
+        System.out.println("  " + out);
+    }
+
+    /** Generates {@code feed.json} (JSON Feed v1.1) in the output directory. */
+    private void generateJsonFeed() throws IOException {
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        String isoNow = now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        String lang = currentLocale != null ? currentLocale : (defaultLocale != null ? defaultLocale : "ja");
+        boolean isNonDefault = currentLocale != null && !currentLocale.equals(defaultLocale);
+        String localePath = isNonDefault ? "/" + currentLocale : "";
+        String feedUrl = siteUrl + localePath + "/feed.json";
+        var sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"version\": \"https://jsonfeed.org/version/1.1\",\n");
+        sb.append("  \"title\": ").append(jsonString(siteName)).append(",\n");
+        sb.append("  \"home_page_url\": ").append(jsonString(siteUrl)).append(",\n");
+        sb.append("  \"feed_url\": ").append(jsonString(feedUrl)).append(",\n");
+        sb.append("  \"language\": ").append(jsonString(lang)).append(",\n");
+        if (faviconDataUrl != null) {
+            sb.append("  \"favicon\": ").append(jsonString(faviconDataUrl)).append(",\n");
+        }
+        sb.append("  \"items\": [\n");
+        List<PageInfo> sorted = new ArrayList<>(builtPages);
+        sorted.sort(Comparator.comparing(PageInfo::absoluteUrl));
+        for (int i = 0; i < sorted.size(); i++) {
+            PageInfo p = sorted.get(i);
+            sb.append("    {\n");
+            sb.append("      \"id\": ").append(jsonString(p.absoluteUrl())).append(",\n");
+            sb.append("      \"url\": ").append(jsonString(p.absoluteUrl())).append(",\n");
+            sb.append("      \"title\": ").append(jsonString(p.title())).append(",\n");
+            sb.append("      \"content_text\": ").append(jsonString(p.rawMarkdown())).append(",\n");
+            sb.append("      \"date_published\": ").append(jsonString(isoNow)).append("\n");
+            sb.append("    }").append(i < sorted.size() - 1 ? "," : "").append("\n");
+        }
+        sb.append("  ]\n}\n");
+        Path out = outDir.resolve("feed.json");
+        Files.writeString(out, sb.toString());
+        System.out.println("  " + out);
+    }
+
+    /** Encodes a string as a JSON string literal (with surrounding quotes). */
+    private static String jsonString(String s) {
+        if (s == null) return "null";
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
+                       .replace("\n", "\\n").replace("\r", "\\r")
+                       .replace("\t", "\\t") + "\"";
+    }
+
+    /** Truncates a string to at most {@code maxLen} characters, appending "..." if cut. */
+    private static String truncate(String s, int maxLen) {
+        if (s == null) return "";
+        s = s.strip();
+        return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
     }
 }
