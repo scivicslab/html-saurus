@@ -65,7 +65,7 @@ public class SiteBuilder {
     private final List<PageInfo> builtPages = new CopyOnWriteArrayList<>();
 
     /** Holds metadata about each built page for feed and sitemap generation. */
-    private record PageInfo(String title, String absoluteUrl, String rawMarkdown) {}
+    private record PageInfo(String title, String absoluteUrl, String summary, String isoDate) {}
 
     /**
      * Creates a SiteBuilder using the parent directory name as the site name (development mode, no i18n).
@@ -322,14 +322,14 @@ public class SiteBuilder {
             }
         }
 
-        // Git last-modified date
+        // Git last-modified date (short for display, ISO for feeds)
         String lastUpdated = gitLastModified(mdFile);
 
         // Collect page info for feeds/sitemap
         if (siteUrl != null) {
             boolean isNonDefaultLocale = currentLocale != null && !currentLocale.equals(defaultLocale);
             String absUrl = siteUrl + (isNonDefaultLocale ? "/" + currentLocale : "") + currentPath;
-            builtPages.add(new PageInfo(title, absUrl, body));
+            builtPages.add(new PageInfo(title, absUrl, plainText(body, 100), gitLastModifiedIso(mdFile)));
         }
 
         String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath,
@@ -1305,7 +1305,7 @@ public class SiteBuilder {
             sb.append("    <link>").append(escapeHtml(p.absoluteUrl())).append("</link>\n");
             sb.append("    <guid>").append(escapeHtml(p.absoluteUrl())).append("</guid>\n");
             sb.append("    <pubDate>").append(escapeHtml(buildDate)).append("</pubDate>\n");
-            sb.append("    <description>").append(escapeHtml(truncate(p.rawMarkdown(), 300))).append("</description>\n");
+            sb.append("    <description>").append(escapeHtml(p.summary())).append("</description>\n");
             sb.append("  </item>\n");
         }
         sb.append("</channel>\n</rss>\n");
@@ -1316,8 +1316,9 @@ public class SiteBuilder {
 
     /** Generates {@code feed.json} (JSON Feed v1.1) in the output directory. */
     private void generateJsonFeed() throws IOException {
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-        String isoNow = now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        // Fallback timestamp used when a file has no git history
+        String fallbackIso = ZonedDateTime.now(ZoneOffset.UTC)
+            .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
         String lang = currentLocale != null ? currentLocale : (defaultLocale != null ? defaultLocale : "ja");
         boolean isNonDefault = currentLocale != null && !currentLocale.equals(defaultLocale);
         String localePath = isNonDefault ? "/" + currentLocale : "";
@@ -1337,12 +1338,13 @@ public class SiteBuilder {
         sorted.sort(Comparator.comparing(PageInfo::absoluteUrl));
         for (int i = 0; i < sorted.size(); i++) {
             PageInfo p = sorted.get(i);
+            String datePublished = p.isoDate() != null ? p.isoDate() : fallbackIso;
             sb.append("    {\n");
             sb.append("      \"id\": ").append(jsonString(p.absoluteUrl())).append(",\n");
             sb.append("      \"url\": ").append(jsonString(p.absoluteUrl())).append(",\n");
             sb.append("      \"title\": ").append(jsonString(p.title())).append(",\n");
-            sb.append("      \"content_text\": ").append(jsonString(p.rawMarkdown())).append(",\n");
-            sb.append("      \"date_published\": ").append(jsonString(isoNow)).append("\n");
+            sb.append("      \"content_text\": ").append(jsonString(p.summary())).append(",\n");
+            sb.append("      \"date_published\": ").append(jsonString(datePublished)).append("\n");
             sb.append("    }").append(i < sorted.size() - 1 ? "," : "").append("\n");
         }
         sb.append("  ]\n}\n");
@@ -1351,18 +1353,56 @@ public class SiteBuilder {
         System.out.println("  " + out);
     }
 
+    /**
+     * Returns the RFC 3339 timestamp of the last git commit that touched {@code filePath}
+     * (e.g. {@code 2024-01-15T10:30:00+09:00}), or {@code null} if not tracked.
+     */
+    private static String gitLastModifiedIso(Path filePath) {
+        try {
+            var pb = new ProcessBuilder(
+                "git", "log", "-1", "--format=%aI", "--",
+                filePath.toAbsolutePath().toString());
+            pb.directory(filePath.getParent().toFile());
+            pb.redirectErrorStream(true);
+            var proc = pb.start();
+            String out = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            proc.waitFor();
+            return out.isEmpty() ? null : out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Strips HTML tags, MDX/JSX expressions, HTML entities, and common Markdown syntax
+     * from {@code markdown}, then truncates to at most {@code maxLen} characters.
+     */
+    private static String plainText(String markdown, int maxLen) {
+        if (markdown == null) return "";
+        String s = markdown;
+        // Strip HTML/MDX tags
+        s = s.replaceAll("<[^>]+?>", " ");
+        // Strip MDX/JSX expressions {#id}, {{prop: val}}, etc. (up to 3 nesting levels)
+        for (int i = 0; i < 3; i++) s = s.replaceAll("\\{[^{}]*\\}", " ");
+        // Strip HTML entities (&amp; &#x1f517; etc.)
+        s = s.replaceAll("&[a-zA-Z0-9#]+;", "");
+        // Strip Markdown heading markers (## text → text)
+        s = s.replaceAll("(?m)^#{1,6}\\s+", "");
+        // Strip bold/italic/code markers
+        s = s.replaceAll("\\*{1,3}([^*\n]+)\\*{1,3}", "$1");
+        s = s.replaceAll("`[^`]+`", "");
+        // Strip link syntax [text](url) → text, image ![alt](src) → alt
+        s = s.replaceAll("!?\\[([^\\]]*)]\\([^)]*\\)", "$1");
+        // Normalize whitespace
+        s = s.replaceAll("[\\r\\n]+", " ").replaceAll("\\s{2,}", " ").strip();
+        return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
+    }
+
     /** Encodes a string as a JSON string literal (with surrounding quotes). */
     private static String jsonString(String s) {
         if (s == null) return "null";
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
                        .replace("\n", "\\n").replace("\r", "\\r")
                        .replace("\t", "\\t") + "\"";
-    }
-
-    /** Truncates a string to at most {@code maxLen} characters, appending "..." if cut. */
-    private static String truncate(String s, int maxLen) {
-        if (s == null) return "";
-        s = s.strip();
-        return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
     }
 }
