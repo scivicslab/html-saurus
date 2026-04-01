@@ -73,6 +73,19 @@ class MarkdownConverterTest {
         }
 
         @Test
+        @DisplayName("raw HTML table in markdown is rendered as HTML, not escaped")
+        void rawHtmlTable_renderedAsHtml() throws IOException {
+            String html = buildPage("<table><tr><td>セル</td></tr></table>\n");
+
+            assertTrue(html.contains("<table>"),
+                "Raw HTML <table> in Markdown must be rendered as HTML, not escaped as &lt;table&gt;");
+            assertTrue(html.contains("<td>セル</td>"),
+                "Raw HTML table cell content must be rendered as HTML");
+            assertFalse(html.contains("&lt;table&gt;"),
+                "Raw HTML must not be escaped to entity form");
+        }
+
+        @Test
         @DisplayName(":::danger inside fenced code block is not processed")
         void insideFencedCode_notProcessed() throws IOException {
             String html = buildPage("```\n:::danger タイトル\n本文\n:::\n```\n");

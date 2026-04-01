@@ -42,7 +42,7 @@ class MarkdownConverter {
             HeadingAnchorExtension.create()
         );
         this.parser = Parser.builder().extensions(extensions).build();
-        this.renderer = HtmlRenderer.builder().extensions(extensions).escapeHtml(true).build();
+        this.renderer = HtmlRenderer.builder().extensions(extensions).build();
     }
 
     /**
