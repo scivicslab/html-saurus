@@ -670,11 +670,9 @@ public class SiteBuilder {
         + "<path d=\"M0 2a8 8 0 0 1 8 8H6.5A6.5 6.5 0 0 0 0 3.5z\"/>"
         + "</svg>";
 
-    /** Inline SVG of curly braces representing JSON. */
+    /** Curly-brace icon for JSON Feed button, rendered as styled HTML. */
     private static final String JSON_ICON =
-        "<svg width=\"13\" height=\"13\" viewBox=\"0 0 13 13\" fill=\"white\" xmlns=\"http://www.w3.org/2000/svg\">"
-        + "<text x=\"0\" y=\"11\" font-family=\"monospace\" font-size=\"12\" font-weight=\"bold\">{}</text>"
-        + "</svg>";
+        "<span style=\"font-family:monospace;font-size:0.85em;letter-spacing:-0.05em;font-weight:900\">{}</span>";
 
     /**
      * Builds the HTML to inject at the bottom of the right-side TOC aside.
@@ -692,7 +690,7 @@ public class SiteBuilder {
                 + "  <a href=\"" + prefix + "rss.xml\" class=\"feed-link rss-link\" title=\"RSS Feed\">"
                 + RSS_ICON + " RSS</a>\n"
                 + "  <a href=\"" + prefix + "feed.json\" class=\"feed-link json-link\" title=\"JSON Feed\">"
-                + JSON_ICON + " JSON Feed</a>\n"
+                + JSON_ICON + " JSON</a>\n"
                 + "</div>\n";
         }
         return "";

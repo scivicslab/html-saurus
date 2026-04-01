@@ -137,13 +137,13 @@ aside.toc a.toc-active { opacity: 1; border-left-color: var(--c-act-text); color
 aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
 @media (max-width: 1100px) { aside.toc { display: none; } }
 /* ---- TOC feed links ---- */
-.toc-feed-links { display: flex; gap: 6px; flex-wrap: wrap;
+.toc-feed-links { display: flex; gap: 6px;
                   padding: 10px 0.75rem 0; margin-top: 10px;
                   border-top: 1px solid var(--c-border); }
 .feed-link { display: inline-flex; align-items: center; justify-content: center;
-             gap: 5px; width: 96px; height: 26px; border-radius: 4px;
+             gap: 4px; width: 82px; height: 26px; border-radius: 4px;
              font-size: 0.72rem; font-weight: 700; text-decoration: none; color: #fff;
-             flex-shrink: 0; }
+             flex-shrink: 0; white-space: nowrap; }
 .rss-link  { background: #f26522; }
 .rss-link:hover  { background: #d4541a; }
 .json-link { background: #009400; }
