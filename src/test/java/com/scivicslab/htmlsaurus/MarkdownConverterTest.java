@@ -108,5 +108,58 @@ class MarkdownConverterTest {
             assertFalse(html.contains("admonition-danger"),
                 "Admonition syntax inside fenced code block must not be processed");
         }
+
+        @Test
+        @DisplayName("Markdown list inside HTML table cell is rendered as <ul><li>")
+        void htmlTableCell_markdownListRendered() throws IOException {
+            String md = "<table><tr><td>\n- 項目 A\n- 項目 B\n- 項目 C\n</td></tr></table>\n";
+            String html = buildPage(md);
+
+            assertTrue(html.contains("<ul>"),
+                "Markdown list inside HTML table cell must render as <ul>");
+            assertTrue(html.contains("<li>項目 A</li>"),
+                "List items must render as <li>");
+            assertFalse(html.contains("- 項目 A"),
+                "Raw Markdown list syntax must not remain in output");
+        }
+
+        @Test
+        @DisplayName("Markdown list with links inside HTML table cell is fully rendered")
+        void htmlTableCell_listWithLinksRendered() throws IOException {
+            String md = "<table><tr><td>\n- [リンクA](/page-a)\n- [リンクB](/page-b)\n</td></tr></table>\n";
+            String html = buildPage(md);
+
+            assertTrue(html.contains("<ul>"), "Must render as <ul>");
+            assertTrue(html.contains("<a href=\"/page-a\">リンクA</a>"),
+                "Links inside list items must be rendered as <a>");
+        }
+
+        @Test
+        @DisplayName("Markdown image inside HTML table cell is rendered as <img>")
+        void htmlTableCell_markdownImageRendered() throws IOException {
+            String md = "<table><tr><td>![説明](photo.png)</td></tr></table>\n";
+            String html = buildPage(md);
+
+            assertTrue(html.contains("<img"),
+                "Markdown image inside HTML table cell must render as <img>");
+            assertTrue(html.contains("photo.png"),
+                "Image URL must appear in rendered output");
+            assertFalse(html.contains("![説明]"),
+                "Raw Markdown image syntax must not remain in output");
+        }
+
+        @Test
+        @DisplayName("Markdown link inside HTML table cell is rendered as <a>")
+        void htmlTableCell_markdownLinkRendered() throws IOException {
+            String md = "<table><tr><td>[リンクテキスト](/some/page)</td></tr></table>\n";
+            String html = buildPage(md);
+
+            assertTrue(html.contains("<a href=\"/some/page\">"),
+                "Markdown link inside HTML table cell must render as <a>");
+            assertTrue(html.contains("リンクテキスト"),
+                "Link text must appear in rendered output");
+            assertFalse(html.contains("[リンクテキスト]"),
+                "Raw Markdown link syntax must not remain in output");
+        }
     }
 }

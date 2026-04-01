@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -22,6 +23,7 @@ public class SearchServer {
     private final Runnable rebuild;
     private final boolean production;
     private final LuceneSearcher searcher;
+    private final Map<String, LuceneSearcher> localeSearchers = new HashMap<>();
 
     /**
      * @param staticDir  directory containing the generated static HTML files
@@ -36,6 +38,17 @@ public class SearchServer {
         this.rebuild = rebuild;
         this.production = production;
         this.searcher = new LuceneSearcher(indexDir);
+        // Load locale-specific indexes from search-index/<locale>/
+        try {
+            if (Files.isDirectory(indexDir)) {
+                Files.list(indexDir)
+                    .filter(Files::isDirectory)
+                    .forEach(locDir -> localeSearchers.put(
+                        locDir.getFileName().toString(), new LuceneSearcher(locDir)));
+            }
+        } catch (IOException e) {
+            System.err.println("Warning: could not scan locale indexes: " + e.getMessage());
+        }
     }
 
     /**
@@ -82,7 +95,10 @@ public class SearchServer {
      */
     private void handleSearch(HttpExchange ex) throws IOException {
         String q = HttpUtils.queryParam(ex, "q");
-        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", search(q));
+        String locale = HttpUtils.queryParam(ex, "locale");
+        LuceneSearcher s = (!locale.isEmpty() && localeSearchers.containsKey(locale))
+            ? localeSearchers.get(locale) : searcher;
+        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", search(q, s));
     }
 
     /**
@@ -93,9 +109,9 @@ public class SearchServer {
      * @param queryStr the user's search query; blank returns an empty array
      * @return JSON array string of search results
      */
-    private String search(String queryStr) {
+    private String search(String queryStr, LuceneSearcher s) {
         try {
-            var hits = searcher.search(queryStr, 20,
+            var hits = s.search(queryStr, 20,
                 new String[]{"title_idx", "doc_id_idx", "body"},
                 Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
             var sb = new StringBuilder("[");

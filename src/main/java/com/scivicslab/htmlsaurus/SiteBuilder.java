@@ -42,6 +42,10 @@ public class SiteBuilder {
     private final String customFooter;
     /** Data URL for the favicon, read from the project's static directory; null if not found. */
     private final String faviconDataUrl;
+    /** Data URL for the navbar logo image; null if not configured. */
+    private final String logoDataUrl;
+    /** Alt text for the navbar logo image. */
+    private final String logoAlt;
     /**
      * Locale code of this build (e.g., "ja", "en"), or null if i18n is not configured.
      * When equal to defaultLocale (or null), this is the default-language build served at the root path.
@@ -112,10 +116,13 @@ public class SiteBuilder {
         // Read site name from i18n navbar.json or docusaurus.config; fall back to passed-in name
         String configSiteName = readSiteNameFromConfig(projectRoot, currentLocale);
         this.siteName = configSiteName != null ? configSiteName : siteName;
-        this.customCss    = production ? readOptional(projectRoot.resolve("html-saurus.css"))    : null;
-        this.customHeader = production ? readOptional(projectRoot.resolve("html-saurus-header.html")) : null;
-        this.customFooter = production ? readOptional(projectRoot.resolve("html-saurus-footer.html")) : null;
+        this.customCss    = production ? readLocalized(projectRoot, "html-saurus.css",          currentLocale) : null;
+        this.customHeader = production ? readLocalized(projectRoot, "html-saurus-header.html", currentLocale) : null;
+        this.customFooter = production ? readLocalized(projectRoot, "html-saurus-footer.html", currentLocale) : null;
         this.faviconDataUrl = readFaviconDataUrl(projectRoot);
+        String[] logoInfo = readLogoInfo(projectRoot);
+        this.logoDataUrl = logoInfo[0];
+        this.logoAlt     = logoInfo[1];
         this.converter = new MarkdownConverter();
         this.navBuilder = new NavTreeBuilder(docsDir, production, converter, currentLocale, defaultLocale);
     }
@@ -194,10 +201,25 @@ public class SiteBuilder {
             }
         });
 
-        // Generate index.html that redirects to the first page
-        String firstHref = root.href(); // e.g. "/Cluster-IaC/foo.html"
-        if (firstHref != null) {
-            String target = firstHref.startsWith("/") ? firstHref.substring(1) : firstHref;
+        // Generate index.html that redirects to the homepage.
+        // A doc with "slug: /" in its frontmatter is the Docusaurus homepage; use its generated URL.
+        // Fall back to the nav tree's first page when no such doc exists.
+        String homeTarget = null;
+        for (Path[] pair : mdFiles) {
+            try {
+                if (hasRootSlug(Files.readString(pair[0]))) {
+                    homeTarget = hrefForRel(pair[1]);
+                    break;
+                }
+            } catch (IOException ignored) {}
+        }
+        if (homeTarget == null) {
+            String h = root.href();
+            homeTarget = h != null ? (h.startsWith("/") ? h.substring(1) : h) : null;
+        }
+        String firstHref = homeTarget;
+        if (firstHref != null && !firstHref.toLowerCase().startsWith("javascript:")) {
+            String target = firstHref;
             String targetEsc = escapeHtml(target);
             String indexHtml = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
                 + "<meta http-equiv=\"refresh\" content=\"0;url=" + targetEsc + "\">"
@@ -317,6 +339,9 @@ public class SiteBuilder {
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>%s</title>
               <link rel="icon" href="YADOC_FAVICON">
+              <link rel="preconnect" href="https://fonts.googleapis.com">
+              <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+              <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap">
               <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
                 integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+"
                 crossorigin="anonymous">
@@ -342,7 +367,12 @@ public class SiteBuilder {
 
         // Top navbar
         sb.append("<header>\n");
-        sb.append("  <a class=\"site-title\" href=\"").append(prefix).append("index.html\">").append(escapeHtml(siteName)).append("</a>\n");
+        sb.append("  <a class=\"site-title\" href=\"").append(prefix).append("index.html\">");
+        if (logoDataUrl != null) {
+            sb.append("<img src=\"").append(logoDataUrl).append("\" alt=\"")
+              .append(escapeHtml(logoAlt)).append("\" class=\"site-logo\">");
+        }
+        sb.append(escapeHtml(siteName)).append("</a>\n");
         sb.append("  <nav class=\"top\">\n");
         for (SiteNode section : root.children()) {
             if (!section.isDir()) continue; // skip top-level .md files like intro.md
@@ -366,6 +396,13 @@ public class SiteBuilder {
             sb.append("    <option value=\"red\">Red</option>\n");
             sb.append("  </select>\n");
         }
+        // Language switcher links and search must reach the SITE ROOT (above all locale dirs).
+        // For the default locale, `prefix` already points to the site root.
+        // For alternate locales, `prefix` points only to the locale root (e.g. /en/),
+        // so we need one extra "../" to escape the locale directory.
+        boolean isNonDefaultLocale = currentLocale != null && !currentLocale.equals(defaultLocale);
+        String siteRootPrefix = isNonDefaultLocale ? "../" + prefix : prefix;
+
         if (allLocales.size() > 1) {
             // Compute the page path without the locale prefix (base path)
             String basePath;
@@ -375,12 +412,6 @@ public class SiteBuilder {
                 String stripped = currentPath.replaceFirst("^/" + currentLocale + "(/|$)", "/");
                 basePath = stripped.isEmpty() ? "/" : stripped;
             }
-            // Language switcher links must reach the SITE ROOT (above all locale dirs).
-            // For the default locale, `prefix` already points to the site root.
-            // For alternate locales, `prefix` points only to the locale root (e.g. /en/),
-            // so we need one extra "../" to escape the locale directory.
-            boolean isNonDefaultLocale = currentLocale != null && !currentLocale.equals(defaultLocale);
-            String siteRootPrefix = isNonDefaultLocale ? "../" + prefix : prefix;
 
             String activeLabel = localeLabel(currentLocale != null ? currentLocale : defaultLocale);
             sb.append("  <div class=\"lang-dropdown\">\n");
@@ -455,7 +486,8 @@ public class SiteBuilder {
                         : "ja";
         String faviconHref = faviconDataUrl != null ? faviconDataUrl : "data:,";
         return sb.toString()
-            .replace("YADOC_SEARCH_URL", prefix + "search")
+            .replace("YADOC_SEARCH_URL", escapeJs(siteRootPrefix + "search"
+                + (isNonDefaultLocale ? "?locale=" + currentLocale : "")))
             .replace("YADOC_PROJECT", escapeJs(siteName))
             .replace("YADOC_LANG", escapeHtml(langAttr))
             .replace("YADOC_FAVICON", faviconHref);
@@ -561,10 +593,6 @@ public class SiteBuilder {
                   else localStorage.removeItem('hs-cat:' + key);
                 }
               });
-              var link = header.querySelector('a.cat-label');
-              if (link) {
-                link.addEventListener('click', function(e) { e.stopPropagation(); });
-              }
             });
             document.querySelectorAll('.cat-header[data-cat]').forEach(function(header) {
               if (localStorage.getItem('hs-cat:' + header.dataset.cat) === '1') {
@@ -624,7 +652,8 @@ public class SiteBuilder {
               })();
               var SEARCH_URL = 'YADOC_SEARCH_URL';
               function doSearch(q) {
-                fetch(SEARCH_URL + '?q=' + encodeURIComponent(q))
+                var sep = SEARCH_URL.indexOf('?') >= 0 ? '&' : '?';
+                fetch(SEARCH_URL + sep + 'q=' + encodeURIComponent(q))
                   .then(function(r) { return r.json(); })
                   .then(function(data) {
                     results.innerHTML = '';
@@ -991,6 +1020,76 @@ public class SiteBuilder {
     }
 
     /**
+     * Returns the generated relative href for a given docs-relative file path,
+     * using the same same-name-detection and cleanRelPath logic as {@link #convertPage}.
+     * The result has no leading slash (e.g. {@code guides/top_page/} in production mode).
+     */
+    private String hrefForRel(Path rel) {
+        boolean isSameName = false;
+        if (rel.getNameCount() >= 2) {
+            String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
+            String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
+            if (fileBase.equals(parentBase)) isSameName = true;
+        }
+        String cleanBase = isSameName
+            ? cleanRelPath(rel.getParent().toString().replace('\\', '/'))
+            : cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
+        return production ? cleanBase + "/" : cleanBase + ".html";
+    }
+
+    /**
+     * Returns {@code true} if the given Markdown source has {@code slug: /} in its YAML frontmatter,
+     * indicating it is the Docusaurus root homepage.
+     */
+    private static boolean hasRootSlug(String source) {
+        if (!source.startsWith("---")) return false;
+        int end = source.indexOf("\n---", 3);
+        if (end == -1) return false;
+        for (String line : source.substring(3, end).split("\n")) {
+            String t = line.strip();
+            if (t.equals("slug: /") || t.equals("slug: '/'") || t.equals("slug: \"/\"")) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Reads the navbar logo from the project's {@code static/} directory and returns
+     * {@code [dataUrl, alt]}. Returns {@code [null, ""]} if not configured or file is absent.
+     * The logo path and alt text are read from {@code themeConfig.navbar.logo} in
+     * {@code docusaurus.config.ts/js}.
+     */
+    private static String[] readLogoInfo(Path projectRoot) {
+        for (String name : new String[]{"docusaurus.config.ts", "docusaurus.config.js"}) {
+            Path cfg = projectRoot.resolve(name);
+            if (!Files.exists(cfg)) continue;
+            try {
+                String content = Files.readString(cfg);
+                var logoBlock = java.util.regex.Pattern
+                    .compile("logo:\\s*\\{([^}]+)\\}", java.util.regex.Pattern.DOTALL)
+                    .matcher(content);
+                if (!logoBlock.find()) continue;
+                String block = logoBlock.group(1);
+                var srcM = java.util.regex.Pattern.compile("src:\\s*['\"]([^'\"]+)['\"]").matcher(block);
+                if (!srcM.find()) continue;
+                String src = srcM.group(1);
+                var altM = java.util.regex.Pattern.compile("alt:\\s*['\"]([^'\"]+)['\"]").matcher(block);
+                String alt = altM.find() ? altM.group(1) : "";
+                Path imgFile = projectRoot.resolve("static").resolve(src);
+                if (!Files.exists(imgFile)) continue;
+                byte[] bytes = Files.readAllBytes(imgFile);
+                String base64 = java.util.Base64.getEncoder().encodeToString(bytes);
+                String ext = imgFile.getFileName().toString().toLowerCase();
+                String mime = ext.endsWith(".svg") ? "image/svg+xml"
+                            : ext.endsWith(".png") ? "image/png"
+                            : ext.endsWith(".jpg") || ext.endsWith(".jpeg") ? "image/jpeg"
+                            : "image/png";
+                return new String[]{"data:" + mime + ";base64," + base64, alt};
+            } catch (IOException ignored) {}
+        }
+        return new String[]{null, ""};
+    }
+
+    /**
      * Walks up from {@code docsDir} to find the Docusaurus project root — the nearest ancestor
      * that contains a {@code docs/} subdirectory. This correctly handles alternate-locale builds
      * where {@code docsDir} is deep inside {@code i18n/<locale>/docusaurus-plugin-content-docs/current}.
@@ -1005,6 +1104,24 @@ public class SiteBuilder {
     }
 
     /** Reads a file to a String, or returns null if the file does not exist. */
+    /**
+     * Reads a localized customization file, trying locale-specific name first.
+     * For {@code html-saurus-header.html} with locale {@code en}, tries
+     * {@code html-saurus-header.en.html} then falls back to {@code html-saurus-header.html}.
+     * Returns {@code null} if neither file exists.
+     */
+    private static String readLocalized(Path dir, String filename, String locale) {
+        if (locale != null) {
+            int dot = filename.lastIndexOf('.');
+            String localized = dot >= 0
+                ? filename.substring(0, dot) + "." + locale + filename.substring(dot)
+                : filename + "." + locale;
+            String content = readOptional(dir.resolve(localized));
+            if (content != null) return content;
+        }
+        return readOptional(dir.resolve(filename));
+    }
+
     private static String readOptional(Path p) {
         if (!Files.exists(p)) return null;
         try { return Files.readString(p); }

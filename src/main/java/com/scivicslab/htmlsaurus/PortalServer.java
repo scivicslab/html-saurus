@@ -49,6 +49,17 @@ public class PortalServer {
             projects.add(proj);
             projectMap.put(name, proj);
             searchers.put(name, new LuceneSearcher(proj.indexDir()));
+            // Load locale-specific indexes from search-index/<locale>/
+            try {
+                if (Files.isDirectory(proj.indexDir())) {
+                    Files.list(proj.indexDir())
+                        .filter(Files::isDirectory)
+                        .forEach(locDir -> searchers.put(
+                            name + ":" + locDir.getFileName(), new LuceneSearcher(locDir)));
+                }
+            } catch (IOException e) {
+                System.err.println("Warning: could not scan locale indexes for " + name + ": " + e.getMessage());
+            }
         }
     }
 
@@ -636,7 +647,10 @@ public class PortalServer {
      */
     private void handleSearch(HttpExchange ex, Project proj) throws IOException {
         String q = HttpUtils.queryParam(ex, "q");
-        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", searchWithProject(q, proj));
+        String locale = HttpUtils.queryParam(ex, "locale");
+        String key = (!locale.isEmpty()) ? proj.name() + ":" + locale : proj.name();
+        LuceneSearcher s = searchers.getOrDefault(key, searchers.get(proj.name()));
+        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", searchWithSearcher(q, proj, s));
     }
 
     /**
@@ -644,7 +658,10 @@ public class PortalServer {
      * as a JSON array. Each result includes title, path (prefixed with project name), and summary.
      */
     private String searchWithProject(String queryStr, Project proj) {
-        LuceneSearcher s = searchers.get(proj.name());
+        return searchWithSearcher(queryStr, proj, searchers.get(proj.name()));
+    }
+
+    private String searchWithSearcher(String queryStr, Project proj, LuceneSearcher s) {
         if (s == null) return "[]";
         try {
             var hits = s.search(queryStr, 20,

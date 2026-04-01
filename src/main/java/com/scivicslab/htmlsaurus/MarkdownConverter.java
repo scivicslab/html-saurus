@@ -161,8 +161,27 @@ class MarkdownConverter {
     }
 
     /**
+     * Matches a Markdown image: {@code ![alt](url)} — must be tried before {@link #MD_LINK}.
+     * Group 1: alt text, Group 2: URL.
+     */
+    private static final Pattern MD_IMAGE = Pattern.compile("!\\[([^\\]]*)\\]\\(([^)]+)\\)");
+    /**
+     * Matches a Markdown inline link: {@code [text](url)}.
+     * Group 1: link text (may contain nested brackets), Group 2: URL.
+     */
+    private static final Pattern MD_LINK  = Pattern.compile("\\[([^\\]]+)\\]\\(([^)]+)\\)");
+    /**
+     * Matches a run of consecutive Markdown unordered list lines (lines starting with
+     * {@code -}, {@code *}, or {@code +} followed by a space).
+     */
+    private static final Pattern MD_LIST_BLOCK = Pattern.compile(
+        "(?:^[ \\t]*[-*+][ \\t]+.+(?:\\n|$))+", Pattern.MULTILINE);
+
+    /**
      * Removes blank lines within {@code <table>...</table>} blocks so that CommonMark
      * does not terminate the HTML block at blank lines inside cells.
+     * Also converts Markdown inline syntax (images and links) inside table blocks to HTML,
+     * because CommonMark does not process Markdown inside HTML blocks.
      * Handles nested tables via depth counting.
      */
     private static String normalizeHtmlTableBlocks(String markdown) {
@@ -181,11 +200,61 @@ class MarkdownConverter {
                 break;
             }
             String tableBlock = markdown.substring(tableOpen, tableClose);
-            // Replace one-or-more consecutive blank lines with a single newline
-            result.append(tableBlock.replaceAll("\n([ \t]*\n)+", "\n"));
+            // Collapse consecutive blank lines so CommonMark does not split the HTML block
+            tableBlock = tableBlock.replaceAll("\n([ \t]*\n)+", "\n");
+            // Convert Markdown inline syntax to HTML (images first, then links)
+            tableBlock = convertInlineMarkdownToHtml(tableBlock);
+            result.append(tableBlock);
             pos = tableClose;
         }
         return result.toString();
+    }
+
+    /**
+     * Converts Markdown inline images and links within a string to their HTML equivalents.
+     * Images ({@code ![alt](url)}) are processed before links to avoid partial matches.
+     */
+    private static String convertInlineMarkdownToHtml(String text) {
+        // Unordered lists: groups of "- item" lines → <ul><li>...</li></ul>
+        Matcher listM = MD_LIST_BLOCK.matcher(text);
+        StringBuffer sb0 = new StringBuffer();
+        while (listM.find()) {
+            StringBuilder ul = new StringBuilder("<ul>\n");
+            for (String line : listM.group().split("\\n")) {
+                if (!line.isBlank()) {
+                    String item = line.replaceFirst("^[ \\t]*[-*+][ \\t]+", "");
+                    ul.append("<li>").append(item).append("</li>\n");
+                }
+            }
+            ul.append("</ul>");
+            listM.appendReplacement(sb0, Matcher.quoteReplacement(ul.toString()));
+        }
+        listM.appendTail(sb0);
+        text = sb0.toString();
+
+        // Images: ![alt](url) → <img src="url" alt="alt">
+        Matcher imgM = MD_IMAGE.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (imgM.find()) {
+            String alt = imgM.group(1).replace("\"", "&quot;");
+            String url = imgM.group(2).trim();
+            imgM.appendReplacement(sb, Matcher.quoteReplacement(
+                "<img src=\"" + url + "\" alt=\"" + alt + "\">"));
+        }
+        imgM.appendTail(sb);
+        text = sb.toString();
+
+        // Links: [text](url) → <a href="url">text</a>
+        Matcher linkM = MD_LINK.matcher(text);
+        StringBuffer sb2 = new StringBuffer();
+        while (linkM.find()) {
+            String linkText = linkM.group(1);
+            String url = linkM.group(2).trim();
+            linkM.appendReplacement(sb2, Matcher.quoteReplacement(
+                "<a href=\"" + url + "\">" + linkText + "</a>"));
+        }
+        linkM.appendTail(sb2);
+        return sb2.toString();
     }
 
     /** Returns the index just past the {@code </table>} that matches the {@code <table} at {@code openPos}. */
