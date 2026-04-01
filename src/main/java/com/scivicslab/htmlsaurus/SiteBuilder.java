@@ -1386,9 +1386,6 @@ public class SiteBuilder {
         sb.append("  \"home_page_url\": ").append(jsonString(siteUrl)).append(",\n");
         sb.append("  \"feed_url\": ").append(jsonString(feedUrl)).append(",\n");
         sb.append("  \"language\": ").append(jsonString(lang)).append(",\n");
-        if (faviconDataUrl != null) {
-            sb.append("  \"favicon\": ").append(jsonString(faviconDataUrl)).append(",\n");
-        }
         sb.append("  \"items\": [\n");
         List<PageInfo> sorted = new ArrayList<>(builtPages);
         sorted.sort(Comparator.comparing(PageInfo::absoluteUrl));
