@@ -265,6 +265,16 @@ public class SiteBuilder {
         String body = fm[1];
         String contentHtml = converter.convertMarkdown(body);
 
+        // If the rendered content starts with an <h1>, prefer it as the page title
+        // and strip it to avoid duplicating the heading (renderPage inserts its own <h1>).
+        var h1Pat = java.util.regex.Pattern.compile("<h1[^>]*>(.*?)</h1>", java.util.regex.Pattern.DOTALL);
+        var h1M = h1Pat.matcher(contentHtml);
+        if (h1M.find()) {
+            String h1Text = h1M.group(1).replaceAll("<[^>]+>", "").trim();
+            if (!h1Text.isBlank()) title = h1Text;
+            contentHtml = contentHtml.substring(0, h1M.start()) + contentHtml.substring(h1M.end());
+        }
+
         // Detect same-name pattern: dir/dir.md (Docusaurus convention).
         // Covers both Pattern 1 (only .md, no subdirs) and Pattern 2 (same-name .md + subdirs).
         // In both cases the URL is based on the parent directory path, not the file path.
