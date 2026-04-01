@@ -770,6 +770,39 @@ class ProductionModeE2ETest {
             assertFalse(text == null || text.isBlank(),
                     "Site title link text must not be blank");
         }
+
+        @Test
+        @DisplayName("I-5: H1 heading overrides frontmatter title — top_page shows '遺伝研スーパーコンピュータ(2025)' not 'トップページ'")
+        void h1HeadingOverridesFrontmatterTitle() {
+            // 010_top_page.md has frontmatter `title: トップページ` but body `# 遺伝研スーパーコンピュータ(2025)`.
+            // The H1 must win: page title and main <h1> must contain the H1 text, not the frontmatter title.
+            page.navigate(url("/guides/top_page/"));
+            page.waitForLoadState();
+
+            String pageTitle = page.title();
+            assertTrue(pageTitle.contains("遺伝研スーパーコンピュータ(2025)"),
+                    "Browser <title> must contain the H1 text '遺伝研スーパーコンピュータ(2025)', got: " + pageTitle);
+            assertFalse(pageTitle.contains("トップページ"),
+                    "Browser <title> must NOT contain frontmatter title 'トップページ', got: " + pageTitle);
+
+            ElementHandle h1 = page.querySelector("main h1");
+            assertNotNull(h1, "main <h1> must be present");
+            String h1Text = h1.textContent();
+            assertTrue(h1Text.contains("遺伝研スーパーコンピュータ(2025)"),
+                    "main <h1> must contain '遺伝研スーパーコンピュータ(2025)', got: " + h1Text);
+        }
+
+        @Test
+        @DisplayName("I-6: H1 is not duplicated — main contains exactly one <h1>")
+        void h1NotDuplicated() {
+            // H1 is stripped from contentHtml and re-inserted by renderPage; must appear exactly once.
+            page.navigate(url("/guides/top_page/"));
+            page.waitForLoadState();
+
+            int h1Count = page.querySelectorAll("main h1").size();
+            assertEquals(1, h1Count,
+                    "main must contain exactly one <h1> — H1 must not be duplicated");
+        }
     }
 
     // ---- J. All five navbar sections accessible --------------------------

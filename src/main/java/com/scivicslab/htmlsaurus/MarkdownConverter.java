@@ -305,7 +305,7 @@ class MarkdownConverter {
             int nl = body.indexOf('\n');
             String headingTitle = (nl >= 0 ? body.substring(2, nl) : body.substring(2)).trim();
             body = nl >= 0 ? body.substring(nl + 1).stripLeading() : "";
-            if (title.isBlank()) title = headingTitle;
+            title = headingTitle; // H1 always takes priority over frontmatter title
         }
         return new String[]{title, body};
     }
