@@ -156,7 +156,7 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
             transition: background 0.15s; }
 .copy-btn:hover { background: var(--c-hover); }
 .copy-btn.copied { background: #2e8555; color: #fff; border-color: #2e8555; }
-main h1 { font-size: 1.875rem; font-weight: 700; color: var(--c-heading);
+main h1 { font-size: 2.25rem; font-weight: 700; color: var(--c-heading);
           margin-bottom: 1.25rem; letter-spacing: -0.01em; }
 main h2 { font-size: 1.375rem; font-weight: 700; color: var(--c-heading);
           margin: 2rem 0 0.75rem; border-bottom: 2px solid var(--c-h2-border);
