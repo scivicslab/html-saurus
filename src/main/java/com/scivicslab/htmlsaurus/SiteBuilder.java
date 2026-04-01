@@ -1021,6 +1021,7 @@ public class SiteBuilder {
             });
             (function() {
               var sel = document.getElementById('theme-sel');
+              if (!sel) return;
               var t = localStorage.getItem('md2html-theme') || 'default';
               sel.value = t;
               sel.addEventListener('change', function() {
@@ -1049,6 +1050,7 @@ public class SiteBuilder {
               });
               (function() {
                 var btn = document.getElementById('rebuild-btn');
+                if (!btn) return;
                 btn.addEventListener('click', function() {
                   btn.disabled = true; btn.textContent = 'Building\u2026';
                   fetch('/api/build/YADOC_PROJECT', {method: 'POST'})
