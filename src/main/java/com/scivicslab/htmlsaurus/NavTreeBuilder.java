@@ -152,9 +152,10 @@ class NavTreeBuilder {
                 }
             }
 
-            // For alternate locales, load translated navbar labels from
-            // i18n/<locale>/docusaurus-theme-classic/navbar.json and override config labels.
-            if (currentLocale != null && !currentLocale.equals(defaultLocale)) {
+            // Load translated navbar labels from i18n/<locale>/docusaurus-theme-classic/navbar.json.
+            // Applied for all locales: default locale configs often use English labels in
+            // docusaurus.config.ts while the actual display labels live in navbar.json.
+            if (currentLocale != null) {
                 Path navbarJson = projectRoot.resolve(
                     "i18n/" + currentLocale + "/docusaurus-theme-classic/navbar.json");
                 if (Files.exists(navbarJson)) {

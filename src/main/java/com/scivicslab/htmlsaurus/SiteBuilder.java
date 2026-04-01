@@ -102,12 +102,14 @@ public class SiteBuilder {
                        String currentLocale, String defaultLocale, List<String> allLocales) {
         this.docsDir = docsDir;
         this.outDir = outDir;
-        this.siteName = siteName;
         this.production = production;
         this.currentLocale = currentLocale;
         this.defaultLocale = defaultLocale;
         this.allLocales = allLocales != null ? allLocales : List.of();
         Path projectRoot = findProjectRoot(docsDir);
+        // Read site name from i18n navbar.json or docusaurus.config; fall back to passed-in name
+        String configSiteName = readSiteNameFromConfig(projectRoot, currentLocale);
+        this.siteName = configSiteName != null ? configSiteName : siteName;
         this.customCss    = production ? readOptional(projectRoot.resolve("html-saurus.css"))    : null;
         this.customHeader = production ? readOptional(projectRoot.resolve("html-saurus-header.html")) : null;
         this.customFooter = production ? readOptional(projectRoot.resolve("html-saurus-footer.html")) : null;
@@ -914,6 +916,43 @@ public class SiteBuilder {
         if (s == null) return "";
         return s.replace("\\", "\\\\").replace("\"", "\\\"")
                 .replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r");
+    }
+
+    /**
+     * Reads the site name to display in the navbar.
+     * Priority: (1) {@code "title"} in {@code i18n/<locale>/docusaurus-theme-classic/navbar.json},
+     * (2) {@code navbar.title} in {@code docusaurus.config.ts/js}, (3) returns {@code null}.
+     */
+    private static String readSiteNameFromConfig(Path projectRoot, String locale) {
+        // 1. i18n/<locale>/docusaurus-theme-classic/navbar.json
+        if (locale != null) {
+            Path navbarJson = projectRoot.resolve(
+                "i18n/" + locale + "/docusaurus-theme-classic/navbar.json");
+            if (Files.exists(navbarJson)) {
+                try {
+                    String content = Files.readString(navbarJson);
+                    var m = java.util.regex.Pattern
+                        .compile("\"title\":\\s*\\{\\s*\"message\":\\s*\"([^\"]+)\"")
+                        .matcher(content);
+                    if (m.find()) return m.group(1);
+                } catch (IOException ignored) {}
+            }
+        }
+        // 2. docusaurus.config.ts/js: navbar: { title: '...' }
+        for (String name : new String[]{"docusaurus.config.ts", "docusaurus.config.js"}) {
+            Path cfg = projectRoot.resolve(name);
+            if (Files.exists(cfg)) {
+                try {
+                    String content = Files.readString(cfg);
+                    var m = java.util.regex.Pattern
+                        .compile("navbar:\\s*\\{[^}]*?title:\\s*['\"]([^'\"]+)['\"]",
+                                 java.util.regex.Pattern.DOTALL)
+                        .matcher(content);
+                    if (m.find()) return m.group(1);
+                } catch (IOException ignored) {}
+            }
+        }
+        return null;
     }
 
     /**

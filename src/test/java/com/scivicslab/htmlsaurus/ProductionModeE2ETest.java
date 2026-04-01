@@ -450,20 +450,19 @@ class ProductionModeE2ETest {
     class NavbarOrdering {
 
         @Test
-        @DisplayName("F-1: first navbar item is 'System Overview' (not alphabetical 'Advanced Guides')")
+        @DisplayName("F-1: first navbar item is 'システム概要' (not alphabetical order)")
         void firstNavbarItem_isSystemOverview() {
-            // Before the reorderFromDocusaurusConfig fix, items were sorted alphabetically,
-            // which would put "Advanced Guides" first. After the fix the order follows
-            // docusaurus.config.ts: System Overview → Applications → Advanced Guides → ...
+            // Before the reorderFromDocusaurusConfig fix, items were sorted alphabetically.
+            // After the fix the order follows docusaurus.config.ts (translated via navbar.json):
+            // システム概要 → 各種申請等 → 活用方法 → 稼働状況 → 成果報告
             page.navigate(url("/guides/top_page/"));
 
             List<ElementHandle> navLinks = page.querySelectorAll("header nav.top a");
             assertFalse(navLinks.isEmpty(), "Navbar must contain at least one link");
 
             String firstLabel = navLinks.get(0).textContent().trim();
-            assertEquals("System Overview", firstLabel,
-                    "First navbar item must be 'System Overview' (docusaurus.config.ts order), " +
-                    "not the alphabetically first item 'Advanced Guides'");
+            assertEquals("システム概要", firstLabel,
+                    "First navbar item must be 'システム概要' (docusaurus.config.ts order translated via navbar.json)");
         }
 
         @Test
@@ -477,7 +476,7 @@ class ProductionModeE2ETest {
         }
 
         @Test
-        @DisplayName("F-3: navbar labels match docusaurus.config.ts order exactly")
+        @DisplayName("F-3: navbar labels match docusaurus.config.ts order translated via navbar.json")
         void navbarItems_labelsMatchConfig_inOrder() {
             page.navigate(url("/guides/top_page/"));
 
@@ -486,18 +485,18 @@ class ProductionModeE2ETest {
                     .toList();
 
             List<String> expected = List.of(
-                    "System Overview",
-                    "Applications",
-                    "Advanced Guides",
-                    "System Status",
-                    "Reports");
+                    "システム概要",
+                    "各種申請等",
+                    "活用方法",
+                    "稼働状況",
+                    "成果報告");
 
             assertEquals(expected, labels,
-                    "Navbar labels must match docusaurus.config.ts order: " + expected);
+                    "Navbar labels must match docusaurus.config.ts order translated via i18n/ja/navbar.json: " + expected);
         }
 
         @Test
-        @DisplayName("F-4: active navbar item on /guides/top_page/ is 'System Overview'")
+        @DisplayName("F-4: active navbar item on /guides/top_page/ is 'システム概要'")
         void activeNavItem_matchesCurrentSection_guidesPage() {
             page.navigate(url("/guides/top_page/"));
 
@@ -506,8 +505,8 @@ class ProductionModeE2ETest {
                     "An active navbar item must be present on /guides/top_page/");
 
             String activeLabel = activeItem.textContent().trim();
-            assertEquals("System Overview", activeLabel,
-                    "Active navbar item on /guides/top_page/ must be 'System Overview'");
+            assertEquals("システム概要", activeLabel,
+                    "Active navbar item on /guides/top_page/ must be 'システム概要'");
         }
 
         @Test
@@ -524,8 +523,8 @@ class ProductionModeE2ETest {
             assertNotNull(activeItem, "An active navbar item must be present on Applications page");
 
             String activeLabel = activeItem.textContent().trim();
-            assertEquals("Applications", activeLabel,
-                    "Active navbar item on Applications page must be 'Applications'");
+            assertEquals("各種申請等", activeLabel,
+                    "Active navbar item on Applications page must be '各種申請等'");
         }
     }
 
