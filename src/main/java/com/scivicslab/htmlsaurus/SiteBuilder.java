@@ -732,6 +732,9 @@ public class SiteBuilder {
               onload="renderMathInElement(document.body, {delimiters: [
                 {left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});"></script>
             <script>
+            document.querySelectorAll('nav.side a.cat-label').forEach(function(link) {
+              link.addEventListener('click', function(e) { e.stopPropagation(); });
+            });
             document.querySelectorAll('.cat-header').forEach(function(header) {
               header.addEventListener('click', function() {
                 var children = this.nextElementSibling;
