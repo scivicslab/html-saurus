@@ -44,6 +44,8 @@ public class SiteBuilder {
     private final String customHeader;
     /** Custom footer HTML injected before {@code </body>}; null if absent. */
     private final String customFooter;
+    /** Custom TOC footer HTML injected at the bottom of the right-side TOC aside; null if absent. */
+    private final String customTocFooter;
     /** Data URL for the favicon, read from the project's static directory; null if not found. */
     private final String faviconDataUrl;
     /** Data URL for the navbar logo image; null if not configured. */
@@ -127,9 +129,10 @@ public class SiteBuilder {
         // Read site name from i18n navbar.json or docusaurus.config; fall back to passed-in name
         String configSiteName = readSiteNameFromConfig(projectRoot, currentLocale);
         this.siteName = configSiteName != null ? configSiteName : siteName;
-        this.customCss    = production ? readLocalized(projectRoot, "html-saurus.css",          currentLocale) : null;
-        this.customHeader = production ? readLocalized(projectRoot, "html-saurus-header.html", currentLocale) : null;
-        this.customFooter = production ? readLocalized(projectRoot, "html-saurus-footer.html", currentLocale) : null;
+        this.customCss       = production ? readLocalized(projectRoot, "html-saurus.css",              currentLocale) : null;
+        this.customHeader    = production ? readLocalized(projectRoot, "html-saurus-header.html",    currentLocale) : null;
+        this.customFooter    = production ? readLocalized(projectRoot, "html-saurus-footer.html",    currentLocale) : null;
+        this.customTocFooter = production ? readLocalized(projectRoot, "html-saurus-toc-footer.html", currentLocale) : null;
         this.faviconDataUrl = readFaviconDataUrl(projectRoot);
         String[] logoInfo = readLogoInfo(projectRoot);
         this.logoDataUrl = logoInfo[0];
@@ -556,7 +559,7 @@ public class SiteBuilder {
         sb.append("</main>\n");
 
         // Right-side TOC: extract h2/h3 headings from content HTML
-        sb.append(buildToc(content));
+        sb.append(buildToc(content, buildTocFooter(prefix)));
         sb.append("</div>\n");
 
         sb.append(pageScripts());
@@ -613,12 +616,13 @@ public class SiteBuilder {
 
     /**
      * Builds a right-side table of contents by extracting h2/h3 headings from the rendered HTML.
-     * Returns an empty string if no headings are found.
+     * Returns an empty string if no headings are found and footer is empty.
      *
      * @param contentHtml the rendered page content HTML
+     * @param footer      HTML to inject at the bottom of the aside (may be empty)
      * @return HTML string for the {@code <aside class="toc">} element
      */
-    private String buildToc(String contentHtml) {
+    private String buildToc(String contentHtml, String footer) {
         var matcher = HEADING_PATTERN.matcher(contentHtml);
         List<String[]> entries = new ArrayList<>(); // [level, id, text]
         while (matcher.find()) {
@@ -627,21 +631,46 @@ public class SiteBuilder {
             String text = matcher.group(3).replaceAll("<[^>]+>", "").trim(); // strip inner HTML tags
             entries.add(new String[]{level, id, text});
         }
-        if (entries.isEmpty()) return "";
+        if (entries.isEmpty() && footer.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
         sb.append("<aside class=\"toc\">\n");
-        sb.append("  <div class=\"toc-title\">On this page</div>\n");
-        sb.append("  <ul>\n");
-        for (String[] e : entries) {
-            String cls = e[0].equals("3") ? " class=\"toc-h3\"" : "";
-            sb.append("    <li").append(cls).append("><a href=\"#")
-              .append(escapeHtml(e[1])).append("\">")
-              .append(escapeHtml(e[2])).append("</a></li>\n");
+        if (!entries.isEmpty()) {
+            sb.append("  <div class=\"toc-title\">On this page</div>\n");
+            sb.append("  <ul>\n");
+            for (String[] e : entries) {
+                String cls = e[0].equals("3") ? " class=\"toc-h3\"" : "";
+                sb.append("    <li").append(cls).append("><a href=\"#")
+                  .append(escapeHtml(e[1])).append("\">")
+                  .append(escapeHtml(e[2])).append("</a></li>\n");
+            }
+            sb.append("  </ul>\n");
         }
-        sb.append("  </ul>\n");
+        if (!footer.isEmpty()) {
+            sb.append(footer);
+        }
         sb.append("</aside>\n");
         return sb.toString();
+    }
+
+    /**
+     * Builds the HTML to inject at the bottom of the right-side TOC aside.
+     * If a {@code html-saurus-toc-footer.html} file exists in the project root, its content is used.
+     * Otherwise, if {@link #siteUrl} is configured, auto-generates RSS and JSON Feed links.
+     * Returns an empty string if neither condition is met.
+     *
+     * @param prefix relative path prefix for resolving asset URLs (e.g., {@code "../"})
+     * @return HTML fragment to append inside the TOC aside, or empty string
+     */
+    private String buildTocFooter(String prefix) {
+        if (customTocFooter != null) return customTocFooter;
+        if (siteUrl != null) {
+            return "<div class=\"toc-feed-links\">\n"
+                + "  <a href=\"" + prefix + "rss.xml\" class=\"feed-link rss-link\" title=\"RSS Feed\">RSS</a>\n"
+                + "  <a href=\"" + prefix + "feed.json\" class=\"feed-link json-link\" title=\"JSON Feed\">JSON Feed</a>\n"
+                + "</div>\n";
+        }
+        return "";
     }
 
     /**
