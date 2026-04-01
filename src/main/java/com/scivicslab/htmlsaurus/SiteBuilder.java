@@ -1012,11 +1012,25 @@ public class SiteBuilder {
                 var children = this.nextElementSibling;
                 var arrow = this.querySelector('.cat-arrow');
                 children.classList.toggle('open');
-                arrow.textContent = children.classList.contains('open') ? '▼' : '▶';
+                var isOpen = children.classList.contains('open');
+                arrow.textContent = isOpen ? '▼' : '▶';
+                var key = header.dataset.cat;
+                if (key) {
+                  if (isOpen) localStorage.setItem('hs-cat:' + key, '1');
+                  else localStorage.removeItem('hs-cat:' + key);
+                }
               });
               var link = header.querySelector('a.cat-label');
               if (link) {
                 link.addEventListener('click', function(e) { e.stopPropagation(); });
+              }
+            });
+            document.querySelectorAll('.cat-header[data-cat]').forEach(function(header) {
+              if (localStorage.getItem('hs-cat:' + header.dataset.cat) === '1') {
+                var children = header.nextElementSibling;
+                var arrow = header.querySelector('.cat-arrow');
+                children.classList.add('open');
+                arrow.textContent = '▼';
               }
             });
             (function() {
@@ -1375,7 +1389,7 @@ public class SiteBuilder {
         for (SiteNode node : nodes) {
             if (node.isDir()) {
                 sb.append("<li>\n");
-                sb.append("  <div class=\"cat-header\">");
+                sb.append("  <div class=\"cat-header\" data-cat=\"").append(escapeHtml(node.href())).append("\">");
                 if (node.catLink() != null) {
                     String catAbsHref = prefix + node.catLink().replaceFirst("^/", "");
                     sb.append("<a href=\"").append(catAbsHref).append("\" class=\"cat-label\">")
