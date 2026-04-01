@@ -3,10 +3,12 @@ package com.scivicslab.htmlsaurus;
 import com.microsoft.playwright.*;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.Assumptions;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -52,12 +54,15 @@ class ProductionModeE2ETest {
     private int port;
     private Playwright playwright;
     private Browser browser;
+    private BrowserContext context;
     private Page page;
 
     // ---- Setup / teardown ------------------------------------------------
 
     @BeforeAll
     void startServer() throws Exception {
+        Assumptions.assumeTrue(Files.isDirectory(NIGSC_DOCS),
+            "nigsc_homepage2/docs not found - skipping production E2E tests");
         outDir = Files.createTempDirectory("html-saurus-e2e-prod-");
 
         // Build all locales (ja default + en alternate) in production mode
@@ -84,12 +89,14 @@ class ProductionModeE2ETest {
 
     @BeforeEach
     void openPage() {
-        page = browser.newPage();
+        context = browser.newContext();
+        page = context.newPage();
     }
 
     @AfterEach
     void closePage() {
         if (page != null) page.close();
+        if (context != null) context.close();
     }
 
     private String url(String path) {
@@ -433,6 +440,553 @@ class ProductionModeE2ETest {
                     "Japanese link must navigate to /guides/top_page/, got: " + finalUrl);
             assertFalse(finalUrl.contains("/en/guides/"),
                     "Japanese link must NOT stay in /en/ locale, got: " + finalUrl);
+        }
+    }
+
+    // ---- F. Navbar ordering and content ----------------------------------
+
+    @Nested
+    @DisplayName("F. Navbar ordering and content (reorderFromDocusaurusConfig fix)")
+    class NavbarOrdering {
+
+        @Test
+        @DisplayName("F-1: first navbar item is 'System Overview' (not alphabetical 'Advanced Guides')")
+        void firstNavbarItem_isSystemOverview() {
+            // Before the reorderFromDocusaurusConfig fix, items were sorted alphabetically,
+            // which would put "Advanced Guides" first. After the fix the order follows
+            // docusaurus.config.ts: System Overview → Applications → Advanced Guides → ...
+            page.navigate(url("/guides/top_page/"));
+
+            List<ElementHandle> navLinks = page.querySelectorAll("header nav.top a");
+            assertFalse(navLinks.isEmpty(), "Navbar must contain at least one link");
+
+            String firstLabel = navLinks.get(0).textContent().trim();
+            assertEquals("System Overview", firstLabel,
+                    "First navbar item must be 'System Overview' (docusaurus.config.ts order), " +
+                    "not the alphabetically first item 'Advanced Guides'");
+        }
+
+        @Test
+        @DisplayName("F-2: navbar contains exactly 5 items")
+        void navbarItems_count_fiveItems() {
+            page.navigate(url("/guides/top_page/"));
+
+            List<ElementHandle> navLinks = page.querySelectorAll("header nav.top a");
+            assertEquals(5, navLinks.size(),
+                    "Navbar must contain exactly 5 items matching docusaurus.config.ts");
+        }
+
+        @Test
+        @DisplayName("F-3: navbar labels match docusaurus.config.ts order exactly")
+        void navbarItems_labelsMatchConfig_inOrder() {
+            page.navigate(url("/guides/top_page/"));
+
+            List<String> labels = page.querySelectorAll("header nav.top a").stream()
+                    .map(el -> el.textContent().trim())
+                    .toList();
+
+            List<String> expected = List.of(
+                    "System Overview",
+                    "Applications",
+                    "Advanced Guides",
+                    "System Status",
+                    "Reports");
+
+            assertEquals(expected, labels,
+                    "Navbar labels must match docusaurus.config.ts order: " + expected);
+        }
+
+        @Test
+        @DisplayName("F-4: active navbar item on /guides/top_page/ is 'System Overview'")
+        void activeNavItem_matchesCurrentSection_guidesPage() {
+            page.navigate(url("/guides/top_page/"));
+
+            ElementHandle activeItem = page.querySelector("header nav.top a.active");
+            assertNotNull(activeItem,
+                    "An active navbar item must be present on /guides/top_page/");
+
+            String activeLabel = activeItem.textContent().trim();
+            assertEquals("System Overview", activeLabel,
+                    "Active navbar item on /guides/top_page/ must be 'System Overview'");
+        }
+
+        @Test
+        @DisplayName("F-5: navbar present on Applications page with 'Applications' active")
+        void navbar_presentAndActiveOnApplicationsPage() {
+            // Applications section first page (from docusaurus.config.ts navbar config)
+            page.navigate(url("/application/terms_and_policies/user_account_issurance_criteria/"));
+
+            List<ElementHandle> navLinks = page.querySelectorAll("header nav.top a");
+            assertEquals(5, navLinks.size(),
+                    "Navbar must still show 5 items on Applications section page");
+
+            ElementHandle activeItem = page.querySelector("header nav.top a.active");
+            assertNotNull(activeItem, "An active navbar item must be present on Applications page");
+
+            String activeLabel = activeItem.textContent().trim();
+            assertEquals("Applications", activeLabel,
+                    "Active navbar item on Applications page must be 'Applications'");
+        }
+    }
+
+    // ---- G. Sidebar state persistence via localStorage -------------------
+
+    @Nested
+    @DisplayName("G. Sidebar state persistence via localStorage (hs-cat: keys)")
+    class SidebarPersistence {
+
+        @Test
+        @DisplayName("G-1: cat-header elements have data-cat attribute starting with '/'")
+        void catHeaders_have_dataCatAttribute() {
+            page.navigate(url("/guides/top_page/"));
+
+            List<ElementHandle> catHeaders = page.querySelectorAll(".cat-header[data-cat]");
+            assertFalse(catHeaders.isEmpty(),
+                    "Sidebar must contain .cat-header elements with a data-cat attribute");
+
+            // All data-cat values must be absolute paths starting with "/"
+            boolean allStartWithSlash = catHeaders.stream()
+                    .allMatch(el -> {
+                        String dataCat = el.getAttribute("data-cat");
+                        return dataCat != null && dataCat.startsWith("/");
+                    });
+            assertTrue(allStartWithSlash,
+                    "All data-cat attribute values must start with '/' (absolute paths)");
+        }
+
+        @Test
+        @DisplayName("G-2: clicking a category saves its data-cat key to localStorage as '1'")
+        void clickingCategory_savesStateToLocalStorage() {
+            page.navigate(url("/guides/top_page/"));
+
+            // Clear any prior state
+            page.evaluate("() => localStorage.clear()");
+
+            // Get the first cat-header's data-cat key
+            ElementHandle firstCatHeader = page.querySelector(".cat-header[data-cat]");
+            assertNotNull(firstCatHeader, "At least one .cat-header[data-cat] must exist");
+            String key = firstCatHeader.getAttribute("data-cat");
+            assertNotNull(key, "data-cat attribute must not be null");
+
+            // Click the arrow span (not the header div, which contains a cat-label link
+            // with stopPropagation that would intercept clicks on the center of the div)
+            ElementHandle arrow = firstCatHeader.querySelector(".cat-arrow");
+            assertNotNull(arrow, ".cat-header must contain a .cat-arrow span");
+            arrow.click();
+
+            // The JS sidebar code must write localStorage.setItem('hs-cat:' + key, '1')
+            Object stored = page.evaluate("k => localStorage.getItem('hs-cat:' + k)", key);
+            assertEquals("1", stored,
+                    "After clicking category, localStorage['hs-cat:" + key + "'] must be '1'");
+        }
+
+        @Test
+        @DisplayName("G-3: localStorage state is restored after navigating to a different page")
+        void localStorageState_restoredAcrossNavigation() {
+            page.navigate(url("/guides/top_page/"));
+
+            // Clear state and explicitly mark security_policy as open
+            page.evaluate("() => localStorage.clear()");
+            page.evaluate("() => localStorage.setItem('hs-cat:/guides/security_policy/', '1')");
+
+            // Navigate to a different page within the same origin (same browser context)
+            page.navigate(url("/guides/overview/"));
+            page.waitForLoadState();
+
+            // The sidebar should restore the open state from localStorage
+            Boolean isOpen = (Boolean) page.evaluate(
+                    "() => { " +
+                    "  const el = document.querySelector('[data-cat=\"/guides/security_policy/\"]'); " +
+                    "  if (!el) return null; " +
+                    "  const next = el.nextElementSibling; " +
+                    "  if (!next) return null; " +
+                    "  return next.classList.contains('open'); " +
+                    "}");
+            assertNotNull(isOpen,
+                    "security_policy cat-header and its sibling must exist on /guides/overview/");
+            assertTrue(isOpen,
+                    "After restoring localStorage state, security_policy category must be open (.open class)");
+        }
+
+        @Test
+        @DisplayName("G-4: closing a category removes its key from localStorage")
+        void closingCategory_removesFromLocalStorage() {
+            page.navigate(url("/guides/top_page/"));
+
+            // Clear state
+            page.evaluate("() => localStorage.clear()");
+
+            ElementHandle firstCatHeader = page.querySelector(".cat-header[data-cat]");
+            assertNotNull(firstCatHeader, "At least one .cat-header[data-cat] must exist");
+            String key = firstCatHeader.getAttribute("data-cat");
+
+            // Click the arrow span to toggle (avoids the stopPropagation on cat-label link)
+            ElementHandle arrow = firstCatHeader.querySelector(".cat-arrow");
+            assertNotNull(arrow, ".cat-header must contain a .cat-arrow span");
+
+            // First click: open the category
+            arrow.click();
+            Object afterOpen = page.evaluate("k => localStorage.getItem('hs-cat:' + k)", key);
+            assertEquals("1", afterOpen,
+                    "After first click (open), localStorage must hold '1' for key: " + key);
+
+            // Second click: close the category
+            arrow.click();
+            Object afterClose = page.evaluate("k => localStorage.getItem('hs-cat:' + k)", key);
+            assertNull(afterClose,
+                    "After second click (close), localStorage key 'hs-cat:" + key + "' must be removed (null)");
+        }
+    }
+
+    // ---- H. Sidebar ancestor auto-expand ---------------------------------
+
+    @Nested
+    @DisplayName("H. Sidebar ancestor auto-expand (SiteBuilder ancestor expansion logic)")
+    class SidebarAutoExpand {
+
+        @Test
+        @DisplayName("H-1: on deep page, software ancestor category is automatically opened")
+        void deepPage_softwareAncestor_autoOpened() {
+            // Navigate to a deep page under software/JobScheduler/Slurm/
+            // The /guides/software/ ancestor cat-header must be auto-expanded (class 'open')
+            page.navigate(url("/guides/software/JobScheduler/Slurm/batch_jobs/"));
+            page.waitForLoadState();
+
+            Boolean isOpen = (Boolean) page.evaluate(
+                    "() => { " +
+                    "  const el = document.querySelector('[data-cat=\"/guides/software/\"]'); " +
+                    "  if (!el) return null; " +
+                    "  const next = el.nextElementSibling; " +
+                    "  if (!next) return null; " +
+                    "  return next.classList.contains('open'); " +
+                    "}");
+            assertNotNull(isOpen,
+                    "/guides/software/ cat-header and its sibling must exist on the deep Slurm page");
+            assertTrue(isOpen,
+                    "Ancestor /guides/software/ must be auto-expanded (class 'open') " +
+                    "when viewing a page deep inside the software section");
+        }
+
+        @Test
+        @DisplayName("H-2: on deep page, Slurm ancestor category is automatically opened")
+        void deepPage_slurmAncestor_autoOpened() {
+            page.navigate(url("/guides/software/JobScheduler/Slurm/batch_jobs/"));
+            page.waitForLoadState();
+
+            Boolean isOpen = (Boolean) page.evaluate(
+                    "() => { " +
+                    "  const el = document.querySelector('[data-cat=\"/guides/software/JobScheduler/Slurm/\"]'); " +
+                    "  if (!el) return null; " +
+                    "  const next = el.nextElementSibling; " +
+                    "  if (!next) return null; " +
+                    "  return next.classList.contains('open'); " +
+                    "}");
+            assertNotNull(isOpen,
+                    "/guides/software/JobScheduler/Slurm/ cat-header and sibling must exist on batch_jobs page");
+            assertTrue(isOpen,
+                    "Ancestor /guides/software/JobScheduler/Slurm/ must be auto-expanded " +
+                    "when viewing batch_jobs page inside it");
+        }
+
+        @Test
+        @DisplayName("H-3: on deep page, unrelated sibling category remains closed")
+        void deepPage_siblingCategory_remainsClosed() {
+            // Navigate to the Slurm page; clear localStorage to ensure no persisted open state;
+            // then reload and check that security_policy (a sibling, not an ancestor) is closed.
+            page.navigate(url("/guides/software/JobScheduler/Slurm/batch_jobs/"));
+            page.waitForLoadState();
+
+            // Clear any localStorage state that might force security_policy open
+            page.evaluate("() => localStorage.clear()");
+            page.reload();
+            page.waitForLoadState();
+
+            Boolean isOpen = (Boolean) page.evaluate(
+                    "() => { " +
+                    "  const el = document.querySelector('[data-cat=\"/guides/security_policy/\"]'); " +
+                    "  if (!el) return null; " +
+                    "  const next = el.nextElementSibling; " +
+                    "  if (!next) return null; " +
+                    "  return next.classList.contains('open'); " +
+                    "}");
+            // If the element does not exist on this page that is also acceptable
+            if (isOpen != null) {
+                assertFalse(isOpen,
+                        "Unrelated sibling category /guides/security_policy/ must NOT be auto-expanded " +
+                        "when viewing a page in the software/Slurm section");
+            }
+        }
+    }
+
+    // ---- I. Page content rendering ---------------------------------------
+
+    @Nested
+    @DisplayName("I. Page content rendering")
+    class ContentRendering {
+
+        @Test
+        @DisplayName("I-1: page title is not empty on /guides/top_page/")
+        void pageTitle_isNotEmpty() {
+            page.navigate(url("/guides/top_page/"));
+            String title = page.title();
+            assertNotNull(title, "page.title() must not be null");
+            assertFalse(title.isBlank(),
+                    "Page title must not be blank on /guides/top_page/");
+        }
+
+        @Test
+        @DisplayName("I-2: main content area exists and contains text")
+        void mainContentArea_existsAndHasText() {
+            page.navigate(url("/guides/top_page/"));
+            ElementHandle main = page.querySelector("main");
+            assertNotNull(main, "A <main> element must be present on the page");
+            String text = main.textContent();
+            assertFalse(text == null || text.isBlank(),
+                    "<main> element must contain non-blank text content");
+        }
+
+        @Test
+        @DisplayName("I-3: main content contains at least one heading (h1 or h2)")
+        void mainContent_hasHeading() {
+            page.navigate(url("/guides/top_page/"));
+            boolean hasHeading = page.querySelector("main h1") != null
+                    || page.querySelector("main h2") != null;
+            assertTrue(hasHeading,
+                    "Main content area must contain at least one <h1> or <h2> heading");
+        }
+
+        @Test
+        @DisplayName("I-4: site title link present in header and not blank")
+        void siteTitle_presentInHeader() {
+            page.navigate(url("/guides/top_page/"));
+            ElementHandle siteTitle = page.querySelector("header a.site-title");
+            assertNotNull(siteTitle,
+                    "Header must contain <a class=\"site-title\"> link");
+            String text = siteTitle.textContent();
+            assertFalse(text == null || text.isBlank(),
+                    "Site title link text must not be blank");
+        }
+    }
+
+    // ---- J. All five navbar sections accessible --------------------------
+
+    @Nested
+    @DisplayName("J. All five navbar sections accessible")
+    class AllSectionsAccessible {
+
+        @Test
+        @DisplayName("J-1: Applications section first page returns 200")
+        void applicationSection_firstPage_returns200() {
+            Response resp = page.navigate(
+                    url("/application/terms_and_policies/user_account_issurance_criteria/"));
+            assertEquals(200, resp.status(),
+                    "GET /application/terms_and_policies/user_account_issurance_criteria/ " +
+                    "must return 200 (Applications section first page from navbar config)");
+        }
+
+        @Test
+        @DisplayName("J-2: Advanced Guides section first page returns 200")
+        void advancedGuidesSection_firstPage_returns200() {
+            Response resp = page.navigate(
+                    url("/advanced_guides/topics/advanced_guide_2020-2022/"));
+            assertEquals(200, resp.status(),
+                    "GET /advanced_guides/topics/advanced_guide_2020-2022/ " +
+                    "must return 200 (Advanced Guides section first page from navbar config)");
+        }
+
+        @Test
+        @DisplayName("J-3: System Status section returns 200")
+        void operationSection_returns200() {
+            Response resp = page.navigate(url("/operation/job_queue_status/"));
+            assertEquals(200, resp.status(),
+                    "GET /operation/job_queue_status/ must return 200 " +
+                    "(System Status section first page from navbar config)");
+        }
+
+        @Test
+        @DisplayName("J-4: Reports section returns 200")
+        void reportSection_returns200() {
+            Response resp = page.navigate(url("/report/statistics/"));
+            assertEquals(200, resp.status(),
+                    "GET /report/statistics/ must return 200 " +
+                    "(Reports section first page from navbar config)");
+        }
+    }
+
+    // ---- K. Search UI interaction ----------------------------------------
+
+    @Nested
+    @DisplayName("K. Search UI interaction (null-guard fix for rebuild-btn in production mode)")
+    class SearchUiInteraction {
+
+        @Test
+        @DisplayName("K-1: typing in search box triggers the results dropdown")
+        void typing_triggersResultsDropdown() {
+            page.navigate(url("/guides/top_page/"));
+
+            // Filling the input dispatches input events which trigger the search debounce
+            page.fill("#search-input", "slurm");
+
+            // The dropdown must open (class 'open' added to #search-results)
+            ElementHandle results = page.waitForSelector("#search-results.open");
+            assertNotNull(results,
+                    "After typing 'slurm', #search-results must acquire class 'open'");
+        }
+
+        @Test
+        @DisplayName("K-2: search results have expected structure elements")
+        void searchResults_haveExpectedStructure() {
+            page.navigate(url("/guides/top_page/"));
+            page.fill("#search-input", "slurm");
+            page.waitForSelector("#search-results.open");
+
+            // Each result item must contain the expected structural sub-elements
+            assertNotNull(page.querySelector(".sr-item"),
+                    "Search results must contain .sr-item elements");
+            assertNotNull(page.querySelector(".sr-title"),
+                    "Search result items must contain .sr-title element");
+            assertNotNull(page.querySelector(".sr-breadcrumb"),
+                    "Search result items must contain .sr-breadcrumb element");
+            assertNotNull(page.querySelector(".sr-summary"),
+                    "Search result items must contain .sr-summary element");
+        }
+
+        @Test
+        @DisplayName("K-3: pressing Escape closes the results dropdown")
+        void escapeKey_closesResultsDropdown() {
+            page.navigate(url("/guides/top_page/"));
+            page.fill("#search-input", "slurm");
+            page.waitForSelector("#search-results.open");
+
+            // Press Escape to dismiss
+            page.keyboard().press("Escape");
+
+            // The dropdown must lose its 'open' class.
+            // #search-results is display:none when not open, so we cannot use waitForSelector
+            // with the default visible state.  Poll the class directly instead.
+            page.waitForFunction("() => !document.querySelector('#search-results').classList.contains('open')");
+            assertNull(page.querySelector("#search-results.open"),
+                    "After pressing Escape, #search-results must not have class 'open'");
+        }
+
+        @Test
+        @DisplayName("K-4: search result links use clean URL hrefs (start with '/', no '.html')")
+        void searchResultLinks_haveCleanUrlHrefs() {
+            page.navigate(url("/guides/top_page/"));
+            page.fill("#search-input", "slurm");
+            page.waitForSelector("#search-results.open");
+
+            // Get the first result item and check its href
+            ElementHandle firstItem = page.querySelector(".sr-item");
+            assertNotNull(firstItem, "At least one .sr-item must be present in results");
+
+            String href = firstItem.getAttribute("href");
+            assertNotNull(href, ".sr-item must have an href attribute");
+            assertTrue(href.startsWith("/"),
+                    "Search result link href must start with '/', got: " + href);
+            assertFalse(href.contains(".html"),
+                    "Search result link href must not contain '.html', got: " + href);
+        }
+
+        @Test
+        @DisplayName("K-5: empty search input does not open the dropdown")
+        void emptySearchInput_doesNotOpenDropdown() {
+            // On a fresh page load with no interaction, the dropdown must be closed
+            page.navigate(url("/guides/top_page/"));
+            page.waitForLoadState();
+
+            assertNull(page.querySelector("#search-results.open"),
+                    "#search-results must not have class 'open' on fresh page load without typing");
+        }
+    }
+
+    // ---- L. Root redirect behavior ---------------------------------------
+
+    @Nested
+    @DisplayName("L. Root redirect behavior")
+    class RedirectBehavior {
+
+        @Test
+        @DisplayName("L-1: navigating to '/' does not stay at index.html after redirect")
+        void rootRedirect_doesNotStayAtIndexHtml() {
+            page.navigate(url("/"));
+            page.waitForLoadState();
+
+            String currentUrl = page.url();
+            assertFalse(currentUrl.endsWith("index.html"),
+                    "After root redirect, page URL must not end with 'index.html', got: " + currentUrl);
+        }
+
+        @Test
+        @DisplayName("L-2: root redirect target page returns 200 when navigated to directly")
+        void rootRedirect_targetPage_returns200() {
+            // Follow the redirect to discover the target URL
+            page.navigate(url("/"));
+            page.waitForLoadState();
+            String redirectTarget = page.url();
+
+            // Navigate via about:blank so we are not at the target URL yet;
+            // then navigate directly to it to obtain a fresh HTTP response.
+            page.navigate("about:blank");
+            Response resp = page.navigate(redirectTarget);
+            assertNotNull(resp,
+                    "Direct navigation to '" + redirectTarget + "' must return a response");
+            assertEquals(200, resp.status(),
+                    "Root redirect target '" + redirectTarget + "' must return 200 when navigated directly");
+        }
+    }
+
+    // ---- M. More i18n ----------------------------------------------------
+
+    @Nested
+    @DisplayName("M. More i18n (language switcher depth and alternate locale)")
+    class MoreI18n {
+
+        @Test
+        @DisplayName("M-1: language switcher shows exactly two locale options")
+        void languageSwitcher_hasTwoLocales() {
+            page.navigate(url("/guides/top_page/"));
+
+            List<ElementHandle> langItems = page.querySelectorAll(".lang-item");
+            assertEquals(2, langItems.size(),
+                    "Language switcher must contain exactly 2 .lang-item elements " +
+                    "(ja + en as configured in nigsc_homepage2)");
+        }
+
+        @Test
+        @DisplayName("M-2: English link on /guides/software/software_update_info/ resolves to /en/ equivalent")
+        void deepJapanesePage_englishLinkResolvesCorrectly() {
+            // Verify that the locale-switcher href for a deep Japanese page correctly
+            // points to the mirrored English page path
+            page.navigate(url("/guides/software/software_update_info/"));
+
+            ElementHandle enLink = page.querySelectorAll(".lang-item").stream()
+                    .filter(el -> {
+                        String text = el.textContent();
+                        return text != null && text.contains("English");
+                    })
+                    .findFirst().orElse(null);
+            assertNotNull(enLink,
+                    "An 'English' .lang-item must exist on /guides/software/software_update_info/");
+
+            String href = enLink.getAttribute("href");
+            assertNotNull(href, "English lang-item must have an href attribute");
+
+            // Resolve the relative href to an absolute URL
+            String resolvedUrl = (String) page.evaluate(
+                    "href => new URL(href, document.baseURI).href", href);
+            assertTrue(resolvedUrl.contains("/en/guides/software/software_update_info/"),
+                    "English link from /guides/software/software_update_info/ must resolve to " +
+                    "/en/guides/software/software_update_info/, got: " + resolvedUrl);
+        }
+
+        @Test
+        @DisplayName("M-3: alternate locale deep page /en/guides/software/software_update_info/ returns 200")
+        void alternateLocaleDeepPage_returns200() {
+            Response resp = page.navigate(url("/en/guides/software/software_update_info/"));
+            assertEquals(200, resp.status(),
+                    "GET /en/guides/software/software_update_info/ must return 200 " +
+                    "(English alternate locale deep page must be built and served)");
         }
     }
 }

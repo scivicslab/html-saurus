@@ -2,11 +2,6 @@ package com.scivicslab.htmlsaurus;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.store.NIOFSDirectory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -31,6 +26,7 @@ public class PortalServer {
 
     private final List<Project> projects;
     private final Map<String, Project> projectMap;
+    private final Map<String, LuceneSearcher> searchers = new LinkedHashMap<>();
     private final int port;
     private final boolean production;
     private final Path worksDir;
@@ -52,6 +48,7 @@ public class PortalServer {
             Project proj = new Project(name, p, p.resolve("static-html"), p.resolve("search-index"));
             projects.add(proj);
             projectMap.put(name, proj);
+            searchers.put(name, new LuceneSearcher(proj.indexDir()));
         }
     }
 
@@ -62,7 +59,7 @@ public class PortalServer {
      * @throws IOException if the server socket cannot be opened
      */
     public HttpServer start() throws IOException {
-        var server = HttpServer.create(new InetSocketAddress(port), 0);
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         server.createContext("/", this::handleAll);
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
@@ -85,8 +82,8 @@ public class PortalServer {
             return;
         }
 
-        // Reload API: POST /api/reload — rescans worksDir and refreshes the project list
-        if (path.equals("/api/reload")) {
+        // Reload API: POST /api/reload (development mode only)
+        if (!production && path.equals("/api/reload")) {
             handleReload(ex);
             return;
         }
@@ -612,22 +609,18 @@ public class PortalServer {
 
     /** Queries a single project's Lucene index and appends matching results to the output list. */
     private void collectHits(String queryStr, Project proj, List<Map<String, String>> out) {
-        try (var dir = new NIOFSDirectory(proj.indexDir());
-             var reader = DirectoryReader.open(dir)) {
-            var searcher = new IndexSearcher(reader);
-            var parser = new MultiFieldQueryParser(
-                new String[]{"title_idx", "doc_id_idx", "body"}, new JapaneseAnalyzer(),
+        LuceneSearcher s = searchers.get(proj.name());
+        if (s == null) return;
+        try {
+            var hits = s.search(queryStr, 1000,
+                new String[]{"title_idx", "doc_id_idx", "body"},
                 Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
-            parser.setDefaultOperator(MultiFieldQueryParser.AND_OPERATOR);
-            var hits = searcher.search(parser.parse(MultiFieldQueryParser.escape(queryStr)), 1000);
-            var stored = searcher.storedFields();
-            for (var hit : hits.scoreDocs) {
-                var doc = stored.document(hit.doc);
+            for (var hit : hits) {
                 out.add(Map.of(
                     "project",  proj.name(),
-                    "title",    doc.get("title") != null ? doc.get("title") : "",
-                    "pagePath", doc.get("path")  != null ? doc.get("path")  : "",
-                    "summary",  doc.get("summary") != null ? doc.get("summary") : ""
+                    "title",    hit.title(),
+                    "pagePath", hit.path(),
+                    "summary",  hit.summary()
                 ));
             }
         } catch (Exception e) {
@@ -642,27 +635,8 @@ public class PortalServer {
      * Returns results from a single project's index as a JSON array.
      */
     private void handleSearch(HttpExchange ex, Project proj) throws IOException {
-        String q = "";
-        String raw = ex.getRequestURI().getRawQuery();
-        if (raw != null) {
-            for (String kv : raw.split("&")) {
-                if (kv.startsWith("q=")) {
-                    q = URLDecoder.decode(kv.substring(2), StandardCharsets.UTF_8);
-                    break;
-                }
-            }
-        }
-        byte[] body = searchWithProject(q, proj).getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
-        ex.sendResponseHeaders(200, body.length);
-        try (var out = ex.getResponseBody()) { out.write(body); }
-    }
-
-    /** Convenience overload that searches an index directory without project context. */
-    private String search(String queryStr, Path indexDir) {
-        return searchWithProject(queryStr, new Project("", null, null, indexDir));
+        String q = HttpUtils.queryParam(ex, "q");
+        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", searchWithProject(q, proj));
     }
 
     /**
@@ -670,30 +644,23 @@ public class PortalServer {
      * as a JSON array. Each result includes title, path (prefixed with project name), and summary.
      */
     private String searchWithProject(String queryStr, Project proj) {
-        if (queryStr.isBlank()) return "[]";
-        try (var dir = new NIOFSDirectory(proj.indexDir());
-             var reader = DirectoryReader.open(dir)) {
-            var searcher = new IndexSearcher(reader);
-            var parser = new MultiFieldQueryParser(
+        LuceneSearcher s = searchers.get(proj.name());
+        if (s == null) return "[]";
+        try {
+            var hits = s.search(queryStr, 20,
                 new String[]{"title_idx", "body"},
-                new JapaneseAnalyzer(),
                 Map.of("title_idx", 3.0f, "body", 1.0f));
-            parser.setDefaultOperator(MultiFieldQueryParser.AND_OPERATOR);
-            var q = parser.parse(MultiFieldQueryParser.escape(queryStr));
-            var hits = searcher.search(q, 20);
-            var stored = searcher.storedFields();
             var sb = new StringBuilder("[");
             boolean first = true;
-            for (var hit : hits.scoreDocs) {
-                var doc = stored.document(hit.doc);
+            for (var hit : hits) {
                 if (!first) sb.append(",");
                 first = false;
                 sb.append("{")
-                  .append("\"title\":").append(jsonStr(doc.get("title"))).append(",")
-                  .append("\"path\":").append(jsonStr((proj.name().isEmpty() ? "" : "/" + proj.name()) + doc.get("path"))).append(",")
-                  .append("\"pagePath\":").append(jsonStr(doc.get("path"))).append(",")
+                  .append("\"title\":").append(jsonStr(hit.title())).append(",")
+                  .append("\"path\":").append(jsonStr((proj.name().isEmpty() ? "" : "/" + proj.name()) + hit.path())).append(",")
+                  .append("\"pagePath\":").append(jsonStr(hit.path())).append(",")
                   .append("\"project\":").append(jsonStr(proj.name())).append(",")
-                  .append("\"summary\":").append(jsonStr(doc.get("summary")))
+                  .append("\"summary\":").append(jsonStr(hit.summary()))
                   .append("}");
             }
             return sb.append("]").toString();
@@ -754,49 +721,9 @@ public class PortalServer {
             .collect(java.util.stream.Collectors.joining(" › "));
     }
 
-    /** Extracts a single query parameter value from the request URL, returning empty string if absent. */
-    private String queryParam(HttpExchange ex, String key) {
-        String raw = ex.getRequestURI().getRawQuery();
-        if (raw == null) return "";
-        for (String kv : raw.split("&")) {
-            if (kv.startsWith(key + "=")) {
-                return URLDecoder.decode(kv.substring(key.length() + 1), StandardCharsets.UTF_8);
-            }
-        }
-        return "";
-    }
-
-    /** Sends an HTTP response with the given status code, content type, and UTF-8 body. */
-    private void respond(HttpExchange ex, int code, String ct, String body) throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().set("Content-Type", ct);
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
-        if (ct.startsWith("text/html")) {
-            ex.getResponseHeaders().set("Content-Security-Policy",
-                "default-src 'self'; " +
-                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
-                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
-                "img-src 'self' data:; " +
-                "font-src 'self' https://cdn.jsdelivr.net; " +
-                "connect-src 'self'; " +
-                "frame-ancestors 'none';");
-        }
-        ex.sendResponseHeaders(code, bytes.length);
-        try (var out = ex.getResponseBody()) { out.write(bytes); }
-    }
-
-    /** Maps a file path's extension to the corresponding MIME type for the HTTP Content-Type header. */
-    private String contentType(String path) {
-        if (path.endsWith(".html")) return "text/html; charset=UTF-8";
-        if (path.endsWith(".css"))  return "text/css";
-        if (path.endsWith(".js"))   return "application/javascript";
-        if (path.endsWith(".json")) return "application/json";
-        if (path.endsWith(".png"))  return "image/png";
-        if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
-        if (path.endsWith(".svg"))  return "image/svg+xml";
-        return "application/octet-stream";
-    }
+    private String queryParam(HttpExchange ex, String key) { return HttpUtils.queryParam(ex, key); }
+    private void respond(HttpExchange ex, int code, String ct, String body) throws IOException { HttpUtils.respond(ex, code, ct, body); }
+    private String contentType(String path) { return HttpUtils.contentType(path); }
 
     /**
      * Reads the Docusaurus configuration file and extracts left-positioned navbar labels.
@@ -840,15 +767,6 @@ public class PortalServer {
         }
     }
 
-    /** Escapes HTML special characters ({@code &}, {@code <}, {@code >}) in a string. */
-    private String escHtml(String s) {
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-    }
-
-    /** Wraps a string in JSON double quotes, escaping backslashes, quotes, and newlines. */
-    private String jsonStr(String s) {
-        if (s == null) s = "";
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
-                       .replace("\n", "\\n").replace("\r", "") + "\"";
-    }
+    private static String escHtml(String s) { return HttpUtils.escapeHtml(s); }
+    private String jsonStr(String s) { return HttpUtils.jsonStr(s); }
 }

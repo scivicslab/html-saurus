@@ -1,16 +1,11 @@
 package com.scivicslab.htmlsaurus;
 
-import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension;
-import org.commonmark.ext.gfm.tables.TablesExtension;
-import org.commonmark.ext.heading.anchor.HeadingAnchorExtension;
-import org.commonmark.parser.Parser;
-import org.commonmark.renderer.html.HtmlRenderer;
-
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -28,28 +23,14 @@ public class SiteBuilder {
 
     private final Path docsDir;
     private final Path outDir;
-    private final Parser parser;
-    private final HtmlRenderer renderer;
+    private final MarkdownConverter converter;
+    private final NavTreeBuilder navBuilder;
 
-    /** Matches numeric prefix patterns like {@code 01_getting-started}. */
-    private static final Pattern NUM_PREFIX       = Pattern.compile("^(\\d+)_(.*)$");
-    /** Matches the opening line of a Docusaurus admonition (e.g., {@code :::note[Title]}). */
-    private static final Pattern ADMONITION_START = Pattern.compile("^:::(\\w+)(?:\\[([^\\]]*)])?\\s*$");
-    /** Matches the closing line of a Docusaurus admonition ({@code :::}). */
-    private static final Pattern ADMONITION_END   = Pattern.compile("^:::\\s*$");
+    /** Page CSS loaded from {@code page.css} resource at class-load time. */
+    private static final String PAGE_CSS = loadResource("page.css");
 
-    /**
-     * Represents a node in the site navigation tree.
-     *
-     * @param label    display label for this node
-     * @param href     URL path used for navigation: the same-name page URL for Pattern 2 categories,
-     *                 the first reachable leaf URL for plain categories, or the page URL for leaves
-     * @param isDir    {@code true} if this node represents a category (directory)
-     * @param children child nodes (empty for leaf pages)
-     * @param catLink  non-null only for Pattern 2 categories (dir/dir.md + subdirs); holds the
-     *                 clickable link URL shown on the sidebar category header
-     */
-    record SiteNode(String label, String href, boolean isDir, List<SiteNode> children, String catLink) {}
+    /** Matches numeric prefix patterns like {@code 01_getting-started} for path utilities. */
+    private static final Pattern NUM_PREFIX = Pattern.compile("^(\\d+)_(.*)$");
 
     private final String siteName;
     private final boolean production;
@@ -130,13 +111,8 @@ public class SiteBuilder {
         this.customCss    = production ? readOptional(projectRoot.resolve("html-saurus.css"))    : null;
         this.customHeader = production ? readOptional(projectRoot.resolve("html-saurus-header.html")) : null;
         this.customFooter = production ? readOptional(projectRoot.resolve("html-saurus-footer.html")) : null;
-        var extensions = List.of(
-            TablesExtension.create(),
-            StrikethroughExtension.create(),
-            HeadingAnchorExtension.create()
-        );
-        this.parser = Parser.builder().extensions(extensions).build();
-        this.renderer = HtmlRenderer.builder().extensions(extensions).build();
+        this.converter = new MarkdownConverter();
+        this.navBuilder = new NavTreeBuilder(docsDir, production, converter);
     }
 
     /** Returns a human-readable display label for a locale code. */
@@ -179,14 +155,16 @@ public class SiteBuilder {
         }
         Files.createDirectories(outDir);
 
-        SiteNode root = reorderFromDocusaurusConfig(buildTree(docsDir));
+        SiteNode root = navBuilder.build();
 
+        // Collect all source files; copy non-Markdown assets and create directories immediately.
+        List<Path[]> mdFiles = new ArrayList<>(); // [mdFile, rel]
         Files.walkFileTree(docsDir, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 Path rel = docsDir.relativize(file);
                 if (file.toString().endsWith(".md")) {
-                    convertPage(file, rel, root);
+                    mdFiles.add(new Path[]{file, rel});
                 } else {
                     Path dest = outDir.resolve(cleanRelPath(rel.toString().replace('\\', '/')));
                     Files.createDirectories(dest.getParent());
@@ -199,6 +177,15 @@ public class SiteBuilder {
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 Files.createDirectories(outDir.resolve(cleanRelPath(docsDir.relativize(dir).toString().replace('\\', '/'))));
                 return FileVisitResult.CONTINUE;
+            }
+        });
+
+        // Convert Markdown files in parallel; output directories already exist from above.
+        mdFiles.parallelStream().forEach(pair -> {
+            try {
+                convertPage(pair[0], pair[1], root);
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
             }
         });
 
@@ -217,254 +204,6 @@ public class SiteBuilder {
     }
 
     /**
-     * Reorders top-level navbar sections according to the order defined in
-     * {@code docusaurus.config.ts} (or {@code .js}). Falls back to the original
-     * order when the config files are absent or unparseable.
-     *
-     * <p>Reads {@code docusaurus.config.ts/js} for navbar item order (sidebarId + label),
-     * then {@code sidebars.ts/js} to map each sidebarId to a directory name.
-     */
-    private SiteNode reorderFromDocusaurusConfig(SiteNode root) {
-        Path projectRoot = docsDir.getParent();
-        Path configFile = resolveFirst(projectRoot, "docusaurus.config.ts", "docusaurus.config.js");
-        Path sidebarsFile = resolveFirst(projectRoot, "sidebars.ts", "sidebars.js");
-        if (configFile == null || sidebarsFile == null) return root;
-
-        try {
-            String configContent = Files.readString(configFile);
-            String sidebarsContent = Files.readString(sidebarsFile);
-
-            // Extract sidebarId -> dirName from sidebars.
-            // Find each autogenerated dirName and locate the nearest preceding sidebar key.
-            Map<String, String> sidebarIdToDirName = new HashMap<>();
-            var dirNamePat = Pattern.compile("dirName:\\s*['\"]([^'\"]+)['\"]");
-            var sidebarKeyPat = Pattern.compile("(\\w+):\\s*\\[");
-            var dnMatcher = dirNamePat.matcher(sidebarsContent);
-            while (dnMatcher.find()) {
-                String preceding = sidebarsContent.substring(0, dnMatcher.start());
-                var km = sidebarKeyPat.matcher(preceding);
-                String lastKey = null;
-                while (km.find()) lastKey = km.group(1);
-                if (lastKey != null && !sidebarIdToDirName.containsKey(lastKey)) {
-                    sidebarIdToDirName.put(lastKey, dnMatcher.group(1));
-                }
-            }
-
-            // Collect navbar items (sidebarId-based and docId-based) with their position in config.
-            record NavItem(int pos, String dirName, String label) {}
-            List<NavItem> navItems = new ArrayList<>();
-
-            var sidebarItemPat = Pattern.compile(
-                "sidebarId:\\s*['\"]([^'\"]+)['\"].*?label:\\s*['\"]([^'\"]+)['\"]",
-                Pattern.DOTALL);
-            var m1 = sidebarItemPat.matcher(configContent);
-            while (m1.find()) {
-                String dir = sidebarIdToDirName.get(m1.group(1));
-                if (dir != null) navItems.add(new NavItem(m1.start(), dir, m1.group(2)));
-            }
-
-            var docItemPat = Pattern.compile(
-                "docId:\\s*['\"]([^'\"]+)['\"].*?label:\\s*['\"]([^'\"]+)['\"]",
-                Pattern.DOTALL);
-            var m2 = docItemPat.matcher(configContent);
-            while (m2.find()) {
-                String dir = m2.group(1).split("/")[0];
-                if (!dir.isEmpty()) navItems.add(new NavItem(m2.start(), dir, m2.group(2)));
-            }
-
-            navItems.sort(Comparator.comparingInt(NavItem::pos));
-
-            // Build ordered dirName list with labels (deduplicated)
-            List<String> orderedDirNames = new ArrayList<>();
-            Map<String, String> dirNameToLabel = new HashMap<>();
-            for (NavItem item : navItems) {
-                if (!orderedDirNames.contains(item.dirName())) {
-                    orderedDirNames.add(item.dirName());
-                    dirNameToLabel.put(item.dirName(), item.label());
-                }
-            }
-            if (orderedDirNames.isEmpty()) return root;
-
-            // Map children by directory name (first path segment of href)
-            Map<String, SiteNode> childByDirName = new LinkedHashMap<>();
-            List<SiteNode> unmatchedChildren = new ArrayList<>();
-            for (SiteNode child : root.children()) {
-                String dirName = dirNameForSection(child, root);
-                if (!dirName.isEmpty()) {
-                    childByDirName.put(dirName, child);
-                } else {
-                    unmatchedChildren.add(child);
-                }
-            }
-
-            // Reorder and apply labels from docusaurus config
-            List<SiteNode> reordered = new ArrayList<>();
-            for (String dirName : orderedDirNames) {
-                SiteNode child = childByDirName.remove(dirName);
-                if (child != null) {
-                    String newLabel = dirNameToLabel.get(dirName);
-                    if (newLabel != null && !newLabel.equals(child.label())) {
-                        child = new SiteNode(newLabel, child.href(), child.isDir(), child.children(), child.catLink());
-                    }
-                    reordered.add(child);
-                }
-            }
-            reordered.addAll(childByDirName.values()); // remaining not in config
-            reordered.addAll(unmatchedChildren);
-
-            return new SiteNode(root.label(), root.href(), root.isDir(), reordered, root.catLink());
-        } catch (IOException e) {
-            return root;
-        }
-    }
-
-    /** Returns the first existing file from the given candidates, or {@code null}. */
-    private static Path resolveFirst(Path dir, String... names) {
-        for (String name : names) {
-            Path p = dir.resolve(name);
-            if (Files.exists(p)) return p;
-        }
-        return null;
-    }
-
-    /**
-     * Recursively builds the navigation tree from the docs directory structure.
-     * Handles Docusaurus conventions: numeric prefixes for ordering, {@code _category_.json}
-     * for category labels, and same-name Markdown files as category index pages.
-     *
-     * @param dir the directory to scan
-     * @return root {@link SiteNode} representing the directory
-     * @throws IOException if file I/O fails
-     */
-    private SiteNode buildTree(Path dir) throws IOException {
-        List<Path> entries;
-        try (var stream = Files.list(dir)) {
-            entries = stream.sorted(Comparator.comparing(p -> sortKey(p.getFileName().toString()))).toList();
-        }
-
-        String dirBase = stripNumericPrefix(dir.getFileName().toString());
-        List<Path> mdFiles = entries.stream()
-            .filter(e -> !Files.isDirectory(e) && e.toString().endsWith(".md"))
-            .toList();
-        boolean hasSubdirs = entries.stream().anyMatch(Files::isDirectory);
-
-        // Find a same-name .md file if it exists
-        Path sameNameMd = null;
-        for (Path md : mdFiles) {
-            String mdBase = stripNumericPrefix(stripExtension(md.getFileName().toString()));
-            if (dirBase.equals(mdBase)) {
-                sameNameMd = md;
-                break;
-            }
-        }
-
-        // Docusaurus convention: if the directory contains ONLY a same-name .md file
-        // (no subdirs, no other .md files), treat it as a direct leaf page link.
-        // URL is based on the directory path (not the file path), matching Docusaurus behavior.
-        if (sameNameMd != null && !hasSubdirs && mdFiles.size() == 1) {
-            String[] fm = parseFrontmatter(Files.readString(sameNameMd));
-            String title = fm[0].isBlank() ? dirBase : fm[0];
-            Path dirRel = docsDir.relativize(dir);
-            String href = "/" + cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
-            return new SiteNode(title, href, false, List.of(), null);
-        }
-
-        // Build category. If there's a same-name .md (Pattern 2: same-name .md + subdirs),
-        // use it as the category label source and make the category header a clickable link.
-        // The same-name .md is NOT added as a child item (Docusaurus convention).
-        String label;
-        String catHref = null;
-        List<SiteNode> children = new ArrayList<>();
-        if (sameNameMd != null) {
-            String[] fm = parseFrontmatter(Files.readString(sameNameMd));
-            label = fm[0].isBlank() ? dirBase : fm[0];
-            // Category header links to the directory URL (same rule as Pattern 1)
-            Path dirRel = docsDir.relativize(dir);
-            catHref = "/" + cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
-        } else {
-            label = readCategoryLabel(dir);
-        }
-
-        for (Path entry : entries) {
-            if (entry.equals(sameNameMd)) continue; // not shown as child (Docusaurus convention)
-            if (Files.isDirectory(entry)) {
-                children.add(buildTree(entry));
-            } else if (entry.toString().endsWith(".md")) {
-                String[] fm = parseFrontmatter(Files.readString(entry));
-                String title = fm[0].isBlank()
-                    ? stripNumericPrefix(stripExtension(entry.getFileName().toString())) : fm[0];
-                Path rel = docsDir.relativize(entry);
-                String href = "/" + cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", "")) + (production ? "/" : ".html");
-                children.add(new SiteNode(title, href, false, List.of(), null));
-            }
-        }
-
-        // href is always the navigation target (for navbar and index.html redirect);
-        // catLink is non-null only for Pattern 2, used by renderSidebar for the clickable header
-        String navHref = catHref != null ? catHref : firstHref(children);
-        return new SiteNode(label, navHref, true, children, catHref);
-    }
-
-    /**
-     * Finds the href of the first leaf page in a subtree (depth-first).
-     * Used to determine the landing page for category nodes.
-     *
-     * @param nodes list of child nodes to search
-     * @return the href of the first leaf page, or {@code null} if none found
-     */
-    private String firstHref(List<SiteNode> nodes) {
-        for (SiteNode n : nodes) {
-            if (!n.isDir()) return n.href();
-            String h = firstHref(n.children());
-            if (h != null) return h;
-        }
-        return null;
-    }
-
-    /** Generates a zero-padded sort key from a numeric prefix (e.g., {@code 3_foo} → {@code 0000000003_foo}). */
-    private String sortKey(String name) {
-        var m = NUM_PREFIX.matcher(name);
-        if (m.matches()) return String.format("%010d_%s", Long.parseLong(m.group(1)), m.group(2));
-        return name;
-    }
-
-    /** Strips a leading numeric prefix (e.g., {@code 01_intro} → {@code intro}). */
-    static String stripNumericPrefix(String name) {
-        var m = NUM_PREFIX.matcher(name);
-        return m.matches() ? m.group(2) : name;
-    }
-
-    /**
-     * Strips numeric prefixes from every segment of a relative path.
-     * E.g., {@code 010_history/020_intro/file.html} → {@code history/intro/file.html}
-     */
-    static String cleanRelPath(String relPath) {
-        String[] segments = relPath.split("/");
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < segments.length; i++) {
-            if (i > 0) sb.append('/');
-            sb.append(stripNumericPrefix(segments[i]));
-        }
-        return sb.toString();
-    }
-
-    /**
-     * Reads a category label from a Docusaurus {@code _category_.json} file,
-     * falling back to the directory name with its numeric prefix stripped.
-     */
-    private String readCategoryLabel(Path dir) {
-        Path cat = dir.resolve("_category_.json");
-        if (Files.exists(cat)) {
-            try {
-                String json = Files.readString(cat);
-                var m = Pattern.compile("\"label\"\\s*:\\s*\"([^\"]+)\"").matcher(json);
-                if (m.find()) return m.group(1);
-            } catch (IOException ignored) {}
-        }
-        return stripNumericPrefix(dir.getFileName().toString());
-    }
-
-    /**
      * Converts a single Markdown file to a full HTML page with navbar, sidebar, and TOC.
      *
      * @param mdFile the source Markdown file
@@ -474,11 +213,11 @@ public class SiteBuilder {
      */
     private void convertPage(Path mdFile, Path rel, SiteNode root) throws IOException {
         String source = Files.readString(mdFile);
-        String[] fm = parseFrontmatter(source);
+        String[] fm = converter.parseFrontmatter(source);
         String title = fm[0].isBlank()
             ? stripNumericPrefix(stripExtension(mdFile.getFileName().toString())) : fm[0];
         String body = fm[1];
-        String contentHtml = convertMarkdown(body);
+        String contentHtml = converter.convertMarkdown(body);
 
         // Detect same-name pattern: dir/dir.md (Docusaurus convention).
         // Covers both Pattern 1 (only .md, no subdirs) and Pattern 2 (same-name .md + subdirs).
@@ -516,153 +255,37 @@ public class SiteBuilder {
         System.out.println("  " + outFile);
     }
 
-    /**
-     * Converts Markdown to HTML, handling Docusaurus-style admonitions ({@code :::note ... :::})
-     * as a pre-processing step before passing through the CommonMark parser.
-     * Admonitions inside fenced code blocks are passed through unchanged.
-     */
-    private String convertMarkdown(String markdown) {
-        StringBuilder result = new StringBuilder();
-        StringBuilder normalBuffer = new StringBuilder();
-        String[] lines = markdown.split("\n", -1);
-        int i = 0;
-        String openFence = null; // non-null when inside a fenced code block
-        while (i < lines.length) {
-            String line = lines[i];
-            // Track fenced code block boundaries (``` or ~~~~)
-            if (openFence == null) {
-                java.util.regex.Matcher fence = java.util.regex.Pattern
-                    .compile("^(`{3,}|~{3,}).*$").matcher(line);
-                if (fence.matches()) {
-                    openFence = fence.group(1); // remember the opening fence characters
-                    normalBuffer.append(line).append("\n");
-                    i++;
-                    continue;
-                }
-            } else {
-                // Inside a fence: look for a closing fence of the same type and length
-                if (line.startsWith(openFence) && line.trim().equals(openFence)) {
-                    openFence = null;
-                }
-                normalBuffer.append(line).append("\n");
-                i++;
-                continue;
-            }
-
-            Matcher m = ADMONITION_START.matcher(line);
-            if (m.matches()) {
-                // Flush pending normal markdown
-                if (normalBuffer.length() > 0) {
-                    result.append(renderMarkdown(normalBuffer.toString()));
-                    normalBuffer.setLength(0);
-                }
-                String type = m.group(1).toLowerCase();
-                String customTitle = m.group(2); // null if not specified
-                StringBuilder inner = new StringBuilder();
-                i++;
-                while (i < lines.length && !ADMONITION_END.matcher(lines[i]).matches()) {
-                    inner.append(lines[i]).append("\n");
-                    i++;
-                }
-                result.append(renderAdmonition(type, customTitle, inner.toString()));
-            } else {
-                normalBuffer.append(line).append("\n");
-            }
-            i++;
-        }
-        if (normalBuffer.length() > 0) {
-            result.append(renderMarkdown(normalBuffer.toString()));
-        }
-        return result.toString();
-    }
-
-    /** Renders a block of Markdown to HTML, converting fenced mermaid code blocks to {@code <div class="mermaid">}. */
-    private String renderMarkdown(String markdown) {
-        var doc = parser.parse(markdown);
-        String html = renderer.render(doc);
-        // Replace fenced mermaid code blocks with mermaid div
-        html = html.replaceAll(
-            "(?s)<pre><code class=\"language-mermaid\">(.*?)</code></pre>",
-            "<div class=\"mermaid\">$1</div>"
-        );
-        // Docusaurus-style heading ID override: ## Title {#my-id} sets id="my-id" on the element.
-        // The {#id} marker is removed from the visible heading text.
-        html = html.replaceAll(
-            "(<h[1-6][^>]*?) id=\"[^\"]*\"([^>]*>)(.*?)\\{#([^}]+)\\}(.*?)(</h[1-6]>)",
-            "$1 id=\"$4\"$2$3$5$6"
-        );
-        return html;
+    /** Strips a leading numeric prefix (e.g., {@code 01_intro} → {@code intro}). */
+    static String stripNumericPrefix(String name) {
+        var m = NUM_PREFIX.matcher(name);
+        return m.matches() ? m.group(2) : name;
     }
 
     /**
-     * Renders a Docusaurus-style admonition as a styled HTML block.
-     * Supports types: note, info, tip, warning, caution, danger.
+     * Strips numeric prefixes from every segment of a relative path.
+     * E.g., {@code 010_history/020_intro/file.html} → {@code history/intro/file.html}
      */
-    private String renderAdmonition(String type, String customTitle, String innerMarkdown) {
-        Map<String, String[]> types = Map.of(
-            "note",    new String[]{"Note",    "#4cb3d4", "#eef9fd"},
-            "info",    new String[]{"Info",    "#2196f3", "#ebf8ff"},
-            "tip",     new String[]{"Tip",     "#009400", "#e6f6e6"},
-            "warning", new String[]{"Warning", "#e6a700", "#fff8e6"},
-            "caution", new String[]{"Caution", "#e6a700", "#fff8e6"},
-            "danger",  new String[]{"Danger",  "#e13238", "#ffebec"}
-        );
-        String[] meta = types.getOrDefault(type, new String[]{
-            capitalize(type), "#888", "#f8f8f8"
-        });
-        String title = customTitle != null ? customTitle : meta[0];
-        String color = meta[1];
-        String bg    = meta[2];
-        String innerHtml = renderMarkdown(innerMarkdown.strip());
-        return String.format(
-            "<div class=\"admonition admonition-%s\" style=\"background:%s;border-left:4px solid %s;\">" +
-            "<div class=\"admonition-title\" style=\"color:%s;\">%s</div>" +
-            "<div class=\"admonition-body\">%s</div></div>\n",
-            escapeHtml(type), bg, color, color, escapeHtml(title), innerHtml
-        );
-    }
-
-    private String capitalize(String s) {
-        return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
-    }
-
-    /**
-     * Extracts YAML frontmatter and body from a Markdown source.
-     * If a leading {@code # heading} is present, it is used as the title (when not set in frontmatter)
-     * and stripped from the body to avoid duplication with the rendered {@code <h1>}.
-     *
-     * @param source the raw Markdown source
-     * @return a two-element array: {@code [title, body]}
-     */
-    private String[] parseFrontmatter(String source) {
-        String title = "";
-        String body = source;
-        if (source.startsWith("---")) {
-            int end = source.indexOf("\n---", 3);
-            if (end != -1) {
-                String fm = source.substring(3, end);
-                body = source.substring(end + 4).stripLeading();
-                for (String line : fm.split("\n")) {
-                    if (line.startsWith("title:")) {
-                        title = line.substring(6).trim().replaceAll("^\"|\"$", "");
-                    }
-                }
-            }
+    static String cleanRelPath(String relPath) {
+        String[] segments = relPath.split("/");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < segments.length; i++) {
+            if (i > 0) sb.append('/');
+            sb.append(stripNumericPrefix(segments[i]));
         }
-        // If body starts with a # heading, use it as title (if none from frontmatter)
-        // and always strip it so it doesn't duplicate the <h1> we render explicitly.
-        if (body.startsWith("# ")) {
-            int nl = body.indexOf('\n');
-            String headingTitle = (nl >= 0 ? body.substring(2, nl) : body.substring(2)).trim();
-            body = nl >= 0 ? body.substring(nl + 1).stripLeading() : "";
-            if (title.isBlank()) title = headingTitle;
-        }
-        return new String[]{title, body};
+        return sb.toString();
     }
 
-    private String stripExtension(String filename) {
+    static String stripExtension(String filename) {
         int dot = filename.lastIndexOf('.');
         return dot >= 0 ? filename.substring(0, dot) : filename;
+    }
+
+    /** Derives the directory-name segment for a top-level nav section from its href. */
+    static String dirNameForSection(SiteNode section) {
+        if (section.href() == null) return "";
+        String h = section.href().replaceFirst("^/", "");
+        int slash = h.indexOf('/');
+        return slash >= 0 ? h.substring(0, slash) : h.replace(".html", "");
     }
 
     /**
@@ -693,186 +316,9 @@ public class SiteBuilder {
                 integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+"
                 crossorigin="anonymous">
               <style>
-                /* ---- Themes (CSS variables) ---- */
-                :root {
-                  --c-text:#1c1e21; --c-bg:#fff; --c-sidebar-bg:#f6f7f8; --c-border:#e3e4e5;
-                  --c-hover:#e3e4e5; --c-nav-bg:#1c1e21; --c-nav-border:#333; --c-nav-accent:#2e8555;
-                  --c-act-bg:#e8f4fd; --c-act-text:#1877f2; --c-cat-label:#444; --c-arrow:#888;
-                  --c-pre-bg:#f6f7f8; --c-code-bg:#f0f0f0; --c-th-bg:#f6f7f8;
-                  --c-bq-border:#ddd; --c-bq-text:#555; --c-h2-border:#eee;
-                }
-                [data-theme="warm"] {
-                  --c-text:#2d1f00; --c-bg:#fdf6e3; --c-sidebar-bg:#f5ead0; --c-border:#d9c89a;
-                  --c-hover:#ecddb8; --c-nav-bg:#4a3820; --c-nav-border:#6b5030; --c-nav-accent:#c8860a;
-                  --c-act-bg:#fef3d0; --c-act-text:#b07a0a; --c-cat-label:#5c4010; --c-arrow:#a08050;
-                  --c-pre-bg:#f5ead0; --c-code-bg:#ede4c8; --c-th-bg:#f0e5c8;
-                  --c-bq-border:#c8a870; --c-bq-text:#6b5030; --c-h2-border:#ddd0a8;
-                }
-                [data-theme="blue"] {
-                  --c-text:#1a2540; --c-bg:#f0f4ff; --c-sidebar-bg:#e8edf8; --c-border:#c5d0e8;
-                  --c-hover:#d8e2f5; --c-nav-bg:#1a3a6b; --c-nav-border:#2a4a7b; --c-nav-accent:#4a9fe8;
-                  --c-act-bg:#ddeeff; --c-act-text:#1a6fd4; --c-cat-label:#2a3a60; --c-arrow:#6080b0;
-                  --c-pre-bg:#e8edf8; --c-code-bg:#dde4f5; --c-th-bg:#e2e8f5;
-                  --c-bq-border:#90aad8; --c-bq-text:#3a5080; --c-h2-border:#c8d5ee;
-                }
-                [data-theme="green"] {
-                  --c-text:#1a3020; --c-bg:#f0f8f0; --c-sidebar-bg:#e4f0e4; --c-border:#b8d8b8;
-                  --c-hover:#d0e8d0; --c-nav-bg:#1a4a2a; --c-nav-border:#2a5a3a; --c-nav-accent:#40c060;
-                  --c-act-bg:#d5f0d5; --c-act-text:#1a8040; --c-cat-label:#2a4a30; --c-arrow:#508050;
-                  --c-pre-bg:#e4f0e4; --c-code-bg:#d8ecd8; --c-th-bg:#deeede;
-                  --c-bq-border:#80c080; --c-bq-text:#3a5a3a; --c-h2-border:#c0dcc0;
-                }
-                [data-theme="red"] {
-                  --c-text:#3a1010; --c-bg:#fff5f5; --c-sidebar-bg:#fce8e8; --c-border:#e8c0c0;
-                  --c-hover:#f5d8d8; --c-nav-bg:#5a1a1a; --c-nav-border:#7a2a2a; --c-nav-accent:#e04040;
-                  --c-act-bg:#fde0e0; --c-act-text:#c02020; --c-cat-label:#5a2020; --c-arrow:#a06060;
-                  --c-pre-bg:#fce8e8; --c-code-bg:#f8dede; --c-th-bg:#faeaea;
-                  --c-bq-border:#d09090; --c-bq-text:#703030; --c-h2-border:#e8c8c8;
-                }
-                * { box-sizing: border-box; margin: 0; padding: 0; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                       font-size: 16px; color: var(--c-text); background: var(--c-bg);
-                       display: flex; flex-direction: column; min-height: 100vh; }
-                /* ---- Top navbar ---- */
-                header { background: var(--c-nav-bg); color: #fff; display: flex; align-items: center;
-                         padding: 0 1.5rem; height: 60px; position: sticky; top: 0; z-index: 100;
-                         border-bottom: 1px solid var(--c-nav-border); flex-shrink: 0; }
-                header .site-title { font-weight: 700; font-size: 1.1rem; color: #fff;
-                                     text-decoration: none; margin-right: 2rem; white-space: nowrap; }
-                header nav.top { display: flex; gap: 0; height: 100%%; flex: 1; }
-                header nav.top a { display: flex; align-items: center; padding: 0 1rem;
-                                   color: #ccc; text-decoration: none; font-size: 0.875rem;
-                                   border-bottom: 3px solid transparent; white-space: nowrap; }
-                header nav.top a:hover { color: #fff; }
-                header nav.top a.active { color: #fff; border-bottom-color: var(--c-nav-accent); }
-                /* ---- Theme switcher ---- */
-                #rebuild-btn { margin-left: auto; background: transparent; border: 1px solid #555;
-                               color: #ccc; border-radius: 4px; padding: 0.2rem 0.6rem;
-                               font-size: 0.8rem; cursor: pointer; white-space: nowrap; }
-                #rebuild-btn:hover:not(:disabled) { background: rgba(255,255,255,0.1); color: #fff; }
-                #rebuild-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-                #theme-sel { background: transparent; color: #ccc;
-                             border: 1px solid #666; border-radius: 4px; padding: 3px 6px;
-                             font-size: 0.8rem; cursor: pointer; }
-                #theme-sel option { background: #2c2c2c; color: #fff; }
-                .lang-dropdown { position: relative; margin-left: 0.5rem; }
-                .lang-btn { background: transparent; border: 1px solid #666; border-radius: 4px;
-                            color: #ccc; padding: 0.2rem 0.6rem; font-size: 0.8rem;
-                            cursor: pointer; white-space: nowrap; }
-                .lang-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
-                .lang-menu { display: none; position: absolute; right: 0; top: calc(100%% + 4px);
-                             background: #2c2c2c; border: 1px solid #555; border-radius: 6px;
-                             min-width: 120px; z-index: 300; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
-                .lang-dropdown.open .lang-menu { display: block; }
-                .lang-item { display: block; padding: 6px 14px; color: #ccc; text-decoration: none;
-                             font-size: 0.875rem; white-space: nowrap; }
-                .lang-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
-                .lang-item.active { color: var(--c-nav-accent, #25c2a0); font-weight: 600; }
-                /* ---- Search ---- */
-                #search-wrap { position: relative; margin-left: 1rem; }
-                #search-input { background: rgba(255,255,255,0.12); border: 1px solid #666; border-radius: 4px;
-                                padding: 4px 10px; color: #fff; font-size: 0.875rem; width: 200px; outline: none; }
-                #search-input::placeholder { color: #aaa; }
-                #search-input:focus { background: rgba(255,255,255,0.22); border-color: #aaa; width: 260px; transition: width 0.2s; }
-                #search-results { position: absolute; top: calc(100%% + 6px); right: 0; width: 400px;
-                                  background: var(--c-bg); border: 1px solid var(--c-border); border-radius: 6px;
-                                  box-shadow: 0 4px 20px rgba(0,0,0,0.18); z-index: 200;
-                                  display: none; max-height: 500px; overflow-y: auto; }
-                #search-results.open { display: block; }
-                .sr-item { padding: 10px 14px; border-bottom: 1px solid var(--c-border);
-                           text-decoration: none; display: block; color: var(--c-text); }
-                .sr-item:last-child { border-bottom: none; }
-                .sr-item:hover { background: var(--c-hover); }
-                .sr-title { font-weight: 600; font-size: 0.875rem; }
-                .sr-breadcrumb { font-size: 0.72rem; color: #2e8555; margin-top: 1px;
-                                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                .sr-summary { font-size: 0.8rem; color: #888; margin-top: 2px;
-                              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                .sr-empty { padding: 1rem; text-align: center; color: #888; font-size: 0.875rem; }
-                /* ---- Content area ---- */
-                .content-wrap { display: flex; flex: 1; overflow: hidden; }
-                /* ---- Sidebar ---- */
-                nav.side { width: 280px; min-width: 280px; background: var(--c-sidebar-bg);
-                           border-right: 1px solid var(--c-border); padding: 1rem;
-                           overflow-y: auto; height: calc(100vh - 60px); position: sticky; top: 60px; }
-                nav.side ul { list-style: none; }
-                nav.side ul li { margin: 1px 0; }
-                nav.side ul li a { display: block; padding: 3px 8px; border-radius: 4px; color: var(--c-text);
-                                   text-decoration: none; font-size: 0.875rem;
-                                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                nav.side ul li a:hover { background: var(--c-hover); }
-                nav.side ul li a.active { background: var(--c-act-bg); color: var(--c-act-text); font-weight: 600; }
-                .cat-header { display: flex; align-items: center; cursor: pointer; user-select: none;
-                              padding: 4px 8px; border-radius: 4px; margin-top: 4px; }
-                .cat-header:hover { background: var(--c-hover); }
-                .cat-label { font-weight: 600; font-size: 0.8rem; color: var(--c-cat-label); flex: 1; }
-                .cat-arrow { font-size: 0.65rem; color: var(--c-arrow); transition: transform 0.15s; }
-                .cat-children { overflow: hidden; padding-left: 12px; border-left: 2px solid var(--c-border);
-                                margin-left: 8px; display: none; }
-                .cat-children.open { display: block; }
-                /* ---- Main ---- */
-                main { flex: 1; padding: 2rem 3rem; max-width: 900px; overflow-y: auto; min-width: 0; }
-                /* ---- Right-side TOC ---- */
-                aside.toc { width: 220px; min-width: 220px; position: sticky; top: 60px;
-                            height: calc(100vh - 60px); overflow-y: auto; padding: 1.5rem 0.5rem 1rem 0;
-                            border-left: 1px solid var(--c-border); font-size: 0.8rem; }
-                aside.toc .toc-title { font-weight: 600; font-size: 0.75rem; text-transform: uppercase;
-                                       letter-spacing: 0.05em; color: var(--c-cat-label);
-                                       padding: 0 0.75rem; margin-bottom: 0.5rem; }
-                aside.toc ul { list-style: none; }
-                aside.toc li { margin: 0; }
-                aside.toc a { display: block; padding: 3px 0.75rem; color: var(--c-text); opacity: 0.7;
-                              text-decoration: none; border-left: 2px solid transparent; line-height: 1.4; }
-                aside.toc a:hover { opacity: 1; }
-                aside.toc a.toc-active { opacity: 1; border-left-color: var(--c-act-text); color: var(--c-act-text); font-weight: 600; }
-                aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
-                @media (max-width: 1100px) { aside.toc { display: none; } }
-                /* ---- Copy buttons ---- */
-                .copy-bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-                .copy-btn { background: var(--c-sidebar-bg); border: 1px solid var(--c-border); border-radius: 4px;
-                            padding: 4px 10px; font-size: 0.75rem; cursor: pointer; color: var(--c-text);
-                            transition: background 0.15s; }
-                .copy-btn:hover { background: var(--c-hover); }
-                .copy-btn.copied { background: #2e8555; color: #fff; border-color: #2e8555; }
-                main h1 { font-size: 2rem; margin-bottom: 1rem; }
-                main h2 { font-size: 1.5rem; margin: 1.5rem 0 0.75rem; border-bottom: 1px solid var(--c-h2-border); padding-bottom: 0.25rem; }
-                main h3 { font-size: 1.2rem; margin: 1.25rem 0 0.5rem; }
-                main h4 { font-size: 1rem; margin: 1rem 0 0.5rem; }
-                main p { margin: 0.75rem 0; line-height: 1.7; }
-                main ul, main ol { margin: 0.75rem 0 0.75rem 1.5rem; line-height: 1.7; }
-                .pre-container { position: relative; margin: 1rem 0; }
-                .pre-toolbar { display: flex; gap: 0.4rem; justify-content: flex-end;
-                               padding: 0.3rem 0.5rem; background: var(--c-pre-bg);
-                               border: 1px solid var(--c-border); border-bottom: none;
-                               border-radius: 6px 6px 0 0; }
-                .pre-toolbar button { background: var(--c-sidebar-bg); border: 1px solid var(--c-border);
-                                      border-radius: 3px; padding: 0.15rem 0.5rem; font-size: 0.75rem;
-                                      cursor: pointer; color: var(--c-text); }
-                .pre-toolbar button:hover { background: var(--c-hover); }
-                .pre-toolbar button.copied { background: #2e8555; color: #fff; border-color: #2e8555; }
-                .pre-toolbar button.active { background: var(--c-act-bg); color: var(--c-act-text); border-color: var(--c-act-text); }
-                main pre { background: var(--c-pre-bg); border: 1px solid var(--c-border); border-radius: 6px;
-                            padding: 1rem; overflow-x: auto; margin: 1rem 0; white-space: pre-wrap; }
-                .pre-container > pre { border-radius: 0 0 6px 6px; margin: 0; }
-                .pre-nowrap > pre { white-space: pre; }
-                main code { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.875em; }
-                main p code, main li code, main td code { background: var(--c-code-bg); padding: 1px 5px; border-radius: 3px; }
-                main table { border-collapse: collapse; width: 100%%; margin: 1rem 0; }
-                main th, main td { border: 1px solid var(--c-border); padding: 8px 12px; text-align: left; }
-                main th { background: var(--c-th-bg); font-weight: 600; }
-                main blockquote { border-left: 4px solid var(--c-bq-border); padding-left: 1rem; color: var(--c-bq-text); margin: 1rem 0; }
-                main img { max-width: 100%%; }
-                /* ---- Admonitions ---- */
-                .admonition { border-radius: 6px; padding: 0.75rem 1rem; margin: 1rem 0; }
-                .admonition-title { font-weight: 700; font-size: 0.875rem; text-transform: uppercase;
-                                    letter-spacing: 0.05em; margin-bottom: 0.5rem; }
-                .admonition-body > *:last-child { margin-bottom: 0; }
-                /* ---- Source footer ---- */
-                .source-footer { margin-top: 3rem; padding-top: 0.75rem; border-top: 1px solid var(--c-border);
-                                 font-size: 0.75rem; color: var(--c-arrow);
-                                 font-family: 'SFMono-Regular', Consolas, monospace; }
-              </style>
-              """.formatted(title));
+            """.formatted(title));
+        sb.append(PAGE_CSS);
+        sb.append("              </style>\n");
         if (customCss != null) {
             sb.append("<style id=\"html-saurus-custom\">\n")
               .append(customCss)
@@ -898,7 +344,7 @@ public class SiteBuilder {
             String sectionPath = "/" + section.label(); // not reliable; use href prefix instead
             // Determine if this section is active: currentPath starts with the section's subtree
             boolean active = topSection != null &&
-                topSection.equals("/" + dirNameForSection(section, root));
+                topSection.equals("/" + dirNameForSection(section));
             String href = section.href() != null ? prefix + section.href().replaceFirst("^/", "") : "#";
             sb.append("    <a href=\"").append(href).append("\"")
               .append(active ? " class=\"active\"" : "").append(">")
@@ -963,7 +409,7 @@ public class SiteBuilder {
         List<SiteNode> sidebarNodes = root.children();
         if (topSection != null) {
             for (SiteNode section : root.children()) {
-                if (section.isDir() && topSection.equals("/" + dirNameForSection(section, root))) {
+                if (section.isDir() && topSection.equals("/" + dirNameForSection(section))) {
                     sidebarNodes = section.children();
                     break;
                 }
@@ -993,7 +439,95 @@ public class SiteBuilder {
         sb.append(buildToc(content));
         sb.append("</div>\n");
 
-        sb.append("""
+        sb.append(pageScripts());
+
+        if (customFooter != null) sb.append(customFooter).append("\n");
+
+        sb.append("</body></html>\n");
+
+        String langAttr = (currentLocale != null) ? currentLocale
+                        : (defaultLocale != null)  ? defaultLocale
+                        : "ja";
+        return sb.toString()
+            .replace("YADOC_SEARCH_URL", prefix + "search")
+            .replace("YADOC_PROJECT", escapeJs(siteName))
+            .replace("YADOC_LANG", escapeHtml(langAttr));
+    }
+
+    /** Recursively renders the left navigation sidebar as nested HTML lists with collapsible categories. */
+    private void renderSidebar(StringBuilder sb, List<SiteNode> nodes, String prefix, String currentPath) {
+        sb.append("<ul>\n");
+        for (SiteNode node : nodes) {
+            if (node.isDir()) {
+                sb.append("<li>\n");
+                sb.append("  <div class=\"cat-header\" data-cat=\"").append(escapeHtml(node.href())).append("\">");
+                if (node.catLink() != null) {
+                    String catAbsHref = prefix + node.catLink().replaceFirst("^/", "");
+                    sb.append("<a href=\"").append(catAbsHref).append("\" class=\"cat-label\">")
+                      .append(escapeHtml(node.label())).append("</a>");
+                } else {
+                    sb.append("<span class=\"cat-label\">").append(escapeHtml(node.label())).append("</span>");
+                }
+                sb.append("<span class=\"cat-arrow\">▶</span>")
+                  .append("</div>\n");
+                sb.append("  <div class=\"cat-children\">\n");
+                renderSidebar(sb, node.children(), prefix, currentPath);
+                sb.append("  </div>\n</li>\n");
+            } else {
+                boolean active = currentPath.equals(node.href());
+                String href = prefix + node.href().replaceFirst("^/", "");
+                sb.append("<li><a href=\"").append(href).append("\"")
+                  .append(active ? " class=\"active\"" : "").append(">")
+                  .append(escapeHtml(node.label())).append("</a></li>\n");
+            }
+        }
+        sb.append("</ul>\n");
+    }
+
+    /** Matches {@code <h2>} and {@code <h3>} elements with {@code id} attributes for TOC extraction. */
+    private static final Pattern HEADING_PATTERN = Pattern.compile(
+        "<h([23])\\s[^>]*id=\"([^\"]+)\"[^>]*>(.*?)</h[23]>", Pattern.DOTALL);
+
+    /**
+     * Builds a right-side table of contents by extracting h2/h3 headings from the rendered HTML.
+     * Returns an empty string if no headings are found.
+     *
+     * @param contentHtml the rendered page content HTML
+     * @return HTML string for the {@code <aside class="toc">} element
+     */
+    private String buildToc(String contentHtml) {
+        var matcher = HEADING_PATTERN.matcher(contentHtml);
+        List<String[]> entries = new ArrayList<>(); // [level, id, text]
+        while (matcher.find()) {
+            String level = matcher.group(1);
+            String id = matcher.group(2);
+            String text = matcher.group(3).replaceAll("<[^>]+>", "").trim(); // strip inner HTML tags
+            entries.add(new String[]{level, id, text});
+        }
+        if (entries.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<aside class=\"toc\">\n");
+        sb.append("  <div class=\"toc-title\">On this page</div>\n");
+        sb.append("  <ul>\n");
+        for (String[] e : entries) {
+            String cls = e[0].equals("3") ? " class=\"toc-h3\"" : "";
+            sb.append("    <li").append(cls).append("><a href=\"#")
+              .append(escapeHtml(e[1])).append("\">")
+              .append(escapeHtml(e[2])).append("</a></li>\n");
+        }
+        sb.append("  </ul>\n");
+        sb.append("</aside>\n");
+        return sb.toString();
+    }
+
+    /**
+     * Returns the inline JavaScript block embedded in each generated page.
+     * Contains {@code YADOC_SEARCH_URL} and {@code YADOC_PROJECT} tokens that are
+     * substituted by the caller before returning the final HTML.
+     */
+    private static String pageScripts() {
+        return """
             <script src="https://cdn.jsdelivr.net/npm/mermaid@11.13.0/dist/mermaid.min.js"
               integrity="sha384-tI0sDqjGJcqrQ8e/XKiQGS+ee11v5knTNWx2goxMBxe4DO9U0uKlfxJtYB9ILZ4j"
               crossorigin="anonymous"></script>
@@ -1066,18 +600,18 @@ public class SiteBuilder {
                 var btn = document.getElementById('rebuild-btn');
                 if (!btn) return;
                 btn.addEventListener('click', function() {
-                  btn.disabled = true; btn.textContent = 'Building\u2026';
+                  btn.disabled = true; btn.textContent = 'Building\\u2026';
                   fetch('/api/build/YADOC_PROJECT', {method: 'POST'})
                     .then(function(r) { return r.json(); })
                     .then(function(j) {
                       btn.textContent = j.status === 'ok'
-                        ? '\u2713 Done (' + j.ms + 'ms)' : '\u2717 Error';
+                        ? '\\u2713 Done (' + j.ms + 'ms)' : '\\u2717 Error';
                       setTimeout(function() {
-                        btn.textContent = '\u21BB Rebuild'; btn.disabled = false;
+                        btn.textContent = '\\u21BB Rebuild'; btn.disabled = false;
                       }, 3000);
                     })
                     .catch(function() {
-                      btn.textContent = '\u21BB Rebuild'; btn.disabled = false;
+                      btn.textContent = '\\u21BB Rebuild'; btn.disabled = false;
                     });
                 });
               })();
@@ -1111,11 +645,12 @@ public class SiteBuilder {
                 var segs = (path||'').replace(/^\\//, '').split('/');
                 return segs.slice(0, -1).map(function(seg) {
                   return seg.replace(/^\\d+_/, '');
-                }).filter(function(s) { return s.length > 0; }).join(' \u203a ');
+                }).filter(function(s) { return s.length > 0; }).join(' \\u203a ');
               }
             })();
             // Copy buttons
             (function() {
+              if (!document.getElementById('copy-text-btn')) return;
               function flash(btn, label) {
                 btn.classList.add('copied');
                 var orig = btn.innerHTML;
@@ -1356,102 +891,29 @@ public class SiteBuilder {
               });
             })();
             </script>
-            """);
-
-        if (customFooter != null) sb.append(customFooter).append("\n");
-
-        sb.append("</body></html>\n");
-
-        String langAttr = (currentLocale != null) ? currentLocale
-                        : (defaultLocale != null)  ? defaultLocale
-                        : "ja";
-        return sb.toString()
-            .replace("YADOC_SEARCH_URL", prefix + "search")
-            .replace("YADOC_PROJECT", siteName)
-            .replace("YADOC_LANG", langAttr);
+            """;
     }
 
-    /**
-     * Derives the on-disk directory name for a top-level navigation section
-     * by extracting the first path segment from the section's href.
-     */
-    private String dirNameForSection(SiteNode section, SiteNode root) {
-        // The first segment of the section's href is the directory name
-        if (section.href() == null) return "";
-        String h = section.href().replaceFirst("^/", "");
-        int slash = h.indexOf('/');
-        return slash >= 0 ? h.substring(0, slash) : h.replace(".html", "");
-    }
-
-    /** Recursively renders the left navigation sidebar as nested HTML lists with collapsible categories. */
-    private void renderSidebar(StringBuilder sb, List<SiteNode> nodes, String prefix, String currentPath) {
-        sb.append("<ul>\n");
-        for (SiteNode node : nodes) {
-            if (node.isDir()) {
-                sb.append("<li>\n");
-                sb.append("  <div class=\"cat-header\" data-cat=\"").append(escapeHtml(node.href())).append("\">");
-                if (node.catLink() != null) {
-                    String catAbsHref = prefix + node.catLink().replaceFirst("^/", "");
-                    sb.append("<a href=\"").append(catAbsHref).append("\" class=\"cat-label\">")
-                      .append(escapeHtml(node.label())).append("</a>");
-                } else {
-                    sb.append("<span class=\"cat-label\">").append(escapeHtml(node.label())).append("</span>");
-                }
-                sb.append("<span class=\"cat-arrow\">▶</span>")
-                  .append("</div>\n");
-                sb.append("  <div class=\"cat-children\">\n");
-                renderSidebar(sb, node.children(), prefix, currentPath);
-                sb.append("  </div>\n</li>\n");
-            } else {
-                boolean active = currentPath.equals(node.href());
-                String href = prefix + node.href().replaceFirst("^/", "");
-                sb.append("<li><a href=\"").append(href).append("\"")
-                  .append(active ? " class=\"active\"" : "").append(">")
-                  .append(escapeHtml(node.label())).append("</a></li>\n");
-            }
+    /** Loads a classpath resource relative to this class; throws at startup if missing. */
+    private static String loadResource(String name) {
+        try (var is = SiteBuilder.class.getResourceAsStream(name)) {
+            if (is == null) throw new IllegalStateException("Missing resource: " + name);
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
-        sb.append("</ul>\n");
     }
 
-    /** Matches {@code <h2>} and {@code <h3>} elements with {@code id} attributes for TOC extraction. */
-    private static final Pattern HEADING_PATTERN = Pattern.compile(
-        "<h([23])\\s[^>]*id=\"([^\"]+)\"[^>]*>(.*?)</h[23]>", Pattern.DOTALL);
-
-    /**
-     * Builds a right-side table of contents by extracting h2/h3 headings from the rendered HTML.
-     * Returns an empty string if no headings are found.
-     *
-     * @param contentHtml the rendered page content HTML
-     * @return HTML string for the {@code <aside class="toc">} element
-     */
-    private String buildToc(String contentHtml) {
-        var matcher = HEADING_PATTERN.matcher(contentHtml);
-        List<String[]> entries = new ArrayList<>(); // [level, id, text]
-        while (matcher.find()) {
-            String level = matcher.group(1);
-            String id = matcher.group(2);
-            String text = matcher.group(3).replaceAll("<[^>]+>", "").trim(); // strip inner HTML tags
-            entries.add(new String[]{level, id, text});
-        }
-        if (entries.isEmpty()) return "";
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("<aside class=\"toc\">\n");
-        sb.append("  <div class=\"toc-title\">On this page</div>\n");
-        sb.append("  <ul>\n");
-        for (String[] e : entries) {
-            String cls = e[0].equals("3") ? " class=\"toc-h3\"" : "";
-            sb.append("    <li").append(cls).append("><a href=\"#")
-              .append(escapeHtml(e[1])).append("\">")
-              .append(escapeHtml(e[2])).append("</a></li>\n");
-        }
-        sb.append("  </ul>\n");
-        sb.append("</aside>\n");
-        return sb.toString();
+    static String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&#39;");
     }
 
-    private String escapeHtml(String s) {
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    private static String escapeJs(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r");
     }
 
     /** Reads a file to a String, or returns null if the file does not exist. */

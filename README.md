@@ -115,14 +115,92 @@ java -jar html-saurus.jar --portal-mode --serve --watch --port 3100
 
 ```
 src/main/java/com/scivicslab/htmlsaurus/
-├── Main.java          # CLI parsing, single/portal mode dispatch
-├── SiteBuilder.java   # Markdown → HTML, tree building, CSS/JS embedding
-├── SearchIndexer.java # Lucene index writer
-├── SearchServer.java  # HTTP server for single-project mode
-└── PortalServer.java  # HTTP server for portal mode (routing, build API, SSR search)
+├── Main.java              # CLI parsing, single/portal mode dispatch
+├── SiteBuilder.java       # HTML rendering, page orchestration
+├── MarkdownConverter.java # Markdown → HTML, frontmatter parsing, admonitions
+├── NavTreeBuilder.java    # Navigation tree construction, Docusaurus config reordering
+├── SiteNode.java          # Navigation tree node (record)
+├── SearchIndexer.java     # Lucene index writer
+├── SearchServer.java      # HTTP server for single-project mode
+├── PortalServer.java      # HTTP server for portal mode (routing, build API, SSR search)
+├── LuceneSearcher.java    # Long-lived Lucene DirectoryReader (shared across requests)
+└── HttpUtils.java         # Shared HTTP utilities (respond, escapeHtml, contentType, …)
 ```
 
 Uses the JDK built-in `com.sun.net.httpserver.HttpServer` — no external server dependency.
+
+## Testing
+
+### Test structure
+
+```
+src/test/java/com/scivicslab/htmlsaurus/
+├── UrlRuleTest.java           # URL generation rules (numeric prefix, dev/prod suffix)
+├── SidebarTest.java           # Sidebar rendering, Pattern 1/2 categories
+├── ModeTest.java              # CLI mode behaviour (build-only, dev, portal, production)
+├── I18nTest.java              # i18n: locale prefixes, lang attribute, language switcher
+├── SearchIndexerTest.java     # Lucene index: path field, locale prefix, cleanRelPath utility
+├── PortalOpenLinkTest.java    # Portal mode: project link generation
+└── ProductionModeE2ETest.java # End-to-end tests with Playwright (requires real data)
+```
+
+There are two tiers of tests:
+
+| Tier | Files | Description |
+|------|-------|-------------|
+| **Unit / integration** | `*Test.java` (all except `ProductionModeE2ETest`) | Spin up real `SiteBuilder` / `SearchServer` instances against `TempDir`. No mocks, no Docker, no external processes. Run with `mvn test`. |
+| **End-to-end** | `ProductionModeE2ETest.java` | Full browser tests via Playwright Java. Require a real Docusaurus project on disk (`nigsc_homepage2`). Skipped automatically when the project is absent. Run with `mvn test`. |
+
+### Running tests
+
+```bash
+# すべてのテスト（ユニット＋E2E）を実行
+cd html-saurus
+rm -rf target && mvn install
+
+# テストのみ（ビルド済みクラスがある場合）
+mvn test
+
+# カバレッジレポートを確認（target/site/jacoco/index.html）
+mvn test  # JaCoCo は mvn test 実行時に自動生成される
+open target/site/jacoco/index.html
+```
+
+E2Eテスト (`ProductionModeE2ETest`) は `/home/devteam/works/nigsc_homepage2/docs` が存在しない環境では `Assumptions.assumeTrue` により自動的にスキップされる。テスト失敗にはならない。
+
+### テスト設計の方針
+
+**何をテストするか**
+
+- URL生成ルール（数値プレフィックスの除去、dev/prod モードのサフィックス）
+- サイドバー構造（Pattern 1: `dir/dir.md` のみ、Pattern 2: `dir/dir.md` + サブディレクトリ）
+- CLIモードごとの出力の違い（Rebuild ボタンの有無、テーマセレクターの有無など）
+- i18n: ロケールプレフィックス、`html lang` 属性、言語切り替えUI
+- Lucene インデックスのパスフィールド（`cleanRelPath` の正確さ）
+- ポータルモードのプロジェクトリンク
+
+**何をテストしないか**
+
+- Playwright がなければ動かない機能は `ProductionModeE2ETest` に限定する
+- Docker・外部サービス・モックDB は使用しない（テスト環境と本番の乖離を防ぐため）
+- 純粋な getter / setter / 定数はテストしない
+
+**新機能を追加するとき**
+
+1. 対応する `*Test.java` にテストケースを追加してから実装する（TDD）
+2. ブラウザ操作が必要な検証は `ProductionModeE2ETest` に追加する
+3. テスト追加後に `mvn test` でグリーンを確認してからコミットする
+
+**E2Eテストを実行したいとき**
+
+```bash
+# nigsc_homepage2 が ~/works/ 以下に存在する場合、mvn test で自動実行される
+ls /home/devteam/works/nigsc_homepage2/docs   # 存在確認
+
+# Playwright ブラウザが未インストールの場合は初回のみ必要
+mvn exec:java -e -D exec.mainClass=com.microsoft.playwright.CLI \
+  -D exec.args="install --with-deps chromium"
+```
 
 ## License
 

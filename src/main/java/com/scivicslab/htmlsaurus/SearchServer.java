@@ -2,16 +2,9 @@ package com.scivicslab.htmlsaurus;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.store.NIOFSDirectory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -25,10 +18,10 @@ import java.util.Map;
 public class SearchServer {
 
     private final Path staticDir;
-    private final Path indexDir;
     private final int port;
     private final Runnable rebuild;
     private final boolean production;
+    private final LuceneSearcher searcher;
 
     /**
      * @param staticDir  directory containing the generated static HTML files
@@ -39,10 +32,10 @@ public class SearchServer {
      */
     public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild, boolean production) {
         this.staticDir = staticDir;
-        this.indexDir = indexDir;
         this.port = port;
         this.rebuild = rebuild;
         this.production = production;
+        this.searcher = new LuceneSearcher(indexDir);
     }
 
     /**
@@ -53,7 +46,7 @@ public class SearchServer {
      * @throws IOException if the server socket cannot be opened
      */
     public HttpServer start() throws IOException {
-        var server = HttpServer.create(new InetSocketAddress(port), 0);
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         if (!production) server.createContext("/api/build", this::handleBuild);
         server.createContext("/search", this::handleSearch);
         server.createContext("/", this::handleStatic);
@@ -88,22 +81,8 @@ public class SearchServer {
      * URL parameters and returns search results as a JSON array with CORS headers.
      */
     private void handleSearch(HttpExchange ex) throws IOException {
-        String q = "";
-        String raw = ex.getRequestURI().getRawQuery();
-        if (raw != null) {
-            for (String kv : raw.split("&")) {
-                if (kv.startsWith("q=")) {
-                    q = URLDecoder.decode(kv.substring(2), StandardCharsets.UTF_8);
-                    break;
-                }
-            }
-        }
-        byte[] body = search(q).getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
-        ex.sendResponseHeaders(200, body.length);
-        try (var out = ex.getResponseBody()) { out.write(body); }
+        String q = HttpUtils.queryParam(ex, "q");
+        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", search(q));
     }
 
     /**
@@ -115,35 +94,22 @@ public class SearchServer {
      * @return JSON array string of search results
      */
     private String search(String queryStr) {
-        if (queryStr.isBlank()) return "[]";
-        try (var dir = new NIOFSDirectory(indexDir);
-             var reader = DirectoryReader.open(dir)) {
-
-            var searcher = new IndexSearcher(reader);
-            var parser = new MultiFieldQueryParser(
+        try {
+            var hits = searcher.search(queryStr, 20,
                 new String[]{"title_idx", "doc_id_idx", "body"},
-                new JapaneseAnalyzer(),
                 Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
-            parser.setDefaultOperator(MultiFieldQueryParser.AND_OPERATOR);
-
-            var q = parser.parse(MultiFieldQueryParser.escape(queryStr));
-            var hits = searcher.search(q, 20);
-            var stored = searcher.storedFields();
-
             var sb = new StringBuilder("[");
             boolean first = true;
-            for (var hit : hits.scoreDocs) {
-                var doc = stored.document(hit.doc);
+            for (var hit : hits) {
                 if (!first) sb.append(",");
                 first = false;
                 sb.append("{")
-                  .append("\"title\":").append(jsonStr(doc.get("title"))).append(",")
-                  .append("\"path\":").append(jsonStr(doc.get("path"))).append(",")
-                  .append("\"summary\":").append(jsonStr(doc.get("summary")))
+                  .append("\"title\":").append(HttpUtils.jsonStr(hit.title())).append(",")
+                  .append("\"path\":").append(HttpUtils.jsonStr(hit.path())).append(",")
+                  .append("\"summary\":").append(HttpUtils.jsonStr(hit.summary()))
                   .append("}");
             }
             return sb.append("]").toString();
-
         } catch (Exception e) {
             System.err.println("Search error: " + e.getMessage());
             return "[]";
@@ -167,77 +133,20 @@ public class SearchServer {
             file = file.resolve("index.html").normalize();
             if (!file.startsWith(staticDir) || !Files.exists(file)) {
                 respond(ex, 404, "text/html",
-                    "<html><body><h1>404 Not Found</h1><p>" + escapeHtml(path) + "</p></body></html>");
+                    "<html><body><h1>404 Not Found</h1><p>" + HttpUtils.escapeHtml(path) + "</p></body></html>");
                 return;
             }
         } else if (!Files.exists(file)) {
             respond(ex, 404, "text/html",
-                "<html><body><h1>404 Not Found</h1><p>" + escapeHtml(path) + "</p></body></html>");
+                "<html><body><h1>404 Not Found</h1><p>" + HttpUtils.escapeHtml(path) + "</p></body></html>");
             return;
         }
 
         byte[] body = Files.readAllBytes(file);
-        String ct = contentType(file.toString());
-        ex.getResponseHeaders().set("Content-Type", ct);
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
-        if (ct.startsWith("text/html")) {
-            ex.getResponseHeaders().set("Content-Security-Policy",
-                "default-src 'self'; " +
-                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
-                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
-                "img-src 'self' data:; " +
-                "font-src 'self' https://cdn.jsdelivr.net; " +
-                "connect-src 'self'; " +
-                "frame-ancestors 'none';");
-        }
-        ex.sendResponseHeaders(200, body.length);
-        try (var out = ex.getResponseBody()) { out.write(body); }
+        HttpUtils.respond(ex, 200, HttpUtils.contentType(file.toString()), body);
     }
 
-    /** Sends an HTTP response with the given status code, content type, and UTF-8 body. */
     private void respond(HttpExchange ex, int code, String ct, String body) throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().set("Content-Type", ct);
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
-        if (ct.startsWith("text/html")) {
-            ex.getResponseHeaders().set("Content-Security-Policy",
-                "default-src 'self'; " +
-                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
-                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
-                "img-src 'self' data:; " +
-                "font-src 'self' https://cdn.jsdelivr.net; " +
-                "connect-src 'self'; " +
-                "frame-ancestors 'none';");
-        }
-        ex.sendResponseHeaders(code, bytes.length);
-        try (var out = ex.getResponseBody()) { out.write(bytes); }
-    }
-
-    /** HTML-escapes {@code <}, {@code >}, {@code &}, {@code "}, and {@code '} in the given string. */
-    private String escapeHtml(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                .replace("\"", "&quot;").replace("'", "&#x27;");
-    }
-
-    /** Maps a file path's extension to the corresponding MIME type for the HTTP Content-Type header. */
-    private String contentType(String path) {
-        if (path.endsWith(".html")) return "text/html; charset=UTF-8";
-        if (path.endsWith(".css"))  return "text/css";
-        if (path.endsWith(".js"))   return "application/javascript";
-        if (path.endsWith(".json")) return "application/json";
-        if (path.endsWith(".png"))  return "image/png";
-        if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
-        if (path.endsWith(".svg"))  return "image/svg+xml";
-        return "application/octet-stream";
-    }
-
-    /** Wraps a string in JSON double quotes, escaping backslashes, quotes, and newlines. */
-    private String jsonStr(String s) {
-        if (s == null) s = "";
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
-                       .replace("\n", "\\n").replace("\r", "") + "\"";
+        HttpUtils.respond(ex, code, ct, body);
     }
 }
