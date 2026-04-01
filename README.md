@@ -123,6 +123,7 @@ html-saurus reads several Docusaurus project files automatically. None of them a
 | `favicon` | ファビコン画像のパス（`static/` ディレクトリからの相対パス） |
 | `themeConfig.navbar.items[].sidebarId` + `.label` | ナビバーのセクション表示順序とラベル |
 | `themeConfig.navbar.items[].docId` + `.label` | 同上（docId 形式） |
+| `url` | サイトの公開 URL（例: `https://example.com`）。`sitemap.xml`・`rss.xml`・`feed.json` の生成に使用。未設定時はこれらのファイルを生成しない |
 | `i18n.defaultLocale` | デフォルトロケールの判定 |
 | `i18n.locales` | 利用可能なロケール一覧（言語切り替え UI） |
 
@@ -161,8 +162,23 @@ html-saurus reads several Docusaurus project files automatically. None of them a
 | `html-saurus.css` | 全ページに追加される CSS（`<style>` タグとして `<head>` に挿入） |
 | `html-saurus-header.html` | 各ページの `<body>` 直後に挿入される HTML |
 | `html-saurus-footer.html` | 各ページの `</body>` 直前に挿入される HTML |
+| `html-saurus-toc-footer.html` | 右サイドカラム（ページ目次）の下部に挿入される HTML。省略時は `url:` が設定されていれば RSS/JSON Feed リンクが自動生成される |
 
 これらのファイルは開発モード（`--serve` のみ）では読み込まれない。`--production` フラグを付けたビルドまたはポータルモードで有効になる。
+
+#### ロケール別カスタマイズファイル
+
+ファイル名に `.{locale}` を挟むことでロケール別の内容を指定できる。例えば日本語ロケールビルドには `html-saurus-toc-footer.ja.html`、英語ロケールビルドには `html-saurus-toc-footer.en.html` が使われる。ロケール指定ファイルが存在しない場合は `html-saurus-toc-footer.html`（ロケール指定なし）にフォールバックする。他のカスタマイズファイル（`html-saurus-header.html` 等）も同様のルールに従う。
+
+#### RSS / JSON Feed リンクの自動生成（`html-saurus-toc-footer.html` 省略時）
+
+`docusaurus.config.ts` に `url: 'https://example.com'` が設定されている場合、`html-saurus-toc-footer.html` が存在しないとき各ページの右サイドカラム下部に RSS と JSON Feed へのリンクバッジが自動生成される。
+
+```
+[ RSS ]  [ JSON Feed ]
+```
+
+リンク先はそれぞれ `rss.xml`（RSS 2.0）と `feed.json`（JSON Feed v1.1）。どちらもビルド時にサイトルートへ出力される。`html-saurus-toc-footer.html` を置くと自動生成リンクの代わりにそのファイルの内容が使われるため、独自のボタン画像や説明文に差し替えることができる。
 
 ---
 
