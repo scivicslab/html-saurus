@@ -361,6 +361,22 @@ public class SiteBuilder {
         return sb.toString();
     }
 
+    /**
+     * Derives a stable, mode-independent localStorage key for a sidebar category.
+     * Strips the leading slash, trailing slash, and {@code .html} extension so that
+     * dev-mode hrefs ({@code /guides/software.html}) and production-mode hrefs
+     * ({@code /guides/software/}) both produce the same key ({@code guides/software}).
+     * Numeric prefixes are also removed via {@link #cleanRelPath}.
+     */
+    static String stableCatKey(String href) {
+        if (href == null) return "";
+        String k = href;
+        if (k.startsWith("/")) k = k.substring(1);
+        if (k.endsWith("/")) k = k.substring(0, k.length() - 1);
+        if (k.endsWith(".html")) k = k.substring(0, k.length() - 5);
+        return cleanRelPath(k);
+    }
+
     static String stripExtension(String filename) {
         int dot = filename.lastIndexOf('.');
         return dot >= 0 ? filename.substring(0, dot) : filename;
@@ -586,7 +602,7 @@ public class SiteBuilder {
         for (SiteNode node : nodes) {
             if (node.isDir()) {
                 sb.append("<li>\n");
-                sb.append("  <div class=\"cat-header\" data-cat=\"").append(escapeHtml(node.href())).append("\">");
+                sb.append("  <div class=\"cat-header\" data-cat=\"").append(escapeHtml(stableCatKey(node.href()))).append("\">");
                 if (node.catLink() != null) {
                     String catAbsHref = prefix + node.catLink().replaceFirst("^/", "");
                     sb.append("<a href=\"").append(catAbsHref).append("\" class=\"cat-label\">")

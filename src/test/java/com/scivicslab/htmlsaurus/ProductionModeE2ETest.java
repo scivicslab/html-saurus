@@ -540,7 +540,7 @@ class ProductionModeE2ETest {
     class SidebarPersistence {
 
         @Test
-        @DisplayName("G-1: cat-header elements have data-cat attribute starting with '/'")
+        @DisplayName("G-1: cat-header elements have data-cat attribute (stable mode-independent key)")
         void catHeaders_have_dataCatAttribute() {
             page.navigate(url("/guides/top_page/"));
 
@@ -548,14 +548,16 @@ class ProductionModeE2ETest {
             assertFalse(catHeaders.isEmpty(),
                     "Sidebar must contain .cat-header elements with a data-cat attribute");
 
-            // All data-cat values must be absolute paths starting with "/"
-            boolean allStartWithSlash = catHeaders.stream()
+            // All data-cat values must be non-empty stable keys (no leading slash, no .html suffix)
+            boolean allNonEmpty = catHeaders.stream()
                     .allMatch(el -> {
                         String dataCat = el.getAttribute("data-cat");
-                        return dataCat != null && dataCat.startsWith("/");
+                        return dataCat != null && !dataCat.isBlank()
+                                && !dataCat.startsWith("/")
+                                && !dataCat.endsWith(".html");
                     });
-            assertTrue(allStartWithSlash,
-                    "All data-cat attribute values must start with '/' (absolute paths)");
+            assertTrue(allNonEmpty,
+                    "All data-cat values must be stable path keys (no leading slash, no .html suffix)");
         }
 
         @Test
@@ -591,7 +593,7 @@ class ProductionModeE2ETest {
 
             // Clear state and explicitly mark security_policy as open
             page.evaluate("() => localStorage.clear()");
-            page.evaluate("() => localStorage.setItem('hs-cat:/guides/security_policy/', '1')");
+            page.evaluate("() => localStorage.setItem('hs-cat:guides/security_policy', '1')");
 
             // Navigate to a different page within the same origin (same browser context)
             page.navigate(url("/guides/overview/"));
@@ -600,7 +602,7 @@ class ProductionModeE2ETest {
             // The sidebar should restore the open state from localStorage
             Boolean isOpen = (Boolean) page.evaluate(
                     "() => { " +
-                    "  const el = document.querySelector('[data-cat=\"/guides/security_policy/\"]'); " +
+                    "  const el = document.querySelector('[data-cat=\"guides/security_policy\"]'); " +
                     "  if (!el) return null; " +
                     "  const next = el.nextElementSibling; " +
                     "  if (!next) return null; " +
@@ -658,14 +660,14 @@ class ProductionModeE2ETest {
 
             Boolean isOpen = (Boolean) page.evaluate(
                     "() => { " +
-                    "  const el = document.querySelector('[data-cat=\"/guides/software/\"]'); " +
+                    "  const el = document.querySelector('[data-cat=\"guides/software\"]'); " +
                     "  if (!el) return null; " +
                     "  const next = el.nextElementSibling; " +
                     "  if (!next) return null; " +
                     "  return next.classList.contains('open'); " +
                     "}");
             assertNotNull(isOpen,
-                    "/guides/software/ cat-header and its sibling must exist on the deep Slurm page");
+                    "guides/software cat-header and its sibling must exist on the deep Slurm page");
             assertTrue(isOpen,
                     "Ancestor /guides/software/ must be auto-expanded (class 'open') " +
                     "when viewing a page deep inside the software section");
@@ -679,16 +681,16 @@ class ProductionModeE2ETest {
 
             Boolean isOpen = (Boolean) page.evaluate(
                     "() => { " +
-                    "  const el = document.querySelector('[data-cat=\"/guides/software/JobScheduler/Slurm/\"]'); " +
+                    "  const el = document.querySelector('[data-cat=\"guides/software/JobScheduler/Slurm\"]'); " +
                     "  if (!el) return null; " +
                     "  const next = el.nextElementSibling; " +
                     "  if (!next) return null; " +
                     "  return next.classList.contains('open'); " +
                     "}");
             assertNotNull(isOpen,
-                    "/guides/software/JobScheduler/Slurm/ cat-header and sibling must exist on batch_jobs page");
+                    "guides/software/JobScheduler/Slurm cat-header and sibling must exist on batch_jobs page");
             assertTrue(isOpen,
-                    "Ancestor /guides/software/JobScheduler/Slurm/ must be auto-expanded " +
+                    "Ancestor guides/software/JobScheduler/Slurm must be auto-expanded " +
                     "when viewing batch_jobs page inside it");
         }
 
@@ -707,7 +709,7 @@ class ProductionModeE2ETest {
 
             Boolean isOpen = (Boolean) page.evaluate(
                     "() => { " +
-                    "  const el = document.querySelector('[data-cat=\"/guides/security_policy/\"]'); " +
+                    "  const el = document.querySelector('[data-cat=\"guides/security_policy\"]'); " +
                     "  if (!el) return null; " +
                     "  const next = el.nextElementSibling; " +
                     "  if (!next) return null; " +
@@ -716,7 +718,7 @@ class ProductionModeE2ETest {
             // If the element does not exist on this page that is also acceptable
             if (isOpen != null) {
                 assertFalse(isOpen,
-                        "Unrelated sibling category /guides/security_policy/ must NOT be auto-expanded " +
+                        "Unrelated sibling category guides/security_policy must NOT be auto-expanded " +
                         "when viewing a page in the software/Slurm section");
             }
         }
