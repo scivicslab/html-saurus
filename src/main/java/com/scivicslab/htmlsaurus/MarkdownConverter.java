@@ -20,8 +20,13 @@ import java.util.regex.Pattern;
  */
 class MarkdownConverter {
 
-    /** Matches the opening line of a Docusaurus admonition (e.g., {@code :::note[Title]}). */
-    private static final Pattern ADMONITION_START = Pattern.compile("^:::(\\w+)(?:\\[([^\\]]*)])?\\s*$");
+    /**
+     * Matches the opening line of a Docusaurus admonition.
+     * Supports both bracket syntax ({@code :::note[Title]}) and
+     * space-separated syntax ({@code :::note Title}) used in older Docusaurus docs.
+     * Group 1: type, Group 2: bracket title, Group 3: space-separated title.
+     */
+    private static final Pattern ADMONITION_START = Pattern.compile("^:::(\\w+)(?:\\[([^\\]]*)]|[ \\t]+(.+?))?\\s*$");
     /** Matches the closing line of a Docusaurus admonition ({@code :::}). */
     private static final Pattern ADMONITION_END   = Pattern.compile("^:::\\s*$");
     /** Matches the opening characters of a fenced code block (``` or ~~~). */
@@ -80,7 +85,8 @@ class MarkdownConverter {
                     normalBuffer.setLength(0);
                 }
                 String type = m.group(1).toLowerCase();
-                String customTitle = m.group(2); // null if not specified
+                // group(2) = bracket title [Title], group(3) = space-separated title
+                String customTitle = m.group(2) != null ? m.group(2) : m.group(3);
                 StringBuilder inner = new StringBuilder();
                 i++;
                 while (i < lines.length && !ADMONITION_END.matcher(lines[i]).matches()) {
