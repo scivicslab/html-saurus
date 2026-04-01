@@ -314,6 +314,9 @@ public class PortalServer {
                 <p>%d project(s)</p>
               </div>
               <div class="header-right">
+            """.formatted(projects.size()));
+        if (!production) {
+            sb.append("""
                 <label style="font-size:0.8rem;color:var(--text-secondary)">Theme:
                   <select id="theme-select">
                     <option value="dark-catppuccin">Dark Catppuccin</option>
@@ -330,6 +333,9 @@ public class PortalServer {
                 </label>
                 <button class="btn btn-reload" id="reload-btn" onclick="doReload(this)">Reload</button>
                 <span class="build-status" id="reload-status"></span>
+            """);
+        }
+        sb.append("""
                 <form class="portal-search" action="/search" method="get">
                   <input type="search" name="q" placeholder="Search all docs...">
                   <button type="submit">Search</button>
@@ -339,7 +345,7 @@ public class PortalServer {
             <main>
               <h2>Projects</h2>
               <div class="project-list">
-            """.formatted(projects.size()));
+            """);
 
         for (Project p : projects) {
             List<String> labels = readNavbarLabels(p.projectDir());
@@ -350,16 +356,18 @@ public class PortalServer {
                 sb.append("        <span class=\"project-label\">").append(escHtml(label)).append("</span>\n");
             }
             sb.append("      </div>\n");
-            sb.append("      <div class=\"project-actions\">\n");
-            sb.append("        <button class=\"btn btn-build\" onclick=\"doBuild('").append(escHtml(p.name())).append("', this)\">Build</button>\n");
-            sb.append("        <span class=\"build-status\" id=\"status-").append(escHtml(p.name())).append("\"></span>\n");
-            sb.append("      </div>\n");
+            if (!production) {
+                sb.append("      <div class=\"project-actions\">\n");
+                sb.append("        <button class=\"btn btn-build\" onclick=\"doBuild('").append(escHtml(p.name())).append("', this)\">Build</button>\n");
+                sb.append("        <span class=\"build-status\" id=\"status-").append(escHtml(p.name())).append("\"></span>\n");
+                sb.append("      </div>\n");
+            }
             sb.append("    </div>\n");
         }
 
-        sb.append("""
-              </div>
-            </main>
+        sb.append("  </div>\n</main>\n");
+        if (!production) {
+            sb.append("""
             <script>
             (function() {
               const sel = document.getElementById('theme-select');
@@ -382,6 +390,7 @@ public class PortalServer {
                 if (j.status === 'ok') {
                   status.textContent = 'Done (' + j.ms + 'ms)';
                   status.style.color = 'var(--accent-green)';
+                  setTimeout(() => location.reload(), 800);
                 } else {
                   status.textContent = 'Error: ' + (j.error || 'unknown');
                   status.style.color = '#e06060';
@@ -422,9 +431,9 @@ public class PortalServer {
               btn.textContent = 'Reload';
             }
             </script>
-            </body>
-            </html>
             """);
+        }
+        sb.append("</body>\n</html>\n");
 
         respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
     }
@@ -703,7 +712,14 @@ public class PortalServer {
     private void handleStatic(HttpExchange ex, Project proj, String rest) throws IOException {
         Path file = proj.staticDir().resolve(rest.replaceFirst("^/", "")).normalize();
         if (!file.startsWith(proj.staticDir())) { respond(ex, 403, "text/plain", "Forbidden"); return; }
-        if (!Files.exists(file) || Files.isDirectory(file)) {
+        if (Files.isDirectory(file)) {
+            file = file.resolve("index.html").normalize();
+            if (!file.startsWith(proj.staticDir()) || !Files.exists(file)) {
+                respond(ex, 404, "text/html",
+                    "<html><body><h1>404 Not Found</h1><p>" + escHtml(rest) + "</p></body></html>");
+                return;
+            }
+        } else if (!Files.exists(file)) {
             respond(ex, 404, "text/html",
                 "<html><body><h1>404 Not Found</h1><p>" + escHtml(rest) + "</p></body></html>");
             return;
@@ -798,6 +814,7 @@ public class PortalServer {
             List<String> labels = new ArrayList<>();
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i).trim();
+                if (line.startsWith("//")) continue;
                 if (line.contains("position: 'left'") || line.contains("position: \"left\"")) {
                     // Inline form: {to: '/blog', label: 'Blog', position: 'left'}
                     if (line.contains("label:")) {

@@ -161,8 +161,18 @@ public class SearchServer {
 
         Path file = staticDir.resolve(path.replaceFirst("^/", "")).normalize();
         if (!file.startsWith(staticDir)) { respond(ex, 403, "text/plain", "Forbidden"); return; }
-        if (!Files.exists(file) || Files.isDirectory(file)) { respond(ex, 404, "text/html",
-            "<html><body><h1>404 Not Found</h1><p>" + escapeHtml(path) + "</p></body></html>"); return; }
+        if (Files.isDirectory(file)) {
+            file = file.resolve("index.html").normalize();
+            if (!file.startsWith(staticDir) || !Files.exists(file)) {
+                respond(ex, 404, "text/html",
+                    "<html><body><h1>404 Not Found</h1><p>" + escapeHtml(path) + "</p></body></html>");
+                return;
+            }
+        } else if (!Files.exists(file)) {
+            respond(ex, 404, "text/html",
+                "<html><body><h1>404 Not Found</h1><p>" + escapeHtml(path) + "</p></body></html>");
+            return;
+        }
 
         byte[] body = Files.readAllBytes(file);
         String ct = contentType(file.toString());

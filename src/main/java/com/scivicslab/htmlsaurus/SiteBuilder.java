@@ -42,11 +42,14 @@ public class SiteBuilder {
      * Represents a node in the site navigation tree.
      *
      * @param label    display label for this node
-     * @param href     URL path to the first reachable page (for directories) or the page itself
+     * @param href     URL path used for navigation: the same-name page URL for Pattern 2 categories,
+     *                 the first reachable leaf URL for plain categories, or the page URL for leaves
      * @param isDir    {@code true} if this node represents a category (directory)
      * @param children child nodes (empty for leaf pages)
+     * @param catLink  non-null only for Pattern 2 categories (dir/dir.md + subdirs); holds the
+     *                 clickable link URL shown on the sidebar category header
      */
-    record SiteNode(String label, String href, boolean isDir, List<SiteNode> children) {}
+    record SiteNode(String label, String href, boolean isDir, List<SiteNode> children, String catLink) {}
 
     private final String siteName;
     private final boolean production;
@@ -56,41 +59,73 @@ public class SiteBuilder {
     private final String customHeader;
     /** Custom footer HTML injected before {@code </body>}; null if absent. */
     private final String customFooter;
+    /**
+     * Locale code of this build (e.g., "ja", "en"), or null if i18n is not configured.
+     * When equal to defaultLocale (or null), this is the default-language build served at the root path.
+     */
+    private final String currentLocale;
+    /** Default locale from docusaurus.config, or null if i18n is not configured. */
+    private final String defaultLocale;
+    /** All available locale codes in display order (including currentLocale); empty if i18n is not configured. */
+    private final List<String> allLocales;
 
     /**
-     * Creates a SiteBuilder using the parent directory name as the site name (development mode).
+     * Creates a SiteBuilder using the parent directory name as the site name (development mode, no i18n).
      *
      * @param docsDir source directory containing Markdown files
      * @param outDir  target directory for generated HTML
      */
     public SiteBuilder(Path docsDir, Path outDir) {
-        this(docsDir, outDir, docsDir.getParent().getFileName().toString(), false);
+        this(docsDir, outDir, docsDir.getParent().getFileName().toString(), false, null, null, List.of());
     }
 
     /**
-     * Creates a SiteBuilder with an explicit site name and production flag.
+     * Creates a SiteBuilder with a production flag and no i18n.
      *
      * @param docsDir    source directory containing Markdown files
      * @param outDir     target directory for generated HTML
      * @param production {@code true} to omit copy buttons and source path footer
      */
     public SiteBuilder(Path docsDir, Path outDir, boolean production) {
-        this(docsDir, outDir, docsDir.getParent().getFileName().toString(), production);
+        this(docsDir, outDir, docsDir.getParent().getFileName().toString(), production, null, null, List.of());
     }
 
     /**
-     * Creates a SiteBuilder with an explicit site name and production flag.
+     * Creates a SiteBuilder with locale information for the language switcher dropdown.
      *
-     * @param docsDir    source directory containing Markdown files
-     * @param outDir     target directory for generated HTML
-     * @param siteName   display name shown in the top navbar
-     * @param production {@code true} to omit copy buttons and source path footer
+     * @param docsDir       source directory containing Markdown files
+     * @param outDir        target directory for generated HTML
+     * @param production    {@code true} to omit copy buttons and source path footer
+     * @param currentLocale locale code of this build (e.g., "ja"), or null if no i18n
+     * @param defaultLocale default locale from docusaurus.config (e.g., "ja"), or null
+     * @param allLocales    all available locale codes in display order; empty if no i18n
      */
-    public SiteBuilder(Path docsDir, Path outDir, String siteName, boolean production) {
+    public SiteBuilder(Path docsDir, Path outDir, boolean production,
+                       String currentLocale, String defaultLocale, List<String> allLocales) {
+        this(docsDir, outDir, docsDir.getParent().getFileName().toString(),
+             production, currentLocale, defaultLocale, allLocales);
+    }
+
+    /**
+     * Full constructor.
+     *
+     * @param docsDir       source directory containing Markdown files
+     * @param outDir        target directory for generated HTML
+     * @param siteName      display name shown in the top navbar
+     * @param production    {@code true} to omit copy buttons and source path footer
+     * @param currentLocale locale code of this build (e.g., "ja"), or null if no i18n
+     * @param defaultLocale default locale from docusaurus.config (e.g., "ja"), or null
+     * @param allLocales    all available locale codes in display order; empty if no i18n
+     */
+    public SiteBuilder(Path docsDir, Path outDir, String siteName, boolean production,
+                       String currentLocale, String defaultLocale, List<String> allLocales) {
         this.docsDir = docsDir;
         this.outDir = outDir;
         this.siteName = siteName;
         this.production = production;
+        this.currentLocale = currentLocale;
+        this.defaultLocale = defaultLocale;
+        this.allLocales = allLocales != null ? allLocales : List.of();
         Path projectRoot = docsDir.getParent();
         this.customCss    = production ? readOptional(projectRoot.resolve("html-saurus.css"))    : null;
         this.customHeader = production ? readOptional(projectRoot.resolve("html-saurus-header.html")) : null;
@@ -104,6 +139,21 @@ public class SiteBuilder {
         this.renderer = HtmlRenderer.builder().extensions(extensions).build();
     }
 
+    /** Returns a human-readable display label for a locale code. */
+    private static String localeLabel(String code) {
+        if (code == null) return "";
+        return switch (code) {
+            case "ja" -> "日本語";
+            case "en" -> "English";
+            case "zh" -> "中文";
+            case "ko" -> "한국어";
+            case "fr" -> "Français";
+            case "de" -> "Deutsch";
+            case "es" -> "Español";
+            default   -> code.toUpperCase();
+        };
+    }
+
     /**
      * Builds the entire static site. Walks the docs directory, converts each Markdown file
      * to HTML, copies non-Markdown assets, and generates an {@code index.html} that redirects
@@ -112,6 +162,23 @@ public class SiteBuilder {
      * @throws IOException if file I/O fails
      */
     public void build() throws IOException {
+        // Clean output directory before building, like Docusaurus yarn build does.
+        if (Files.exists(outDir)) {
+            Files.walkFileTree(outDir, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    Files.delete(dir);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        }
+        Files.createDirectories(outDir);
+
         SiteNode root = reorderFromDocusaurusConfig(buildTree(docsDir));
 
         Files.walkFileTree(docsDir, new SimpleFileVisitor<>() {
@@ -121,7 +188,7 @@ public class SiteBuilder {
                 if (file.toString().endsWith(".md")) {
                     convertPage(file, rel, root);
                 } else {
-                    Path dest = outDir.resolve(rel);
+                    Path dest = outDir.resolve(cleanRelPath(rel.toString().replace('\\', '/')));
                     Files.createDirectories(dest.getParent());
                     Files.copy(file, dest, StandardCopyOption.REPLACE_EXISTING);
                 }
@@ -130,7 +197,7 @@ public class SiteBuilder {
 
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                Files.createDirectories(outDir.resolve(docsDir.relativize(dir)));
+                Files.createDirectories(outDir.resolve(cleanRelPath(docsDir.relativize(dir).toString().replace('\\', '/'))));
                 return FileVisitResult.CONTINUE;
             }
         });
@@ -219,7 +286,7 @@ public class SiteBuilder {
                 if (child != null) {
                     String newLabel = dirNameToLabel.get(dirName);
                     if (newLabel != null && !newLabel.equals(child.label())) {
-                        child = new SiteNode(newLabel, child.href(), child.isDir(), child.children());
+                        child = new SiteNode(newLabel, child.href(), child.isDir(), child.children(), child.catLink());
                     }
                     reordered.add(child);
                 }
@@ -227,7 +294,7 @@ public class SiteBuilder {
             reordered.addAll(childByDirName.values()); // remaining not in config
             reordered.addAll(unmatchedChildren);
 
-            return new SiteNode(root.label(), root.href(), root.isDir(), reordered);
+            return new SiteNode(root.label(), root.href(), root.isDir(), reordered, root.catLink());
         } catch (IOException e) {
             return root;
         }
@@ -275,31 +342,33 @@ public class SiteBuilder {
 
         // Docusaurus convention: if the directory contains ONLY a same-name .md file
         // (no subdirs, no other .md files), treat it as a direct leaf page link.
+        // URL is based on the directory path (not the file path), matching Docusaurus behavior.
         if (sameNameMd != null && !hasSubdirs && mdFiles.size() == 1) {
             String[] fm = parseFrontmatter(Files.readString(sameNameMd));
             String title = fm[0].isBlank() ? dirBase : fm[0];
-            Path rel = docsDir.relativize(sameNameMd);
-            String href = "/" + rel.toString().replace('\\', '/').replaceAll("\\.md$", ".html");
-            return new SiteNode(title, href, false, List.of());
+            Path dirRel = docsDir.relativize(dir);
+            String href = "/" + cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
+            return new SiteNode(title, href, false, List.of(), null);
         }
 
-        // Build category. If there's a same-name .md, use it as label source and
-        // include it as the first child (index page); exclude it from normal child iteration.
+        // Build category. If there's a same-name .md (Pattern 2: same-name .md + subdirs),
+        // use it as the category label source and make the category header a clickable link.
+        // The same-name .md is NOT added as a child item (Docusaurus convention).
         String label;
+        String catHref = null;
         List<SiteNode> children = new ArrayList<>();
         if (sameNameMd != null) {
             String[] fm = parseFrontmatter(Files.readString(sameNameMd));
             label = fm[0].isBlank() ? dirBase : fm[0];
-            Path rel = docsDir.relativize(sameNameMd);
-            String href = "/" + rel.toString().replace('\\', '/').replaceAll("\\.md$", ".html");
-            // Add the index page as first child
-            children.add(new SiteNode(label, href, false, List.of()));
+            // Category header links to the directory URL (same rule as Pattern 1)
+            Path dirRel = docsDir.relativize(dir);
+            catHref = "/" + cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
         } else {
             label = readCategoryLabel(dir);
         }
 
         for (Path entry : entries) {
-            if (entry.equals(sameNameMd)) continue; // already added above
+            if (entry.equals(sameNameMd)) continue; // not shown as child (Docusaurus convention)
             if (Files.isDirectory(entry)) {
                 children.add(buildTree(entry));
             } else if (entry.toString().endsWith(".md")) {
@@ -307,13 +376,15 @@ public class SiteBuilder {
                 String title = fm[0].isBlank()
                     ? stripNumericPrefix(stripExtension(entry.getFileName().toString())) : fm[0];
                 Path rel = docsDir.relativize(entry);
-                String href = "/" + rel.toString().replace('\\', '/').replaceAll("\\.md$", ".html");
-                children.add(new SiteNode(title, href, false, List.of()));
+                String href = "/" + cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", "")) + (production ? "/" : ".html");
+                children.add(new SiteNode(title, href, false, List.of(), null));
             }
         }
 
-        String firstHref = firstHref(children);
-        return new SiteNode(label, firstHref, true, children);
+        // href is always the navigation target (for navbar and index.html redirect);
+        // catLink is non-null only for Pattern 2, used by renderSidebar for the clickable header
+        String navHref = catHref != null ? catHref : firstHref(children);
+        return new SiteNode(label, navHref, true, children, catHref);
     }
 
     /**
@@ -340,9 +411,23 @@ public class SiteBuilder {
     }
 
     /** Strips a leading numeric prefix (e.g., {@code 01_intro} → {@code intro}). */
-    private String stripNumericPrefix(String name) {
+    static String stripNumericPrefix(String name) {
         var m = NUM_PREFIX.matcher(name);
         return m.matches() ? m.group(2) : name;
+    }
+
+    /**
+     * Strips numeric prefixes from every segment of a relative path.
+     * E.g., {@code 010_history/020_intro/file.html} → {@code history/intro/file.html}
+     */
+    static String cleanRelPath(String relPath) {
+        String[] segments = relPath.split("/");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < segments.length; i++) {
+            if (i > 0) sb.append('/');
+            sb.append(stripNumericPrefix(segments[i]));
+        }
+        return sb.toString();
     }
 
     /**
@@ -377,20 +462,38 @@ public class SiteBuilder {
         String body = fm[1];
         String contentHtml = convertMarkdown(body);
 
-        String relStr = rel.toString().replace('\\', '/').replaceAll("\\.md$", ".html");
+        // Detect same-name pattern: dir/dir.md (Docusaurus convention).
+        // Covers both Pattern 1 (only .md, no subdirs) and Pattern 2 (same-name .md + subdirs).
+        // In both cases the URL is based on the parent directory path, not the file path.
+        boolean isSameName = false;
+        if (rel.getNameCount() >= 2) {
+            String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
+            String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
+            if (fileBase.equals(parentBase)) {
+                isSameName = true;
+            }
+        }
+
+        String cleanBase = isSameName
+            ? cleanRelPath(rel.getParent().toString().replace('\\', '/'))
+            : cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
+        String relStr = production ? cleanBase + "/index.html" : cleanBase + ".html";
         Path outFile = outDir.resolve(relStr);
         Files.createDirectories(outFile.getParent());
 
-        long depth = rel.getNameCount() - 1;
+        long depth = production ? (long) cleanBase.split("/").length
+                                : (long) cleanBase.split("/").length - 1;
         String prefix = "../".repeat((int) depth);
         if (prefix.isEmpty()) prefix = "./";
 
-        String currentPath = "/" + relStr;
+        String currentPath = production ? "/" + cleanBase + "/" : "/" + cleanBase + ".html";
 
         // Determine which top-level section this page belongs to
-        String topSection = rel.getNameCount() > 1 ? "/" + rel.getName(0).toString() : null;
+        String topSection = rel.getNameCount() > 1
+            ? "/" + stripNumericPrefix(rel.getName(0).toString()) : null;
 
-        String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection);
+        String rawRelPath = rel.toString().replace('\\', '/');
+        String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath);
         Files.writeString(outFile, html);
         System.out.println("  " + outFile);
     }
@@ -398,14 +501,37 @@ public class SiteBuilder {
     /**
      * Converts Markdown to HTML, handling Docusaurus-style admonitions ({@code :::note ... :::})
      * as a pre-processing step before passing through the CommonMark parser.
+     * Admonitions inside fenced code blocks are passed through unchanged.
      */
     private String convertMarkdown(String markdown) {
         StringBuilder result = new StringBuilder();
         StringBuilder normalBuffer = new StringBuilder();
         String[] lines = markdown.split("\n", -1);
         int i = 0;
+        String openFence = null; // non-null when inside a fenced code block
         while (i < lines.length) {
-            Matcher m = ADMONITION_START.matcher(lines[i]);
+            String line = lines[i];
+            // Track fenced code block boundaries (``` or ~~~~)
+            if (openFence == null) {
+                java.util.regex.Matcher fence = java.util.regex.Pattern
+                    .compile("^(`{3,}|~{3,}).*$").matcher(line);
+                if (fence.matches()) {
+                    openFence = fence.group(1); // remember the opening fence characters
+                    normalBuffer.append(line).append("\n");
+                    i++;
+                    continue;
+                }
+            } else {
+                // Inside a fence: look for a closing fence of the same type and length
+                if (line.startsWith(openFence) && line.trim().equals(openFence)) {
+                    openFence = null;
+                }
+                normalBuffer.append(line).append("\n");
+                i++;
+                continue;
+            }
+
+            Matcher m = ADMONITION_START.matcher(line);
             if (m.matches()) {
                 // Flush pending normal markdown
                 if (normalBuffer.length() > 0) {
@@ -422,7 +548,7 @@ public class SiteBuilder {
                 }
                 result.append(renderAdmonition(type, customTitle, inner.toString()));
             } else {
-                normalBuffer.append(lines[i]).append("\n");
+                normalBuffer.append(line).append("\n");
             }
             i++;
         }
@@ -440,6 +566,12 @@ public class SiteBuilder {
         html = html.replaceAll(
             "(?s)<pre><code class=\"language-mermaid\">(.*?)</code></pre>",
             "<div class=\"mermaid\">$1</div>"
+        );
+        // Docusaurus-style heading ID override: ## Title {#my-id} sets id="my-id" on the element.
+        // The {#id} marker is removed from the visible heading text.
+        html = html.replaceAll(
+            "(<h[1-6][^>]*?) id=\"[^\"]*\"([^>]*>)(.*?)\\{#([^}]+)\\}(.*?)(</h[1-6]>)",
+            "$1 id=\"$4\"$2$3$5$6"
         );
         return html;
     }
@@ -528,11 +660,12 @@ public class SiteBuilder {
      * @return the complete HTML string
      */
     private String renderPage(String title, String content, SiteNode root,
-                               String prefix, String currentPath, String topSection) {
+                               String prefix, String currentPath, String topSection,
+                               String rawRelPath) {
         StringBuilder sb = new StringBuilder();
         sb.append("""
             <!DOCTYPE html>
-            <html lang="ja">
+            <html lang="YADOC_LANG">
             <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -604,6 +737,19 @@ public class SiteBuilder {
                              border: 1px solid #666; border-radius: 4px; padding: 3px 6px;
                              font-size: 0.8rem; cursor: pointer; }
                 #theme-sel option { background: #2c2c2c; color: #fff; }
+                .lang-dropdown { position: relative; margin-left: 0.5rem; }
+                .lang-btn { background: transparent; border: 1px solid #666; border-radius: 4px;
+                            color: #ccc; padding: 0.2rem 0.6rem; font-size: 0.8rem;
+                            cursor: pointer; white-space: nowrap; }
+                .lang-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+                .lang-menu { display: none; position: absolute; right: 0; top: calc(100%% + 4px);
+                             background: #2c2c2c; border: 1px solid #555; border-radius: 6px;
+                             min-width: 120px; z-index: 300; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+                .lang-dropdown.open .lang-menu { display: block; }
+                .lang-item { display: block; padding: 6px 14px; color: #ccc; text-decoration: none;
+                             font-size: 0.875rem; white-space: nowrap; }
+                .lang-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+                .lang-item.active { color: var(--c-nav-accent, #25c2a0); font-weight: 600; }
                 /* ---- Search ---- */
                 #search-wrap { position: relative; margin-left: 1rem; }
                 #search-input { background: rgba(255,255,255,0.12); border: 1px solid #666; border-radius: 4px;
@@ -676,8 +822,21 @@ public class SiteBuilder {
                 main h4 { font-size: 1rem; margin: 1rem 0 0.5rem; }
                 main p { margin: 0.75rem 0; line-height: 1.7; }
                 main ul, main ol { margin: 0.75rem 0 0.75rem 1.5rem; line-height: 1.7; }
+                .pre-container { position: relative; margin: 1rem 0; }
+                .pre-toolbar { display: flex; gap: 0.4rem; justify-content: flex-end;
+                               padding: 0.3rem 0.5rem; background: var(--c-pre-bg);
+                               border: 1px solid var(--c-border); border-bottom: none;
+                               border-radius: 6px 6px 0 0; }
+                .pre-toolbar button { background: var(--c-sidebar-bg); border: 1px solid var(--c-border);
+                                      border-radius: 3px; padding: 0.15rem 0.5rem; font-size: 0.75rem;
+                                      cursor: pointer; color: var(--c-text); }
+                .pre-toolbar button:hover { background: var(--c-hover); }
+                .pre-toolbar button.copied { background: #2e8555; color: #fff; border-color: #2e8555; }
+                .pre-toolbar button.active { background: var(--c-act-bg); color: var(--c-act-text); border-color: var(--c-act-text); }
                 main pre { background: var(--c-pre-bg); border: 1px solid var(--c-border); border-radius: 6px;
-                            padding: 1rem; overflow-x: auto; margin: 1rem 0; }
+                            padding: 1rem; overflow-x: auto; margin: 1rem 0; white-space: pre-wrap; }
+                .pre-container > pre { border-radius: 0 0 6px 6px; margin: 0; }
+                .pre-nowrap > pre { white-space: pre; }
                 main code { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.875em; }
                 main p code, main li code, main td code { background: var(--c-code-bg); padding: 1px 5px; border-radius: 3px; }
                 main table { border-collapse: collapse; width: 100%%; margin: 1rem 0; }
@@ -728,14 +887,43 @@ public class SiteBuilder {
               .append(escapeHtml(section.label())).append("</a>\n");
         }
         sb.append("  </nav>\n");
-        sb.append("  <button id=\"rebuild-btn\" title=\"Rebuild this project\">&#x21BB; Rebuild</button>\n");
-        sb.append("  <select id=\"theme-sel\">\n");
-        sb.append("    <option value=\"default\">Default</option>\n");
-        sb.append("    <option value=\"warm\">Warm</option>\n");
-        sb.append("    <option value=\"blue\">Blue</option>\n");
-        sb.append("    <option value=\"green\">Green</option>\n");
-        sb.append("    <option value=\"red\">Red</option>\n");
-        sb.append("  </select>\n");
+        if (!production) {
+            sb.append("  <button id=\"rebuild-btn\" title=\"Rebuild this project\">&#x21BB; Rebuild</button>\n");
+            sb.append("  <select id=\"theme-sel\">\n");
+            sb.append("    <option value=\"default\">Default</option>\n");
+            sb.append("    <option value=\"warm\">Warm</option>\n");
+            sb.append("    <option value=\"blue\">Blue</option>\n");
+            sb.append("    <option value=\"green\">Green</option>\n");
+            sb.append("    <option value=\"red\">Red</option>\n");
+            sb.append("  </select>\n");
+        }
+        if (allLocales.size() > 1) {
+            // Compute the page path without the locale prefix (base path)
+            String basePath;
+            if (currentLocale == null || currentLocale.equals(defaultLocale)) {
+                basePath = currentPath;
+            } else {
+                String stripped = currentPath.replaceFirst("^/" + currentLocale + "(/|$)", "/");
+                basePath = stripped.isEmpty() ? "/" : stripped;
+            }
+            String activeLabel = localeLabel(currentLocale != null ? currentLocale : defaultLocale);
+            sb.append("  <div class=\"lang-dropdown\">\n");
+            sb.append("    <button class=\"lang-btn\">").append(escapeHtml(activeLabel))
+              .append(" &#9662;</button>\n");
+            sb.append("    <div class=\"lang-menu\">\n");
+            for (String locale : allLocales) {
+                String targetPath = locale.equals(defaultLocale)
+                    ? basePath
+                    : "/" + locale + (basePath.startsWith("/") ? basePath : "/" + basePath);
+                String href = prefix + targetPath.replaceFirst("^/", "");
+                boolean isCurrent = locale.equals(currentLocale)
+                    || (currentLocale == null && locale.equals(defaultLocale));
+                sb.append("      <a href=\"").append(href).append("\" class=\"lang-item")
+                  .append(isCurrent ? " active" : "").append("\">")
+                  .append(escapeHtml(localeLabel(locale))).append("</a>\n");
+            }
+            sb.append("    </div>\n  </div>\n");
+        }
         sb.append("  <div id=\"search-wrap\">\n");
         sb.append("    <input id=\"search-input\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\">\n");
         sb.append("    <div id=\"search-results\"></div>\n");
@@ -762,8 +950,7 @@ public class SiteBuilder {
         // Main content
         sb.append("<main>\n<h1>").append(escapeHtml(title)).append("</h1>\n");
         if (!production) {
-            String mdSourcePath = (siteName + "/docs" + currentPath.replaceAll("\\.html$", ".md"))
-                .replaceAll("\\.md\\.md$", ".md");
+            String mdSourcePath = siteName + "/docs/" + rawRelPath;
             sb.append("<div class=\"copy-bar\">");
             sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
             sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
@@ -802,6 +989,10 @@ public class SiteBuilder {
                 children.classList.toggle('open');
                 arrow.textContent = children.classList.contains('open') ? '▼' : '▶';
               });
+              var link = header.querySelector('a.cat-label');
+              if (link) {
+                link.addEventListener('click', function(e) { e.stopPropagation(); });
+              }
             });
             (function() {
               var sel = document.getElementById('theme-sel');
@@ -1067,6 +1258,62 @@ public class SiteBuilder {
                 el = el.parentElement;
               }
             }
+            // Pre-block toolbar: copy + wrap-toggle buttons
+            (function() {
+              document.querySelectorAll('main pre').forEach(function(pre) {
+                var container = document.createElement('div');
+                container.className = 'pre-container';
+                var toolbar = document.createElement('div');
+                toolbar.className = 'pre-toolbar';
+                // Copy button
+                var copyBtn = document.createElement('button');
+                copyBtn.innerHTML = '&#x1F4CB; Copy';
+                copyBtn.title = 'Copy to clipboard';
+                copyBtn.addEventListener('click', function() {
+                  var text = pre.textContent;
+                  navigator.clipboard.writeText(text.trim()).then(function() {
+                    copyBtn.classList.add('copied');
+                    copyBtn.innerHTML = '&#x2713; Copied';
+                    setTimeout(function() { copyBtn.classList.remove('copied'); copyBtn.innerHTML = '&#x1F4CB; Copy'; }, 1500);
+                  });
+                });
+                // Wrap toggle button (wrap is default)
+                var wrapBtn = document.createElement('button');
+                wrapBtn.innerHTML = '&#x21B5; Wrap';
+                wrapBtn.title = 'Toggle line wrap';
+                wrapBtn.classList.add('active');
+                wrapBtn.addEventListener('click', function() {
+                  if (container.classList.contains('pre-nowrap')) {
+                    container.classList.remove('pre-nowrap');
+                    wrapBtn.classList.add('active');
+                    wrapBtn.innerHTML = '&#x21B5; Wrap';
+                  } else {
+                    container.classList.add('pre-nowrap');
+                    wrapBtn.classList.remove('active');
+                    wrapBtn.innerHTML = '&#x2194; NoWrap';
+                  }
+                });
+                toolbar.appendChild(copyBtn);
+                toolbar.appendChild(wrapBtn);
+                pre.parentNode.insertBefore(container, pre);
+                container.appendChild(toolbar);
+                container.appendChild(pre);
+              });
+            })();
+            // Language dropdown toggle
+            (function() {
+              document.querySelectorAll('.lang-btn').forEach(function(btn) {
+                btn.addEventListener('click', function(e) {
+                  e.stopPropagation();
+                  btn.parentElement.classList.toggle('open');
+                });
+              });
+              document.addEventListener('click', function() {
+                document.querySelectorAll('.lang-dropdown.open').forEach(function(d) {
+                  d.classList.remove('open');
+                });
+              });
+            })();
             </script>
             """);
 
@@ -1074,9 +1321,13 @@ public class SiteBuilder {
 
         sb.append("</body></html>\n");
 
+        String langAttr = (currentLocale != null) ? currentLocale
+                        : (defaultLocale != null)  ? defaultLocale
+                        : "ja";
         return sb.toString()
             .replace("YADOC_SEARCH_URL", prefix + "search")
-            .replace("YADOC_PROJECT", siteName);
+            .replace("YADOC_PROJECT", siteName)
+            .replace("YADOC_LANG", langAttr);
     }
 
     /**
@@ -1097,9 +1348,15 @@ public class SiteBuilder {
         for (SiteNode node : nodes) {
             if (node.isDir()) {
                 sb.append("<li>\n");
-                sb.append("  <div class=\"cat-header\">")
-                  .append("<span class=\"cat-label\">").append(escapeHtml(node.label())).append("</span>")
-                  .append("<span class=\"cat-arrow\">▶</span>")
+                sb.append("  <div class=\"cat-header\">");
+                if (node.catLink() != null) {
+                    String catAbsHref = prefix + node.catLink().replaceFirst("^/", "");
+                    sb.append("<a href=\"").append(catAbsHref).append("\" class=\"cat-label\">")
+                      .append(escapeHtml(node.label())).append("</a>");
+                } else {
+                    sb.append("<span class=\"cat-label\">").append(escapeHtml(node.label())).append("</span>");
+                }
+                sb.append("<span class=\"cat-arrow\">▶</span>")
                   .append("</div>\n");
                 sb.append("  <div class=\"cat-children\">\n");
                 renderSidebar(sb, node.children(), prefix, currentPath);

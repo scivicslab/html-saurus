@@ -1,6 +1,8 @@
 package com.scivicslab.htmlsaurus;
 
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
 import org.apache.lucene.store.NIOFSDirectory;
@@ -12,22 +14,43 @@ import java.nio.file.attribute.BasicFileAttributes;
 /**
  * Builds a Lucene full-text search index from Markdown files in a Docusaurus {@code docs/} directory.
  *
- * <p>Uses a {@link org.apache.lucene.analysis.ja.JapaneseAnalyzer} to support Japanese text search.
- * Each Markdown file is indexed with its title, document ID (from frontmatter), body text,
- * and a summary snippet for display in search results.
+ * <p>Uses a {@link JapaneseAnalyzer} for Japanese content and {@link StandardAnalyzer} for other
+ * locales (e.g., English). Each Markdown file is indexed with its title, document ID (from
+ * frontmatter), body text, and a summary snippet for display in search results.
+ *
+ * <p>The {@code path} field stores the clean URL path (numeric prefixes stripped, locale prefix
+ * included for non-default locales).
  */
 public class SearchIndexer {
 
     private final Path docsDir;
     private final Path indexDir;
+    private final String locale;
+    private final boolean production;
 
     /**
-     * @param docsDir source directory containing Markdown files to index
+     * Creates an indexer for the default (Japanese) locale in dev mode.
+     *
+     * @param docsDir  source directory containing Markdown files to index
      * @param indexDir target directory for the Lucene index
      */
     public SearchIndexer(Path docsDir, Path indexDir) {
+        this(docsDir, indexDir, null, false);
+    }
+
+    /**
+     * Creates an indexer with explicit locale and production-mode settings.
+     *
+     * @param docsDir    source directory containing Markdown files to index
+     * @param indexDir   target directory for the Lucene index
+     * @param locale     BCP 47 locale code (e.g. {@code "ja"}, {@code "en"}), or {@code null} for Japanese default
+     * @param production if {@code true}, generates clean URLs ({@code /page/}); otherwise {@code .html} URLs
+     */
+    public SearchIndexer(Path docsDir, Path indexDir, String locale, boolean production) {
         this.docsDir = docsDir;
         this.indexDir = indexDir;
+        this.locale = locale;
+        this.production = production;
     }
 
     /**
@@ -37,7 +60,8 @@ public class SearchIndexer {
      * @throws IOException if file I/O or index writing fails
      */
     public void index() throws IOException {
-        var config = new IndexWriterConfig(new JapaneseAnalyzer());
+        Analyzer analyzer = isJapanese() ? new JapaneseAnalyzer() : new StandardAnalyzer();
+        var config = new IndexWriterConfig(analyzer);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
 
         try (var dir = new NIOFSDirectory(indexDir);
@@ -53,6 +77,10 @@ public class SearchIndexer {
                 }
             });
         }
+    }
+
+    private boolean isJapanese() {
+        return locale == null || locale.equals("ja");
     }
 
     /**
@@ -92,13 +120,30 @@ public class SearchIndexer {
         String summary = plainText.length() > 250 ? plainText.substring(0, 250) + "…" : plainText;
 
         Path rel = docsDir.relativize(mdFile);
-        String href = "/" + rel.toString().replace('\\', '/').replaceAll("\\.md$", ".html");
+        String relStr = rel.toString().replace('\\', '/');
+        String cleanBase;
+        // Apply dir/dir.md collapsing (same rule as SiteBuilder.convertPage)
+        if (rel.getNameCount() >= 2) {
+            String fileBase = SiteBuilder.stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
+            String parentBase = SiteBuilder.stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
+            if (fileBase.equals(parentBase)) {
+                cleanBase = SiteBuilder.cleanRelPath(rel.getParent().toString().replace('\\', '/'));
+            } else {
+                cleanBase = SiteBuilder.cleanRelPath(relStr.replaceAll("\\.md$", ""));
+            }
+        } else {
+            cleanBase = SiteBuilder.cleanRelPath(relStr.replaceAll("\\.md$", ""));
+        }
+        String localePrefix = (locale != null && !isJapanese()) ? locale + "/" : "";
+        String href = production
+            ? "/" + localePrefix + cleanBase + "/"
+            : "/" + localePrefix + cleanBase + ".html";
 
         Document doc = new Document();
         doc.add(new StoredField("path", href));
         doc.add(new StoredField("title", title));
         doc.add(new StoredField("summary", summary));
-        // title_idx and doc_id are boosted at query time; body is not stored (only indexed)
+        // title_idx and doc_id_idx are boosted at query time; body is not stored (only indexed)
         doc.add(new TextField("title_idx", title, Field.Store.NO));
         doc.add(new TextField("body", plainText, Field.Store.NO));
         if (!docId.isBlank()) {
