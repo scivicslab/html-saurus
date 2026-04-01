@@ -56,6 +56,7 @@ final class HttpUtils {
         if (path.endsWith(".png"))  return "image/png";
         if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
         if (path.endsWith(".svg"))  return "image/svg+xml";
+        if (path.endsWith(".xml"))  return "text/xml; charset=UTF-8";
         return "application/octet-stream";
     }
 
