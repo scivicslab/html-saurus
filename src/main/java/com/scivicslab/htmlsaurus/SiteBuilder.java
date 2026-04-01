@@ -906,6 +906,13 @@ public class SiteBuilder {
                 String stripped = currentPath.replaceFirst("^/" + currentLocale + "(/|$)", "/");
                 basePath = stripped.isEmpty() ? "/" : stripped;
             }
+            // Language switcher links must reach the SITE ROOT (above all locale dirs).
+            // For the default locale, `prefix` already points to the site root.
+            // For alternate locales, `prefix` points only to the locale root (e.g. /en/),
+            // so we need one extra "../" to escape the locale directory.
+            boolean isNonDefaultLocale = currentLocale != null && !currentLocale.equals(defaultLocale);
+            String siteRootPrefix = isNonDefaultLocale ? "../" + prefix : prefix;
+
             String activeLabel = localeLabel(currentLocale != null ? currentLocale : defaultLocale);
             sb.append("  <div class=\"lang-dropdown\">\n");
             sb.append("    <button class=\"lang-btn\">").append(escapeHtml(activeLabel))
@@ -915,7 +922,7 @@ public class SiteBuilder {
                 String targetPath = locale.equals(defaultLocale)
                     ? basePath
                     : "/" + locale + (basePath.startsWith("/") ? basePath : "/" + basePath);
-                String href = prefix + targetPath.replaceFirst("^/", "");
+                String href = siteRootPrefix + targetPath.replaceFirst("^/", "");
                 boolean isCurrent = locale.equals(currentLocale)
                     || (currentLocale == null && locale.equals(defaultLocale));
                 sb.append("      <a href=\"").append(href).append("\" class=\"lang-item")

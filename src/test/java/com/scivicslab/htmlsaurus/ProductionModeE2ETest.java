@@ -375,5 +375,64 @@ class ProductionModeE2ETest {
                     "GET /en/guides/top_page/ must return 200 " +
                     "(English alternate locale must be built and served)");
         }
+
+        @Test
+        @DisplayName("E-3: from English page, Japanese link resolves to /guides/top_page/ (not /en/guides/top_page/)")
+        void english_to_japanese_linkIsCorrect() {
+            // Bug fixed: alternate locale pages need one extra '../' to escape the locale dir.
+            // Before fix: prefix='../../' → ../../guides/top_page/ → /en/guides/top_page/ (wrong)
+            // After fix:  prefix='../../../' → ../../../guides/top_page/ → /guides/top_page/ (correct)
+            page.navigate(url("/en/guides/top_page/"));
+
+            ElementHandle jaLink = page.querySelectorAll(".lang-item").stream()
+                    .filter(el -> {
+                        String text = el.textContent();
+                        return text != null && text.contains("日本語");
+                    })
+                    .findFirst().orElse(null);
+            assertNotNull(jaLink, "Japanese language link must exist on English page");
+
+            String href = jaLink.getAttribute("href");
+            assertNotNull(href, "Japanese link must have href attribute");
+
+            // Resolve the relative href against the English page URL
+            String resolvedUrl = (String) page.evaluate(
+                    "href => new URL(href, document.baseURI).href", href);
+            assertTrue(resolvedUrl.endsWith("/guides/top_page/"),
+                    "Japanese link from English page must resolve to /guides/top_page/, got: " + resolvedUrl);
+            assertFalse(resolvedUrl.contains("/en/guides/"),
+                    "Japanese link must NOT stay in /en/ locale, got: " + resolvedUrl);
+        }
+
+        @Test
+        @DisplayName("E-4: following Japanese link from English page lands on Japanese page")
+        void english_follow_japanese_link_navigates() {
+            page.navigate(url("/en/guides/top_page/"));
+
+            // Extract the ja link href and navigate to it directly
+            // (avoids dropdown-open timing issues while still verifying the link works end-to-end)
+            String jaHref = (String) page.evaluate("""
+                    () => {
+                        const links = document.querySelectorAll('.lang-item');
+                        for (const l of links) {
+                            if (l.textContent.includes('日本語')) return l.getAttribute('href');
+                        }
+                        return null;
+                    }
+                    """);
+            assertNotNull(jaHref, "Japanese lang-item link must exist");
+
+            // Resolve the relative href to an absolute URL using the browser, then navigate
+            page.navigate(url("/en/guides/top_page/"));
+            String resolved = (String) page.evaluate("href => new URL(href, document.baseURI).href", jaHref);
+            page.navigate(resolved);
+            page.waitForLoadState();
+
+            String finalUrl = page.url();
+            assertTrue(finalUrl.contains("/guides/top_page/"),
+                    "Japanese link must navigate to /guides/top_page/, got: " + finalUrl);
+            assertFalse(finalUrl.contains("/en/guides/"),
+                    "Japanese link must NOT stay in /en/ locale, got: " + finalUrl);
+        }
     }
 }
