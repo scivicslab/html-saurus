@@ -138,14 +138,16 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
 @media (max-width: 1100px) { aside.toc { display: none; } }
 /* ---- TOC feed links ---- */
 .toc-feed-links { display: flex; gap: 6px; flex-wrap: wrap;
-                  padding: 8px 0.75rem 0; margin-top: 8px;
+                  padding: 10px 0.75rem 0; margin-top: 10px;
                   border-top: 1px solid var(--c-border); }
-.feed-link { display: inline-block; padding: 2px 8px; border-radius: 3px;
-             font-size: 0.72rem; font-weight: 700; text-decoration: none; color: #fff; }
+.feed-link { display: inline-flex; align-items: center; justify-content: center;
+             gap: 5px; width: 96px; height: 26px; border-radius: 4px;
+             font-size: 0.72rem; font-weight: 700; text-decoration: none; color: #fff;
+             flex-shrink: 0; }
 .rss-link  { background: #f26522; }
 .rss-link:hover  { background: #d4541a; }
-.json-link { background: #4a90d9; }
-.json-link:hover { background: #3278c0; }
+.json-link { background: #009400; }
+.json-link:hover { background: #007000; }
 /* ---- Copy buttons ---- */
 .copy-bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
 .copy-btn { background: var(--c-sidebar-bg); border: 1px solid var(--c-border); border-radius: 4px;

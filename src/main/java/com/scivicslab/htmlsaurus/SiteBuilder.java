@@ -662,12 +662,37 @@ public class SiteBuilder {
      * @param prefix relative path prefix for resolving asset URLs (e.g., {@code "../"})
      * @return HTML fragment to append inside the TOC aside, or empty string
      */
+    /** Inline SVG of the standard RSS wave icon (dot + two arcs), white fill. */
+    private static final String RSS_ICON =
+        "<svg width=\"13\" height=\"13\" viewBox=\"0 0 10 10\" fill=\"white\" xmlns=\"http://www.w3.org/2000/svg\">"
+        + "<circle cx=\"1.5\" cy=\"8.5\" r=\"1.5\"/>"
+        + "<path d=\"M0 5.5a4.5 4.5 0 0 1 4.5 4.5H3A3 3 0 0 0 0 7z\"/>"
+        + "<path d=\"M0 2a8 8 0 0 1 8 8H6.5A6.5 6.5 0 0 0 0 3.5z\"/>"
+        + "</svg>";
+
+    /** Inline SVG of curly braces representing JSON. */
+    private static final String JSON_ICON =
+        "<svg width=\"13\" height=\"13\" viewBox=\"0 0 13 13\" fill=\"white\" xmlns=\"http://www.w3.org/2000/svg\">"
+        + "<text x=\"0\" y=\"11\" font-family=\"monospace\" font-size=\"12\" font-weight=\"bold\">{}</text>"
+        + "</svg>";
+
+    /**
+     * Builds the HTML to inject at the bottom of the right-side TOC aside.
+     * If a {@code html-saurus-toc-footer.html} file exists in the project root, its content is used.
+     * Otherwise, if {@link #siteUrl} is configured, auto-generates RSS and JSON Feed links.
+     * Returns an empty string if neither condition is met.
+     *
+     * @param prefix relative path prefix for resolving asset URLs (e.g., {@code "../"})
+     * @return HTML fragment to append inside the TOC aside, or empty string
+     */
     private String buildTocFooter(String prefix) {
         if (customTocFooter != null) return customTocFooter;
         if (siteUrl != null) {
             return "<div class=\"toc-feed-links\">\n"
-                + "  <a href=\"" + prefix + "rss.xml\" class=\"feed-link rss-link\" title=\"RSS Feed\">RSS</a>\n"
-                + "  <a href=\"" + prefix + "feed.json\" class=\"feed-link json-link\" title=\"JSON Feed\">JSON Feed</a>\n"
+                + "  <a href=\"" + prefix + "rss.xml\" class=\"feed-link rss-link\" title=\"RSS Feed\">"
+                + RSS_ICON + " RSS</a>\n"
+                + "  <a href=\"" + prefix + "feed.json\" class=\"feed-link json-link\" title=\"JSON Feed\">"
+                + JSON_ICON + " JSON Feed</a>\n"
                 + "</div>\n";
         }
         return "";
