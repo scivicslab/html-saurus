@@ -950,6 +950,10 @@ public class SiteBuilder {
                   el.classList.add('open');
                   var arrow = el.previousElementSibling && el.previousElementSibling.querySelector('.cat-arrow');
                   if (arrow) arrow.textContent = '▼';
+                  var header = el.previousElementSibling;
+                  if (header && header.dataset.cat) {
+                    localStorage.setItem('hs-cat:' + header.dataset.cat, '1');
+                  }
                 }
                 el = el.parentElement;
               }
