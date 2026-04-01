@@ -86,6 +86,21 @@ class MarkdownConverterTest {
         }
 
         @Test
+        @DisplayName("HTML table with blank lines inside cells renders as table, not code block")
+        void htmlTableWithBlankLines_notCodeBlock() throws IOException {
+            String md =
+                "<table>\n<tbody>\n<tr>\n<td>\n\nセルの内容<br />\n\n</td>\n</tr>\n</tbody>\n</table>\n";
+            String html = buildPage(md);
+
+            assertTrue(html.contains("<td>"),
+                "Table cell must render as <td>, not be split by blank lines");
+            assertFalse(html.contains("<pre>"),
+                "Indented HTML inside table must not be treated as a code block");
+            assertTrue(html.contains("セルの内容"),
+                "Cell text must appear in rendered output");
+        }
+
+        @Test
         @DisplayName(":::danger inside fenced code block is not processed")
         void insideFencedCode_notProcessed() throws IOException {
             String html = buildPage("```\n:::danger タイトル\n本文\n:::\n```\n");

@@ -51,6 +51,11 @@ class MarkdownConverter {
      * Admonitions inside fenced code blocks are passed through unchanged.
      */
     String convertMarkdown(String markdown) {
+        // CommonMark ends an HTML block (type 6) at a blank line.
+        // Tables with blank lines inside cells would be split: post-blank content
+        // rendered as Markdown, and 4-space-indented <td> tags as code blocks.
+        // Pre-processing: collapse blank lines within <table>...</table> blocks.
+        markdown = normalizeHtmlTableBlocks(markdown);
         StringBuilder result = new StringBuilder();
         StringBuilder normalBuffer = new StringBuilder();
         String[] lines = markdown.split("\n", -1);
@@ -153,6 +158,53 @@ class MarkdownConverter {
 
     private String capitalize(String s) {
         return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
+    /**
+     * Removes blank lines within {@code <table>...</table>} blocks so that CommonMark
+     * does not terminate the HTML block at blank lines inside cells.
+     * Handles nested tables via depth counting.
+     */
+    private static String normalizeHtmlTableBlocks(String markdown) {
+        StringBuilder result = new StringBuilder();
+        int pos = 0;
+        while (pos < markdown.length()) {
+            int tableOpen = markdown.indexOf("<table", pos);
+            if (tableOpen == -1) {
+                result.append(markdown, pos, markdown.length());
+                break;
+            }
+            result.append(markdown, pos, tableOpen);
+            int tableClose = findMatchingTableClose(markdown, tableOpen);
+            if (tableClose == -1) {
+                result.append(markdown, tableOpen, markdown.length());
+                break;
+            }
+            String tableBlock = markdown.substring(tableOpen, tableClose);
+            // Replace one-or-more consecutive blank lines with a single newline
+            result.append(tableBlock.replaceAll("\n([ \t]*\n)+", "\n"));
+            pos = tableClose;
+        }
+        return result.toString();
+    }
+
+    /** Returns the index just past the {@code </table>} that matches the {@code <table} at {@code openPos}. */
+    private static int findMatchingTableClose(String markdown, int openPos) {
+        int depth = 1;
+        int pos = openPos + 6; // skip "<table"
+        while (pos < markdown.length() && depth > 0) {
+            int nextOpen  = markdown.indexOf("<table",  pos);
+            int nextClose = markdown.indexOf("</table>", pos);
+            if (nextClose == -1) return -1;
+            if (nextOpen != -1 && nextOpen < nextClose) {
+                depth++;
+                pos = nextOpen + 6;
+            } else {
+                depth--;
+                pos = nextClose + 8;
+            }
+        }
+        return depth == 0 ? pos : -1;
     }
 
     /**
