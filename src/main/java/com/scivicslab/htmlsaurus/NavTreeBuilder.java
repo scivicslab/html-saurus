@@ -30,19 +30,46 @@ class NavTreeBuilder {
     private static final Pattern DOC_ITEM_PAT         = Pattern.compile(
         "docId:\\s*['\"]([^'\"]+)['\"].*?label:\\s*['\"]([^'\"]+)['\"]", Pattern.DOTALL);
 
+    /** Matches {@code "item.label.<original>": { "message": "<translated>" }} in navbar.json. */
+    private static final Pattern NAVBAR_LABEL_PAT = Pattern.compile(
+        "\"item\\.label\\.([^\"]+)\":\\s*\\{\\s*\"message\":\\s*\"([^\"]+)\"");
+
     private final Path docsDir;
+    private final Path projectRoot;
     private final boolean production;
     private final MarkdownConverter converter;
+    private final String currentLocale;
+    private final String defaultLocale;
 
     /**
-     * @param docsDir    source directory containing Markdown files
-     * @param production {@code true} to generate production-style directory URLs
-     * @param converter  Markdown converter used for frontmatter extraction during tree building
+     * @param docsDir       source directory containing Markdown files
+     * @param production    {@code true} to generate production-style directory URLs
+     * @param converter     Markdown converter used for frontmatter extraction during tree building
+     * @param currentLocale locale code of this build (e.g., "en"), or null for default
+     * @param defaultLocale default locale from docusaurus.config (e.g., "ja"), or null
      */
-    NavTreeBuilder(Path docsDir, boolean production, MarkdownConverter converter) {
+    NavTreeBuilder(Path docsDir, boolean production, MarkdownConverter converter,
+                   String currentLocale, String defaultLocale) {
         this.docsDir = docsDir;
+        this.projectRoot = findProjectRoot(docsDir);
         this.production = production;
         this.converter = converter;
+        this.currentLocale = currentLocale;
+        this.defaultLocale = defaultLocale;
+    }
+
+    /**
+     * Walks up from docsDir to find the Docusaurus project root — the nearest ancestor
+     * containing a {@code docs/} subdirectory. Handles alternate-locale builds where
+     * docsDir is deep inside {@code i18n/<locale>/docusaurus-plugin-content-docs/current}.
+     */
+    private static Path findProjectRoot(Path docsDir) {
+        Path p = docsDir.getParent();
+        while (p != null) {
+            if (Files.isDirectory(p.resolve("docs"))) return p;
+            p = p.getParent();
+        }
+        return docsDir.getParent();
     }
 
     /**
@@ -62,7 +89,6 @@ class NavTreeBuilder {
      * order when the config files are absent or unparseable.
      */
     private SiteNode reorderFromDocusaurusConfig(SiteNode root) {
-        Path projectRoot = docsDir.getParent();
         Path configFile = resolveFirst(projectRoot, "docusaurus.config.ts", "docusaurus.config.js");
         Path sidebarsFile = resolveFirst(projectRoot, "sidebars.ts", "sidebars.js");
         if (configFile == null || sidebarsFile == null) return root;
@@ -123,6 +149,29 @@ class NavTreeBuilder {
                     childByDirName.put(dirName, child);
                 } else {
                     unmatchedChildren.add(child);
+                }
+            }
+
+            // For alternate locales, load translated navbar labels from
+            // i18n/<locale>/docusaurus-theme-classic/navbar.json and override config labels.
+            if (currentLocale != null && !currentLocale.equals(defaultLocale)) {
+                Path navbarJson = projectRoot.resolve(
+                    "i18n/" + currentLocale + "/docusaurus-theme-classic/navbar.json");
+                if (Files.exists(navbarJson)) {
+                    try {
+                        String navbarContent = Files.readString(navbarJson);
+                        var nm = NAVBAR_LABEL_PAT.matcher(navbarContent);
+                        while (nm.find()) {
+                            String originalLabel = nm.group(1);
+                            String translatedLabel = nm.group(2);
+                            // Find which dirName has this original label and update it
+                            for (String dirName : orderedDirNames) {
+                                if (originalLabel.equals(dirNameToLabel.get(dirName))) {
+                                    dirNameToLabel.put(dirName, translatedLabel);
+                                }
+                            }
+                        }
+                    } catch (IOException ignored) {}
                 }
             }
 

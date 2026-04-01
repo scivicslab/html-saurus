@@ -107,12 +107,12 @@ public class SiteBuilder {
         this.currentLocale = currentLocale;
         this.defaultLocale = defaultLocale;
         this.allLocales = allLocales != null ? allLocales : List.of();
-        Path projectRoot = docsDir.getParent();
+        Path projectRoot = findProjectRoot(docsDir);
         this.customCss    = production ? readOptional(projectRoot.resolve("html-saurus.css"))    : null;
         this.customHeader = production ? readOptional(projectRoot.resolve("html-saurus-header.html")) : null;
         this.customFooter = production ? readOptional(projectRoot.resolve("html-saurus-footer.html")) : null;
         this.converter = new MarkdownConverter();
-        this.navBuilder = new NavTreeBuilder(docsDir, production, converter);
+        this.navBuilder = new NavTreeBuilder(docsDir, production, converter, currentLocale, defaultLocale);
     }
 
     /** Returns a human-readable display label for a locale code. */
@@ -914,6 +914,20 @@ public class SiteBuilder {
         if (s == null) return "";
         return s.replace("\\", "\\\\").replace("\"", "\\\"")
                 .replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r");
+    }
+
+    /**
+     * Walks up from {@code docsDir} to find the Docusaurus project root — the nearest ancestor
+     * that contains a {@code docs/} subdirectory. This correctly handles alternate-locale builds
+     * where {@code docsDir} is deep inside {@code i18n/<locale>/docusaurus-plugin-content-docs/current}.
+     */
+    private static Path findProjectRoot(Path docsDir) {
+        Path p = docsDir.getParent();
+        while (p != null) {
+            if (Files.isDirectory(p.resolve("docs"))) return p;
+            p = p.getParent();
+        }
+        return docsDir.getParent(); // fallback: should not happen in valid Docusaurus layout
     }
 
     /** Reads a file to a String, or returns null if the file does not exist. */
