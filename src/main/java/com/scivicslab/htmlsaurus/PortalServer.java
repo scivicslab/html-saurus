@@ -70,7 +70,7 @@ public class PortalServer {
      * @throws IOException if the server socket cannot be opened
      */
     public HttpServer start() throws IOException {
-        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
+        var server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         server.createContext("/", this::handleAll);
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
