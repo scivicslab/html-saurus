@@ -400,6 +400,125 @@ class UrlRuleTest {
         }
     }
 
+    // ---- Root page (slug: /) -------------------------------------------
+
+    @Nested
+    @DisplayName("Root page (slug: /)")
+    class RootPage {
+
+        /** Creates a docs directory with a slug:/ page inside a same-name dir. */
+        private Path createProjectWithRootPage(boolean production) throws IOException {
+            Path proj = createProject("proj");
+            Path docsDir = proj.resolve("docs");
+            // slug:/ page in same-name pattern: guides/010_top_page/010_top_page.md
+            Path rootMdDir = docsDir.resolve("010_guides/010_top_page");
+            Files.createDirectories(rootMdDir);
+            Files.writeString(rootMdDir.resolve("010_top_page.md"),
+                    "---\ntitle: Top Page\nid: top_page\nslug: /\n---\n\n# Top\n\n![img](hero.png)\n");
+            // Create a dummy image asset in the same directory
+            Files.writeString(rootMdDir.resolve("hero.png"), "FAKE_PNG_DATA");
+            // Need at least one other page so the site has content
+            writeDoc(docsDir, "010_guides/020_about/020_about.md", "About");
+
+            Main.build(docsDir, proj.resolve("static-html"), production);
+            return proj;
+        }
+
+        @Test
+        @DisplayName("root index.html is generated at outDir root")
+        void rootIndexHtml_exists_devMode() throws IOException {
+            Path proj = createProjectWithRootPage(false);
+            assertTrue(Files.exists(proj.resolve("static-html/index.html")),
+                    "slug:/ page must generate index.html at the output root");
+        }
+
+        @Test
+        @DisplayName("root index.html is generated at outDir root (production)")
+        void rootIndexHtml_exists_productionMode() throws IOException {
+            Path proj = createProjectWithRootPage(true);
+            assertTrue(Files.exists(proj.resolve("static-html/index.html")),
+                    "slug:/ page must generate index.html at the output root in production");
+        }
+
+        @Test
+        @DisplayName("root page asset (image) is copied to outDir root")
+        void rootPage_assetCopied_productionMode() throws IOException {
+            Path proj = createProjectWithRootPage(true);
+            assertTrue(Files.exists(proj.resolve("static-html/hero.png")),
+                    "Asset hero.png must be copied to outDir root for root page");
+        }
+
+        @Test
+        @DisplayName("root page asset (image) is copied to outDir root (dev mode)")
+        void rootPage_assetCopied_devMode() throws IOException {
+            Path proj = createProjectWithRootPage(false);
+            assertTrue(Files.exists(proj.resolve("static-html/hero.png")),
+                    "Asset hero.png must be copied to outDir root for root page in dev mode");
+        }
+
+        @Test
+        @DisplayName("root page image src remains relative (not rewritten)")
+        void rootPage_imageSrc_remainsRelative() throws IOException {
+            Path proj = createProjectWithRootPage(true);
+            String html = Files.readString(proj.resolve("static-html/index.html"));
+            assertTrue(html.contains("src=\"hero.png\""),
+                    "Root page image src must remain as relative 'hero.png' (asset is copied to outDir root)");
+        }
+
+        @Test
+        @DisplayName("normal page is also generated at its own path (production)")
+        void normalPage_alsoGenerated_productionMode() throws IOException {
+            Path proj = createProjectWithRootPage(true);
+            assertTrue(Files.exists(proj.resolve("static-html/guides/top_page/index.html")),
+                    "slug:/ page must also be generated at its normal path (guides/top_page/index.html)");
+        }
+
+        @Test
+        @DisplayName("normal page is also generated at its own path (dev)")
+        void normalPage_alsoGenerated_devMode() throws IOException {
+            Path proj = createProjectWithRootPage(false);
+            assertTrue(Files.exists(proj.resolve("static-html/guides/top_page.html")),
+                    "slug:/ page must also be generated at its normal path (guides/top_page.html)");
+        }
+
+        @Test
+        @DisplayName("site-title link uses ./ (never index.html) in both modes")
+        void siteTitleLink_neverExposesIndexHtml() throws IOException {
+            Path proj = createProjectWithRootPage(true);
+            String html = Files.readString(proj.resolve("static-html/index.html"));
+            assertTrue(html.contains("class=\"site-title\" href=\"./\""),
+                    "Site title must link to './' in production mode");
+
+            Path projDev = createProjectWithRootPage(false);
+            String htmlDev = Files.readString(projDev.resolve("static-html/index.html"));
+            assertTrue(htmlDev.contains("class=\"site-title\" href=\"./\""),
+                    "Site title must link to './' in dev mode too — index.html must never be exposed in URL");
+        }
+
+        @Test
+        @DisplayName("site-title link on subpages also never contains index.html")
+        void siteTitleLink_subpage_neverExposesIndexHtml() throws IOException {
+            Path proj = createProjectWithRootPage(true);
+            // Check the about page (a subpage)
+            String html = Files.readString(proj.resolve("static-html/guides/about/index.html"));
+            assertFalse(html.contains("index.html"),
+                    "Subpage site-title link must not contain 'index.html'");
+        }
+
+        @Test
+        @DisplayName("fallback: redirect index.html when no slug:/ page exists")
+        void fallback_redirectWhenNoRootSlug() throws IOException {
+            Path proj = createProject("proj");
+            writeDoc(proj.resolve("docs"), "intro.md", "Introduction");
+
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
+
+            String html = Files.readString(proj.resolve("static-html/index.html"));
+            assertTrue(html.contains("meta http-equiv=\"refresh\""),
+                    "Without slug:/ page, index.html must be a meta-refresh redirect");
+        }
+    }
+
     // ---- Numeric prefix stripping: edge cases --------------------------
 
     @Nested

@@ -480,22 +480,25 @@ public class SiteBuilder {
             if (nextUrl != null) { nextHref = prefix + nextUrl.replaceFirst("^/", ""); nextLabel = next.label(); }
         }
 
-        // Rewrite relative asset paths (images etc.) in root page content to point to the
-        // normal page's asset directory.  The same page is also generated at its normal
-        // location (e.g. guides/top_page/), so assets are already served from there.
-        // This avoids placing assets at the output root, where external reverse proxies
-        // may block direct file access.
-        String assetPrefix = normalCleanBase + "/";
-        contentHtml = contentHtml.replaceAll(
-            "(src=\")(?!https?://|data:|/|#)([^\"]+\")",
-            "$1" + assetPrefix.replace("$", "\\$") + "$2");
-
         String lastUpdated = gitLastModified(mdFile);
         String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath,
                                   prevHref, prevLabel, nextHref, nextLabel, lastUpdated);
         Path outFile = outDir.resolve("index.html");
         Files.writeString(outFile, html);
         System.out.println("  " + outFile + " (root)");
+
+        // Copy non-MD sibling assets (images etc.) from the source directory to outDir root
+        // so that relative src="top_image.png" in root index.html resolves correctly.
+        Path srcDir = mdFile.getParent();
+        try (var siblings = Files.list(srcDir)) {
+            siblings.filter(f -> !Files.isDirectory(f) && !f.toString().endsWith(".md"))
+                    .forEach(asset -> {
+                        try {
+                            Path dest = outDir.resolve(asset.getFileName().toString());
+                            Files.copy(asset, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        } catch (IOException ignored) {}
+                    });
+        }
     }
 
     /** Strips a leading numeric prefix (e.g., {@code 01_intro} → {@code intro}). */
@@ -602,9 +605,9 @@ public class SiteBuilder {
 
         // Top navbar
         sb.append("<header>\n");
-        // In production mode, link to the directory (clean URL); in dev mode, link to index.html.
-        String homeHref = production ? prefix : prefix + "index.html";
-        sb.append("  <a class=\"site-title\" href=\"").append(homeHref).append("\">");
+        // Site title always links to the directory root (./) — the server resolves / to index.html
+        // internally.  Never expose "index.html" in the URL bar regardless of mode.
+        sb.append("  <a class=\"site-title\" href=\"").append(prefix).append("\">");
         if (logoDataUrl != null) {
             sb.append("<img src=\"").append(logoDataUrl).append("\" alt=\"")
               .append(escapeHtml(logoAlt)).append("\" class=\"site-logo\">");
