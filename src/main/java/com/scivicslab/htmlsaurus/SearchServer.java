@@ -19,6 +19,7 @@ import java.util.Map;
 public class SearchServer {
 
     private final Path staticDir;
+    private final Path docsDir;
     private final int port;
     private final Runnable rebuild;
     private final boolean production;
@@ -31,9 +32,12 @@ public class SearchServer {
      * @param port       HTTP port to listen on
      * @param rebuild    callback to trigger a full rebuild (build + reindex)
      * @param production {@code true} to disable the {@code /api/build} endpoint
+     * @param docsDir    source directory containing raw Markdown files (for MCP tools)
      */
-    public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild, boolean production) {
+    public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild,
+                        boolean production, Path docsDir) {
         this.staticDir = staticDir;
+        this.docsDir = docsDir;
         this.port = port;
         this.rebuild = rebuild;
         this.production = production;
@@ -62,6 +66,9 @@ public class SearchServer {
         var server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         if (!production) server.createContext("/api/build", this::handleBuild);
         server.createContext("/search", this::handleSearch);
+        // MCP endpoint for LLM tool access
+        var mcpHandler = new McpHandler(docsDir, searcher, rebuild, localeSearchers);
+        server.createContext("/mcp", mcpHandler::handle);
         server.createContext("/", this::handleStatic);
         server.setExecutor(null);
         server.start();

@@ -73,7 +73,7 @@ public class Main {
             // Build search index only when serving; build-only mode does not need it.
             reindexAll(projectDir, production);
             Runnable rebuild = () -> { build(docsDir, outDir, false); reindexAll(projectDir, false); };
-            new SearchServer(outDir, indexDir, port, rebuild, production).start();
+            new SearchServer(outDir, indexDir, port, rebuild, production, docsDir).start();
         }
     }
 

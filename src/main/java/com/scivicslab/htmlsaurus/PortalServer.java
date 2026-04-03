@@ -30,6 +30,7 @@ public class PortalServer {
     private final int port;
     private final boolean production;
     private final Path worksDir;
+    private McpHandler mcpHandler;
 
     /**
      * @param worksDir    root directory containing all Docusaurus projects (used for reload)
@@ -61,6 +62,15 @@ public class PortalServer {
                 System.err.println("Warning: could not scan locale indexes for " + name + ": " + e.getMessage());
             }
         }
+        // MCP handler: in portal mode, use worksDir as root so all projects' docs/ are accessible
+        LuceneSearcher defaultSearcher = searchers.values().stream().findFirst().orElse(null);
+        Runnable rebuildAll = () -> {
+            for (Project p : projects) {
+                Main.build(p.projectDir().resolve("docs"), p.staticDir(), production);
+                Main.reindexAll(p.projectDir(), production);
+            }
+        };
+        this.mcpHandler = new McpHandler(worksDir, defaultSearcher, rebuildAll, searchers);
     }
 
     /**
@@ -90,6 +100,12 @@ public class PortalServer {
 
         if (path.equals("/") || path.isEmpty()) {
             servePortalIndex(ex);
+            return;
+        }
+
+        // MCP endpoint for LLM tool access
+        if (path.equals("/mcp")) {
+            mcpHandler.handle(ex);
             return;
         }
 

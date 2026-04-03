@@ -77,7 +77,7 @@ class ProductionModeE2ETest {
             Main.reindex(NIGSC_EN_DOCS, indexDir.resolve("en"), "en", true);
         }
 
-        SearchServer ss = new SearchServer(outDir, indexDir, 0, () -> {}, true);
+        SearchServer ss = new SearchServer(outDir, indexDir, 0, () -> {}, true, NIGSC_DOCS);
         server = ss.start();
         port = server.getAddress().getPort();
 
