@@ -261,34 +261,32 @@ public class SiteBuilder {
             }
         }
 
-        // Generate index.html that redirects to the homepage.
-        // A doc with "slug: /" in its frontmatter is the Docusaurus homepage; use its generated URL.
-        // Fall back to the nav tree's first page when no such doc exists.
-        String homeTarget = null;
+        // Generate root index.html for the homepage.
+        // A doc with "slug: /" in its frontmatter is the Docusaurus homepage.
+        // Render it directly as root index.html (no redirect) to avoid browser blocking.
+        boolean rootPageGenerated = false;
         for (Path[] pair : mdFiles) {
             try {
-                String src = Files.readString(pair[0]);
-                if (hasRootSlug(src)) {
-                    String[] homeFm = converter.parseFrontmatter(src);
-                    homeTarget = hrefForRel(pair[1], homeFm[2]);
+                if (hasRootSlug(Files.readString(pair[0]))) {
+                    convertPageAsRoot(pair[0], pair[1], root, pageOrder);
+                    rootPageGenerated = true;
                     break;
                 }
             } catch (IOException ignored) {}
         }
-        if (homeTarget == null) {
+        if (!rootPageGenerated) {
+            // Fallback: redirect to the first page in the nav tree
             String h = root.href();
-            homeTarget = h != null ? (h.startsWith("/") ? h.substring(1) : h) : null;
-        }
-        String firstHref = homeTarget;
-        if (firstHref != null && !firstHref.toLowerCase().startsWith("javascript:")) {
-            String target = firstHref;
-            String targetEsc = escapeHtml(target);
-            String indexHtml = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
-                + "<meta http-equiv=\"refresh\" content=\"0;url=" + targetEsc + "\">"
-                + "<title>Redirecting...</title></head><body>"
-                + "<p>Redirecting to <a href=\"" + targetEsc + "\">" + targetEsc + "</a>...</p>"
-                + "</body></html>\n";
-            Files.writeString(outDir.resolve("index.html"), indexHtml);
+            String homeTarget = h != null ? (h.startsWith("/") ? h.substring(1) : h) : null;
+            if (homeTarget != null && !homeTarget.toLowerCase().startsWith("javascript:")) {
+                String targetEsc = escapeHtml(homeTarget);
+                String indexHtml = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+                    + "<meta http-equiv=\"refresh\" content=\"0;url=" + targetEsc + "\">"
+                    + "<title>Redirecting...</title></head><body>"
+                    + "<p>Redirecting to <a href=\"" + targetEsc + "\">" + targetEsc + "</a>...</p>"
+                    + "</body></html>\n";
+                Files.writeString(outDir.resolve("index.html"), indexHtml);
+            }
         }
 
         if (siteUrl != null && !builtPages.isEmpty()) {
@@ -402,6 +400,58 @@ public class SiteBuilder {
                                   prevHref, prevLabel, nextHref, nextLabel, lastUpdated);
         Files.writeString(outFile, html);
         System.out.println("  " + outFile);
+    }
+
+    /**
+     * Renders a page with {@code slug: /} directly as {@code outDir/index.html}.
+     * Uses depth 0 and currentPath "/" so all relative links resolve from the site root.
+     * The page is also generated at its normal location by {@link #convertPage}.
+     */
+    private void convertPageAsRoot(Path mdFile, Path rel, SiteNode root, List<SiteNode> pageOrder) throws IOException {
+        String source = Files.readString(mdFile);
+        String[] fm = converter.parseFrontmatter(source);
+        String title = fm[0].isBlank()
+            ? stripNumericPrefix(stripExtension(mdFile.getFileName().toString())) : fm[0];
+        String body = fm[1];
+        String contentHtml = converter.convertMarkdown(body);
+
+        // Root page: depth is 0 in production (/index.html), prefix is "./"
+        String prefix = "./";
+        String currentPath = "/";
+        String topSection = rel.getNameCount() > 1
+            ? "/" + stripNumericPrefix(rel.getName(0).toString()) : null;
+        String rawRelPath = rel.toString().replace('\\', '/');
+
+        // prev/next: find this page's normal URL in pageOrder for navigation
+        String fmId = fm[2];
+        String normalCleanBase = fmId.isEmpty()
+            ? cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""))
+            : (rel.getParent() == null ? fmId : cleanRelPath(rel.getParent().toString().replace('\\', '/')) + "/" + fmId);
+        String normalPath = production ? "/" + normalCleanBase + "/" : "/" + normalCleanBase + ".html";
+        String prevHref = null, prevLabel = null, nextHref = null, nextLabel = null;
+        int pageIdx = -1;
+        for (int i = 0; i < pageOrder.size(); i++) {
+            SiteNode n = pageOrder.get(i);
+            String nUrl = n.isDir() ? n.catLink() : n.href();
+            if (normalPath.equals(nUrl)) { pageIdx = i; break; }
+        }
+        if (pageIdx > 0) {
+            SiteNode prev = pageOrder.get(pageIdx - 1);
+            String prevUrl = prev.isDir() ? prev.catLink() : prev.href();
+            if (prevUrl != null) { prevHref = prefix + prevUrl.replaceFirst("^/", ""); prevLabel = prev.label(); }
+        }
+        if (pageIdx >= 0 && pageIdx < pageOrder.size() - 1) {
+            SiteNode next = pageOrder.get(pageIdx + 1);
+            String nextUrl = next.isDir() ? next.catLink() : next.href();
+            if (nextUrl != null) { nextHref = prefix + nextUrl.replaceFirst("^/", ""); nextLabel = next.label(); }
+        }
+
+        String lastUpdated = gitLastModified(mdFile);
+        String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath,
+                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated);
+        Path outFile = outDir.resolve("index.html");
+        Files.writeString(outFile, html);
+        System.out.println("  " + outFile + " (root)");
     }
 
     /** Strips a leading numeric prefix (e.g., {@code 01_intro} → {@code intro}). */
