@@ -437,11 +437,30 @@ public class SiteBuilder {
         String rawRelPath = rel.toString().replace('\\', '/');
 
         // prev/next: find this page's normal URL in pageOrder for navigation
+        // Detect same-name pattern (dir/dir.md) to match convertPage's URL collapsing.
+        boolean isSameName = false;
+        if (rel.getNameCount() >= 2) {
+            String fileBase = stripNumericPrefix(stripExtension(rel.getFileName().toString()));
+            String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
+            if (fileBase.equals(parentBase)) isSameName = true;
+        }
         String fmId = fm[2];
         String cleanFmId = stripNumericPrefix(fmId);
-        String normalCleanBase = fmId.isEmpty()
-            ? cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""))
-            : (rel.getParent() == null ? cleanFmId : cleanRelPath(rel.getParent().toString().replace('\\', '/')) + "/" + cleanFmId);
+        String normalCleanBase;
+        if (!fmId.isEmpty()) {
+            if (isSameName) {
+                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
+                int lastSlash = parentPath.lastIndexOf('/');
+                String parentDir = lastSlash >= 0 ? cleanRelPath(parentPath.substring(0, lastSlash)) + "/" : "";
+                normalCleanBase = parentDir + cleanFmId;
+            } else {
+                normalCleanBase = rel.getParent() == null ? cleanFmId : cleanRelPath(rel.getParent().toString().replace('\\', '/')) + "/" + cleanFmId;
+            }
+        } else {
+            normalCleanBase = isSameName
+                ? cleanRelPath(rel.getParent().toString().replace('\\', '/'))
+                : cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
+        }
         String normalPath = production ? "/" + normalCleanBase + "/" : "/" + normalCleanBase + ".html";
         String prevHref = null, prevLabel = null, nextHref = null, nextLabel = null;
         int pageIdx = -1;
@@ -461,25 +480,22 @@ public class SiteBuilder {
             if (nextUrl != null) { nextHref = prefix + nextUrl.replaceFirst("^/", ""); nextLabel = next.label(); }
         }
 
+        // Rewrite relative asset paths (images etc.) in root page content to point to the
+        // normal page's asset directory.  The same page is also generated at its normal
+        // location (e.g. guides/top_page/), so assets are already served from there.
+        // This avoids placing assets at the output root, where external reverse proxies
+        // may block direct file access.
+        String assetPrefix = normalCleanBase + "/";
+        contentHtml = contentHtml.replaceAll(
+            "(src=\")(?!https?://|data:|/|#)([^\"]+\")",
+            "$1" + assetPrefix.replace("$", "\\$") + "$2");
+
         String lastUpdated = gitLastModified(mdFile);
         String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath,
                                   prevHref, prevLabel, nextHref, nextLabel, lastUpdated);
         Path outFile = outDir.resolve("index.html");
         Files.writeString(outFile, html);
         System.out.println("  " + outFile + " (root)");
-
-        // Copy non-MD sibling assets (images etc.) from the source directory to outDir root
-        // so that relative src="top_image.png" in root index.html resolves correctly.
-        Path srcDir = mdFile.getParent();
-        try (var siblings = Files.list(srcDir)) {
-            siblings.filter(f -> !Files.isDirectory(f) && !f.toString().endsWith(".md"))
-                    .forEach(asset -> {
-                        try {
-                            Path dest = outDir.resolve(asset.getFileName().toString());
-                            Files.copy(asset, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        } catch (IOException ignored) {}
-                    });
-        }
     }
 
     /** Strips a leading numeric prefix (e.g., {@code 01_intro} → {@code intro}). */
