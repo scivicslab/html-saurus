@@ -217,6 +217,50 @@ public class SiteBuilder {
             }
         });
 
+        // In production mode, non-same-name MD files produce dir/file/index.html,
+        // one level deeper than the source directory.  Copy sibling assets (images etc.)
+        // into each page's output directory so that relative src="./img.png" still works.
+        if (production) {
+            for (Path[] pair : mdFiles) {
+                Path rel = pair[1];
+                // Skip same-name pattern files (their output dir matches the source dir)
+                boolean isSameName = false;
+                if (rel.getNameCount() >= 2) {
+                    String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
+                    String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
+                    if (fileBase.equals(parentBase)) isSameName = true;
+                }
+                if (isSameName) continue;
+
+                // Determine the output directory for this page's index.html
+                String[] fm = converter.parseFrontmatter(Files.readString(pair[0]));
+                String fmId = fm[2];
+                String cleanBase;
+                if (!fmId.isEmpty()) {
+                    String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
+                    cleanBase = parentPath.isEmpty() ? fmId : cleanRelPath(parentPath) + "/" + fmId;
+                } else {
+                    cleanBase = cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
+                }
+                Path pageOutDir = outDir.resolve(cleanBase);
+
+                // Copy non-MD siblings from the source directory into the page output directory
+                Path srcDir = pair[0].getParent();
+                try (var siblings = Files.list(srcDir)) {
+                    siblings.filter(f -> !Files.isDirectory(f) && !f.toString().endsWith(".md"))
+                            .forEach(asset -> {
+                                try {
+                                    Path dest = pageOutDir.resolve(asset.getFileName().toString());
+                                    if (!Files.exists(dest)) {
+                                        Files.createDirectories(dest.getParent());
+                                        Files.copy(asset, dest);
+                                    }
+                                } catch (IOException ignored) {}
+                            });
+                }
+            }
+        }
+
         // Generate index.html that redirects to the homepage.
         // A doc with "slug: /" in its frontmatter is the Docusaurus homepage; use its generated URL.
         // Fall back to the nav tree's first page when no such doc exists.
