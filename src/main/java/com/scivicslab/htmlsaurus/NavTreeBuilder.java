@@ -243,7 +243,7 @@ class NavTreeBuilder {
         if (sameNameMd != null && !hasSubdirs && mdFiles.size() == 1) {
             String[] fm = converter.parseFrontmatter(Files.readString(sameNameMd));
             String title = fm[0].isBlank() ? dirBase : fm[0];
-            String fmId = fm[2];
+            String fmId = SiteBuilder.stripNumericPrefix(fm[2]);
             Path dirRel = docsDir.relativize(dir);
             String href;
             if (!fmId.isEmpty()) {
@@ -266,7 +266,7 @@ class NavTreeBuilder {
         if (sameNameMd != null) {
             String[] fm = converter.parseFrontmatter(Files.readString(sameNameMd));
             label = fm[0].isBlank() ? dirBase : fm[0];
-            String fmId = fm[2];
+            String fmId = SiteBuilder.stripNumericPrefix(fm[2]);
             // Category header links to the directory URL (same rule as Pattern 1)
             Path dirRel = docsDir.relativize(dir);
             if (!fmId.isEmpty()) {
@@ -288,7 +288,7 @@ class NavTreeBuilder {
                 String[] fm = converter.parseFrontmatter(Files.readString(entry));
                 String title = fm[0].isBlank()
                     ? SiteBuilder.stripNumericPrefix(SiteBuilder.stripExtension(entry.getFileName().toString())) : fm[0];
-                String fmId = fm[2];
+                String fmId = SiteBuilder.stripNumericPrefix(fm[2]);
                 Path rel = docsDir.relativize(entry);
                 String href;
                 if (!fmId.isEmpty()) {

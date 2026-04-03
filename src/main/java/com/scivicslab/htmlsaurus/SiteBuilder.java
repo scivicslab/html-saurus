@@ -314,6 +314,7 @@ public class SiteBuilder {
         String contentHtml = converter.convertMarkdown(body);
 
         // Detect same-name pattern: dir/dir.md (Docusaurus convention).
+        // Also used below to fix relative asset paths in dev mode.
         // Covers both Pattern 1 (only .md, no subdirs) and Pattern 2 (same-name .md + subdirs).
         // In both cases the URL is based on the parent directory path, not the file path.
         boolean isSameName = false;
@@ -328,22 +329,35 @@ public class SiteBuilder {
         String cleanBase;
         if (!fmId.isEmpty()) {
             // Frontmatter id overrides the filename segment (Docusaurus compatibility).
+            // Strip numeric prefix from id so that "010_Foo" becomes "Foo" (consistent with filename handling).
+            String cleanId = stripNumericPrefix(fmId);
             // For same-name files, id replaces the last directory segment.
             // For regular files, id replaces the filename.
             if (isSameName) {
                 String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
                 int lastSlash = parentPath.lastIndexOf('/');
                 String parentDir = lastSlash >= 0 ? cleanRelPath(parentPath.substring(0, lastSlash)) + "/" : "";
-                cleanBase = parentDir + fmId;
+                cleanBase = parentDir + cleanId;
             } else {
                 String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
-                cleanBase = parentPath.isEmpty() ? fmId : cleanRelPath(parentPath) + "/" + fmId;
+                cleanBase = parentPath.isEmpty() ? cleanId : cleanRelPath(parentPath) + "/" + cleanId;
             }
         } else {
             cleanBase = isSameName
                 ? cleanRelPath(rel.getParent().toString().replace('\\', '/'))
                 : cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
         }
+        // In dev mode, same-name HTML is output one level up from the asset directory.
+        // Rewrite relative src in content so that "img.png" becomes "dirName/img.png".
+        if (isSameName && !production) {
+            // Use the cleaned directory name (where assets are copied), not fmId
+            String assetDir = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
+            String assetPrefix = assetDir + "/";
+            contentHtml = contentHtml.replaceAll(
+                "(src=\")(?!https?://|data:|/|#)([^\"]+\")",
+                "$1" + assetPrefix.replace("$", "\\$") + "$2");
+        }
+
         String relStr = production ? cleanBase + "/index.html" : cleanBase + ".html";
         Path outFile = outDir.resolve(relStr);
         Files.createDirectories(outFile.getParent());
@@ -424,9 +438,10 @@ public class SiteBuilder {
 
         // prev/next: find this page's normal URL in pageOrder for navigation
         String fmId = fm[2];
+        String cleanFmId = stripNumericPrefix(fmId);
         String normalCleanBase = fmId.isEmpty()
             ? cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""))
-            : (rel.getParent() == null ? fmId : cleanRelPath(rel.getParent().toString().replace('\\', '/')) + "/" + fmId);
+            : (rel.getParent() == null ? cleanFmId : cleanRelPath(rel.getParent().toString().replace('\\', '/')) + "/" + cleanFmId);
         String normalPath = production ? "/" + normalCleanBase + "/" : "/" + normalCleanBase + ".html";
         String prevHref = null, prevLabel = null, nextHref = null, nextLabel = null;
         int pageIdx = -1;
@@ -452,6 +467,19 @@ public class SiteBuilder {
         Path outFile = outDir.resolve("index.html");
         Files.writeString(outFile, html);
         System.out.println("  " + outFile + " (root)");
+
+        // Copy non-MD sibling assets (images etc.) from the source directory to outDir root
+        // so that relative src="top_image.png" in root index.html resolves correctly.
+        Path srcDir = mdFile.getParent();
+        try (var siblings = Files.list(srcDir)) {
+            siblings.filter(f -> !Files.isDirectory(f) && !f.toString().endsWith(".md"))
+                    .forEach(asset -> {
+                        try {
+                            Path dest = outDir.resolve(asset.getFileName().toString());
+                            Files.copy(asset, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        } catch (IOException ignored) {}
+                    });
+        }
     }
 
     /** Strips a leading numeric prefix (e.g., {@code 01_intro} → {@code intro}). */
@@ -558,7 +586,9 @@ public class SiteBuilder {
 
         // Top navbar
         sb.append("<header>\n");
-        sb.append("  <a class=\"site-title\" href=\"").append(prefix).append("index.html\">");
+        // In production mode, link to the directory (clean URL); in dev mode, link to index.html.
+        String homeHref = production ? prefix : prefix + "index.html";
+        sb.append("  <a class=\"site-title\" href=\"").append(homeHref).append("\">");
         if (logoDataUrl != null) {
             sb.append("<img src=\"").append(logoDataUrl).append("\" alt=\"")
               .append(escapeHtml(logoAlt)).append("\" class=\"site-logo\">");
@@ -1307,15 +1337,16 @@ public class SiteBuilder {
             if (fileBase.equals(parentBase)) isSameName = true;
         }
         String cleanBase;
-        if (fmId != null && !fmId.isEmpty()) {
+        String cleanId = fmId != null ? stripNumericPrefix(fmId) : "";
+        if (!cleanId.isEmpty()) {
             if (isSameName) {
                 String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
                 int lastSlash = parentPath.lastIndexOf('/');
                 String parentDir = lastSlash >= 0 ? cleanRelPath(parentPath.substring(0, lastSlash)) + "/" : "";
-                cleanBase = parentDir + fmId;
+                cleanBase = parentDir + cleanId;
             } else {
                 String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
-                cleanBase = parentPath.isEmpty() ? fmId : cleanRelPath(parentPath) + "/" + fmId;
+                cleanBase = parentPath.isEmpty() ? cleanId : cleanRelPath(parentPath) + "/" + cleanId;
             }
         } else {
             cleanBase = isSameName

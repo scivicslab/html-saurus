@@ -121,18 +121,30 @@ public class SearchIndexer {
 
         Path rel = docsDir.relativize(mdFile);
         String relStr = rel.toString().replace('\\', '/');
-        String cleanBase;
-        // Apply dir/dir.md collapsing (same rule as SiteBuilder.convertPage)
+        // Detect same-name pattern: dir/dir.md
+        boolean isSameName = false;
         if (rel.getNameCount() >= 2) {
             String fileBase = SiteBuilder.stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
             String parentBase = SiteBuilder.stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
-            if (fileBase.equals(parentBase)) {
-                cleanBase = SiteBuilder.cleanRelPath(rel.getParent().toString().replace('\\', '/'));
+            if (fileBase.equals(parentBase)) isSameName = true;
+        }
+        // Compute cleanBase using the same logic as SiteBuilder.convertPage
+        String cleanId = SiteBuilder.stripNumericPrefix(docId);
+        String cleanBase;
+        if (!cleanId.isEmpty()) {
+            if (isSameName) {
+                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
+                int lastSlash = parentPath.lastIndexOf('/');
+                String parentDir = lastSlash >= 0 ? SiteBuilder.cleanRelPath(parentPath.substring(0, lastSlash)) + "/" : "";
+                cleanBase = parentDir + cleanId;
             } else {
-                cleanBase = SiteBuilder.cleanRelPath(relStr.replaceAll("\\.md$", ""));
+                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
+                cleanBase = parentPath.isEmpty() ? cleanId : SiteBuilder.cleanRelPath(parentPath) + "/" + cleanId;
             }
         } else {
-            cleanBase = SiteBuilder.cleanRelPath(relStr.replaceAll("\\.md$", ""));
+            cleanBase = isSameName
+                ? SiteBuilder.cleanRelPath(rel.getParent().toString().replace('\\', '/'))
+                : SiteBuilder.cleanRelPath(relStr.replaceAll("\\.md$", ""));
         }
         String localePrefix = (locale != null && !isJapanese()) ? locale + "/" : "";
         String href = production
