@@ -282,10 +282,11 @@ class MarkdownConverter {
      * and stripped from the body to avoid duplication with the rendered {@code <h1>}.
      *
      * @param source the raw Markdown source
-     * @return a two-element array: {@code [title, body]}
+     * @return a three-element array: {@code [title, body, id]} where id may be empty
      */
     String[] parseFrontmatter(String source) {
         String title = "";
+        String id = "";
         String body = source;
         if (source.startsWith("---")) {
             int end = source.indexOf("\n---", 3);
@@ -295,6 +296,8 @@ class MarkdownConverter {
                 for (String line : fm.split("\n")) {
                     if (line.startsWith("title:")) {
                         title = line.substring(6).trim().replaceAll("^\"|\"$", "");
+                    } else if (line.startsWith("id:")) {
+                        id = line.substring(3).trim().replaceAll("^\"|\"$", "");
                     }
                 }
             }
@@ -307,6 +310,6 @@ class MarkdownConverter {
             body = nl >= 0 ? body.substring(nl + 1).stripLeading() : "";
             title = headingTitle; // H1 always takes priority over frontmatter title
         }
-        return new String[]{title, body};
+        return new String[]{title, body, id};
     }
 }

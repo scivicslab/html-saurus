@@ -518,7 +518,7 @@ class ProductionModeE2ETest {
         @DisplayName("F-5: navbar present on Applications page with 'Applications' active")
         void navbar_presentAndActiveOnApplicationsPage() {
             // Applications section first page (from docusaurus.config.ts navbar config)
-            page.navigate(url("/application/terms_and_policies/user_account_issurance_criteria/"));
+            page.navigate(url("/application/terms_and_policies/user_issurance_criteria/"));
 
             List<ElementHandle> navLinks = page.querySelectorAll("header nav.top a");
             assertEquals(5, navLinks.size(),
@@ -817,9 +817,9 @@ class ProductionModeE2ETest {
         @DisplayName("J-1: Applications section first page returns 200")
         void applicationSection_firstPage_returns200() {
             Response resp = page.navigate(
-                    url("/application/terms_and_policies/user_account_issurance_criteria/"));
+                    url("/application/terms_and_policies/user_issurance_criteria/"));
             assertEquals(200, resp.status(),
-                    "GET /application/terms_and_policies/user_account_issurance_criteria/ " +
+                    "GET /application/terms_and_policies/user_issurance_criteria/ " +
                     "must return 200 (Applications section first page from navbar config)");
         }
 
