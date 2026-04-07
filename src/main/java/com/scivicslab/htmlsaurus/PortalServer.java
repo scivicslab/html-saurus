@@ -640,8 +640,8 @@ public class PortalServer {
         if (s == null) return;
         try {
             var hits = s.search(queryStr, 1000,
-                new String[]{"title_idx", "doc_id_idx", "body"},
-                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
+                new String[]{"title_idx", "doc_id_idx", "path_tokens", "body"},
+                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "body", 1.0f));
             for (var hit : hits) {
                 out.add(Map.of(
                     "project",  proj.name(),

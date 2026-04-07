@@ -119,8 +119,8 @@ public class SearchServer {
     private String search(String queryStr, LuceneSearcher s) {
         try {
             var hits = s.search(queryStr, 20,
-                new String[]{"title_idx", "doc_id_idx", "body"},
-                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
+                new String[]{"title_idx", "doc_id_idx", "path_tokens", "body"},
+                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "body", 1.0f));
             var sb = new StringBuilder("[");
             boolean first = true;
             for (var hit : hits) {

@@ -183,8 +183,8 @@ class McpHandler {
             ? localeSearchers.get(locale) : searcher;
 
         var hits = s.search(query, maxResults,
-            new String[]{"title_idx", "doc_id_idx", "body"},
-            Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "body", 1.0f));
+            new String[]{"title_idx", "doc_id_idx", "path_tokens", "body"},
+            Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "body", 1.0f));
 
         var sb = new StringBuilder();
         if (hits.isEmpty()) {

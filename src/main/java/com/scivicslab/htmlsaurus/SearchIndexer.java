@@ -1,7 +1,9 @@
 package com.scivicslab.htmlsaurus;
 
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.core.KeywordAnalyzer;
 import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
+import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
@@ -10,6 +12,7 @@ import org.apache.lucene.store.NIOFSDirectory;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Map;
 
 /**
  * Builds a Lucene full-text search index from Markdown files in a Docusaurus {@code docs/} directory.
@@ -55,12 +58,16 @@ public class SearchIndexer {
 
     /**
      * Rebuilds the search index from scratch. Walks all {@code .md} files in the docs directory
-     * and creates a Lucene index with fields: path, title, title_idx, body, summary, doc_id.
+     * and creates a Lucene index with fields: path, title, title_idx, body, summary, doc_id,
+     * doc_id_idx, path_tokens.
      *
      * @throws IOException if file I/O or index writing fails
      */
     public void index() throws IOException {
-        Analyzer analyzer = isJapanese() ? new JapaneseAnalyzer() : new StandardAnalyzer();
+        Analyzer baseAnalyzer = isJapanese() ? new JapaneseAnalyzer() : new StandardAnalyzer();
+        KeywordAnalyzer kw = new KeywordAnalyzer();
+        Analyzer analyzer = new PerFieldAnalyzerWrapper(baseAnalyzer,
+                Map.of("doc_id_idx", kw, "path_tokens", kw));
         var config = new IndexWriterConfig(analyzer);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
 
@@ -160,7 +167,20 @@ public class SearchIndexer {
         doc.add(new TextField("body", plainText, Field.Store.NO));
         if (!docId.isBlank()) {
             doc.add(new StoredField("doc_id", docId));
-            doc.add(new StringField("doc_id_idx", docId, Field.Store.NO));
+            doc.add(new TextField("doc_id_idx", docId, Field.Store.NO));
+        }
+
+        // Index each path segment as a whole string (KeywordAnalyzer) for document ID search.
+        // Segments like "020_DocumentationStandard_260401_oo01" are indexed both as-is and
+        // with the numeric prefix stripped, so searching either form finds the document.
+        for (String seg : relStr.split("/")) {
+            String s = seg.endsWith(".md") ? seg.substring(0, seg.length() - 3) : seg;
+            if (s.isBlank()) continue;
+            doc.add(new TextField("path_tokens", s, Field.Store.NO));
+            String stripped = SiteBuilder.stripNumericPrefix(s);
+            if (!stripped.equals(s)) {
+                doc.add(new TextField("path_tokens", stripped, Field.Store.NO));
+            }
         }
 
         writer.addDocument(doc);
