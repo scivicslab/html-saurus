@@ -675,13 +675,19 @@ public class SiteBuilder {
         sb.append("    <input id=\"search-input\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\">\n");
         sb.append("    <div id=\"search-results\"></div>\n");
         sb.append("  </div>\n");
+        sb.append("  <button class=\"menu-toggle\" id=\"menu-toggle\" aria-label=\"Toggle navigation\" aria-expanded=\"false\">\n");
+        sb.append("    <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\">\n");
+        sb.append("      <line x1=\"3\" y1=\"6\" x2=\"21\" y2=\"6\"/><line x1=\"3\" y1=\"12\" x2=\"21\" y2=\"12\"/><line x1=\"3\" y1=\"18\" x2=\"21\" y2=\"18\"/>\n");
+        sb.append("    </svg>\n");
+        sb.append("  </button>\n");
         sb.append("</header>\n");
+        sb.append("<div class=\"sidebar-overlay\" id=\"sidebar-overlay\"></div>\n");
 
         // Content wrapper
         sb.append("<div class=\"content-wrap\">\n");
 
         // Sidebar: show only the active section's children, or all if no section
-        sb.append("<nav class=\"side\">\n");
+        sb.append("<nav class=\"side\" id=\"sidebar\">\n");
         List<SiteNode> sidebarNodes = root.children();
         if (topSection != null) {
             for (SiteNode section : root.children()) {
@@ -894,6 +900,29 @@ public class SiteBuilder {
               onload="renderMathInElement(document.body, {delimiters: [
                 {left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});"></script>
             <script>
+            (function() {
+              var toggle = document.getElementById('menu-toggle');
+              var sidebar = document.getElementById('sidebar');
+              var overlay = document.getElementById('sidebar-overlay');
+              if (!toggle || !sidebar || !overlay) return;
+              function openSidebar() {
+                sidebar.classList.add('open');
+                overlay.classList.add('open');
+                toggle.setAttribute('aria-expanded', 'true');
+              }
+              function closeSidebar() {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('open');
+                toggle.setAttribute('aria-expanded', 'false');
+              }
+              toggle.addEventListener('click', function() {
+                sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
+              });
+              overlay.addEventListener('click', closeSidebar);
+              document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') closeSidebar();
+              });
+            })();
             document.querySelectorAll('nav.side a.cat-label').forEach(function(link) {
               link.addEventListener('click', function(e) { e.stopPropagation(); });
             });
