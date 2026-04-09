@@ -178,6 +178,8 @@
                                 <buildArg>-H:IncludeResources=org/apache/lucene/.*|META-INF/services/.*|.*\.dict|.*\.fst|.*\.dat</buildArg>
                                 <!-- Defer Lucene vectorization classes to runtime to avoid NativeLibrary.findEntry0 -->
                                 <buildArg>--initialize-at-run-time=org.apache.lucene.internal.vectorization.PanamaVectorUtilSupport,org.apache.lucene.internal.vectorization.VectorizationProvider,org.apache.lucene.util.VectorUtil</buildArg>
+                                <!-- Allow NativeLibrary.findEntry0 to be reported at runtime (Lucene falls back to scalar) -->
+                                <buildArg>--report-unsupported-elements-at-runtime</buildArg>
                             </buildArgs>
                         </configuration>
                     </plugin>
