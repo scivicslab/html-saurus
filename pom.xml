@@ -176,8 +176,8 @@
                                 <buildArg>-H:+ReportExceptionStackTraces</buildArg>
                                 <buildArg>--enable-url-protocols=http,https</buildArg>
                                 <buildArg>-H:IncludeResources=org/apache/lucene/.*|META-INF/services/.*|.*\.dict|.*\.fst|.*\.dat</buildArg>
-                                <!-- Lucene vectorization uses NativeLibrary at load time; defer to runtime -->
-                                <buildArg>--initialize-at-run-time=jdk.internal.loader.NativeLibraries,jdk.internal.loader.NativeLibrary,org.apache.lucene.internal.vectorization.PanamaVectorUtilSupport,org.apache.lucene.util.VectorUtil</buildArg>
+                                <!-- Defer Lucene vectorization classes to runtime to avoid NativeLibrary.findEntry0 -->
+                                <buildArg>--initialize-at-run-time=org.apache.lucene.internal.vectorization.PanamaVectorUtilSupport,org.apache.lucene.internal.vectorization.VectorizationProvider,org.apache.lucene.util.VectorUtil</buildArg>
                             </buildArgs>
                         </configuration>
                     </plugin>
