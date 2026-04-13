@@ -753,6 +753,7 @@ public class SiteBuilder {
         return sb.toString()
             .replace("YADOC_SEARCH_URL", escapeJs(siteRootPrefix + "search"
                 + (isNonDefaultLocale ? "?locale=" + currentLocale : "")))
+            .replace("YADOC_BUILD_URL", escapeJs("/api/build/" + siteName))
             .replace("YADOC_PROJECT", escapeJs(siteName))
             .replace("YADOC_LANG", escapeHtml(langAttr))
             .replace("YADOC_FAVICON", faviconHref);
@@ -953,7 +954,7 @@ public class SiteBuilder {
                 if (!btn) return;
                 btn.addEventListener('click', function() {
                   btn.disabled = true; btn.textContent = 'Building\\u2026';
-                  fetch('/api/build/YADOC_PROJECT', {method: 'POST'})
+                  fetch('YADOC_BUILD_URL', {method: 'POST'})
                     .then(function(r) { return r.json(); })
                     .then(function(j) {
                       btn.textContent = j.status === 'ok'

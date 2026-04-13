@@ -44,6 +44,17 @@ public class Main {
 
         if (rootDir == null) rootDir = Path.of("").toAbsolutePath();
 
+        // Startup mode summary — always printed so callers (e.g. service-portal) can verify options
+        String mode = portalMode ? "PORTAL" : "SINGLE";
+        String action = production ? "build+serve(production)" : serve ? "build+serve" : "build-only";
+        System.out.println("=== html-saurus startup ===");
+        System.out.println("  mode    : " + mode);
+        System.out.println("  rootDir : " + rootDir);
+        System.out.println("  action  : " + action);
+        System.out.println("  port    : " + (serve || production ? String.valueOf(port) : "n/a"));
+        System.out.println("  args    : " + String.join(" ", args));
+        System.out.println("===========================");
+
         if (portalMode) {
             runPortal(rootDir, port, serve, production);
         } else {

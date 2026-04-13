@@ -97,9 +97,12 @@ public class SearchIndexer {
     private void indexFile(IndexWriter writer, Path mdFile) throws IOException {
         String source = Files.readString(mdFile);
 
-        // Extract title and id from frontmatter
+        // Extract title, id, and metadata from frontmatter
         String title = "";
         String docId = "";
+        String authors = "";
+        String year = "";
+        String journal = "";
         String body = source;
         if (source.startsWith("---")) {
             int end = source.indexOf("\n---", 3);
@@ -111,6 +114,12 @@ public class SearchIndexer {
                         title = line.substring(6).trim().replaceAll("^\"|\"$", "");
                     } else if (line.startsWith("id:")) {
                         docId = line.substring(3).trim().replaceAll("^\"|\"$", "");
+                    } else if (line.startsWith("authors:")) {
+                        authors = line.substring(8).trim().replaceAll("^\"|\"$", "");
+                    } else if (line.startsWith("year:")) {
+                        year = line.substring(5).trim().replaceAll("^\"|\"$", "");
+                    } else if (line.startsWith("journal:")) {
+                        journal = line.substring(8).trim().replaceAll("^\"|\"$", "");
                     }
                 }
             }
@@ -165,6 +174,10 @@ public class SearchIndexer {
         // title_idx and doc_id_idx are boosted at query time; body is not stored (only indexed)
         doc.add(new TextField("title_idx", title, Field.Store.NO));
         doc.add(new TextField("body", plainText, Field.Store.NO));
+        String meta = (authors + " " + year + " " + journal).trim();
+        if (!meta.isBlank()) {
+            doc.add(new TextField("meta", meta, Field.Store.NO));
+        }
         if (!docId.isBlank()) {
             doc.add(new StoredField("doc_id", docId));
             doc.add(new TextField("doc_id_idx", docId, Field.Store.NO));

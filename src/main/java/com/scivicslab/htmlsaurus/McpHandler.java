@@ -147,7 +147,11 @@ class McpHandler {
             toolDef("rebuild-site",
                 "Regenerate static HTML and search index from the current Markdown sources.",
                 """
-                {"type":"object","properties":{},"required":[]}""")
+                {"type":"object","properties":{},"required":[]}"""),
+            toolDef("upload-pdf",
+                "Import a PDF file into the docs directory. Copies the PDF, extracts text, writes a companion .md file with YAML frontmatter (title, authors, year, journal), and triggers a rebuild.",
+                """
+                {"type":"object","properties":{"source_path":{"type":"string","description":"Absolute path to the PDF file on the filesystem"},"dest_path":{"type":"string","description":"Relative path within docs/ where the PDF should be saved (e.g. 'papers/attention.pdf')"}},"required":["source_path","dest_path"]}""")
         ) + "]}";
     }
 
@@ -163,6 +167,7 @@ class McpHandler {
             case "read-document"  -> toolReadDocument(args);
             case "edit-document"  -> toolEditDocument(args);
             case "rebuild-site"   -> toolRebuildSite();
+            case "upload-pdf"     -> toolUploadPdf(args);
             case null -> errorJson(-32602, "Missing tool name");
             default -> errorJson(-32602, "Unknown tool: " + toolName);
         };
@@ -183,8 +188,8 @@ class McpHandler {
             ? localeSearchers.get(locale) : searcher;
 
         var hits = s.search(query, maxResults,
-            new String[]{"title_idx", "doc_id_idx", "path_tokens", "body"},
-            Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "body", 1.0f));
+            new String[]{"title_idx", "doc_id_idx", "path_tokens", "meta", "body"},
+            Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f));
 
         var sb = new StringBuilder();
         if (hits.isEmpty()) {
@@ -284,6 +289,52 @@ class McpHandler {
         rebuild.run();
         long ms = System.currentTimeMillis() - start;
         return toolResult("Site rebuilt successfully in " + ms + " ms.");
+    }
+
+    private String toolUploadPdf(Map<String, Object> args) throws IOException {
+        String sourcePath = McpJsonParser.getString(args, "source_path");
+        String destPath   = McpJsonParser.getString(args, "dest_path");
+        if (sourcePath == null || sourcePath.isBlank()) {
+            return toolError("source_path is required");
+        }
+        if (destPath == null || destPath.isBlank()) {
+            return toolError("dest_path is required");
+        }
+        if (!destPath.toLowerCase().endsWith(".pdf")) {
+            return toolError("dest_path must end with .pdf");
+        }
+
+        Path src = Path.of(sourcePath).normalize();
+        if (!Files.exists(src)) {
+            return toolError("Source file not found: " + sourcePath);
+        }
+
+        Path dest = docsDir.resolve(destPath).normalize();
+        if (!dest.startsWith(docsDir)) {
+            return toolError("Path traversal not allowed");
+        }
+
+        Files.createDirectories(dest.getParent());
+        Files.copy(src, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+        String filename = dest.getFileName().toString();
+        String stem = filename.substring(0, filename.length() - 4);
+        Path mdPath = dest.getParent().resolve(stem + ".md");
+        try {
+            String md = PdfExtractor.extract(dest);
+            Files.writeString(mdPath, md, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            System.err.println("PDF extraction failed for " + filename + ": " + e.getMessage());
+            Files.writeString(mdPath,
+                "---\ntitle: \"" + stem + "\"\nsource_pdf: \"" + filename + "\"\n---\n\n(Text extraction failed)",
+                StandardCharsets.UTF_8);
+        }
+
+        long start = System.currentTimeMillis();
+        rebuild.run();
+        long ms = System.currentTimeMillis() - start;
+
+        return toolResult("PDF imported: " + destPath + " → " + stem + ".md (rebuilt in " + ms + " ms)");
     }
 
     // ---- Helpers ----

@@ -122,6 +122,13 @@ public class PortalServer {
             return;
         }
 
+        // Upload API: POST /api/upload/<project> (development mode only)
+        if (!production && path.startsWith("/api/upload/")) {
+            String name = path.substring("/api/upload/".length());
+            handleUpload(ex, name);
+            return;
+        }
+
         // Cross-project search API (JSON): GET /api/search?q=...
         if (path.equals("/api/search")) {
             handleGlobalSearch(ex);
@@ -227,6 +234,63 @@ public class PortalServer {
             System.err.println("Build error for " + name + ": " + e.getMessage());
             respond(ex, 500, "application/json", "{\"error\":\"Build failed\"}");
         }
+    }
+
+    // ---- Upload API endpoint ------------------------------------
+
+    /**
+     * Handles {@code POST /api/upload/<project>?dir=subdir&filename=paper.pdf}.
+     * Accepts raw PDF bytes, saves the file, extracts text to a companion {@code .md},
+     * and triggers a rebuild+reindex for the project.
+     */
+    private void handleUpload(HttpExchange ex, String projectName) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Project proj = projectMap.get(projectName);
+        if (proj == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"Project not found: " + projectName + "\"}");
+            return;
+        }
+
+        String filename = HttpUtils.queryParam(ex, "filename");
+        String dir      = HttpUtils.queryParam(ex, "dir");
+
+        if (filename.isBlank() || !filename.toLowerCase().endsWith(".pdf")) {
+            respond(ex, 400, "application/json", "{\"error\":\"filename must end with .pdf\"}");
+            return;
+        }
+        filename = Path.of(filename).getFileName().toString();
+
+        Path docsDir = proj.projectDir().resolve("docs");
+        Path targetDir = dir.isBlank() ? docsDir : docsDir.resolve(dir).normalize();
+        if (!targetDir.startsWith(docsDir)) {
+            respond(ex, 400, "application/json", "{\"error\":\"Invalid directory\"}");
+            return;
+        }
+        Files.createDirectories(targetDir);
+
+        Path pdfPath = targetDir.resolve(filename);
+        byte[] pdfBytes = ex.getRequestBody().readAllBytes();
+        Files.write(pdfPath, pdfBytes);
+
+        String stem = filename.substring(0, filename.length() - 4);
+        Path mdPath = targetDir.resolve(stem + ".md");
+        try {
+            String md = PdfExtractor.extract(pdfPath);
+            Files.writeString(mdPath, md, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            System.err.println("PDF extraction failed for " + filename + ": " + e.getMessage());
+            Files.writeString(mdPath,
+                "---\ntitle: \"" + stem + "\"\nsource_pdf: \"" + filename + "\"\n---\n\n(Text extraction failed)",
+                StandardCharsets.UTF_8);
+        }
+
+        Main.build(docsDir, proj.staticDir(), false);
+        Main.reindex(docsDir, proj.indexDir());
+        respond(ex, 200, "application/json",
+            "{\"status\":\"ok\",\"project\":\"" + projectName + "\",\"pdf\":\"" + filename + "\",\"md\":\"" + stem + ".md\"}");
     }
 
     // ---- Portal index page --------------------------------------
@@ -389,7 +453,40 @@ public class PortalServer {
             sb.append("    </div>\n");
         }
 
-        sb.append("  </div>\n</main>\n");
+        sb.append("  </div>\n");
+
+        if (!production) {
+            // Build project options for the upload drop zone
+            StringBuilder opts = new StringBuilder();
+            for (Project p : projects) {
+                opts.append("<option value=\"").append(escHtml(p.name())).append("\">")
+                    .append(escHtml(p.name())).append("</option>\n");
+            }
+            sb.append("""
+              <div style="margin-top:2rem;">
+                <h2>Upload PDF</h2>
+                <div style="display:flex;gap:0.75rem;margin:0.75rem 0;flex-wrap:wrap;align-items:center;">
+                  <select id="up-project" style="padding:0.35rem 0.5rem;border-radius:4px;border:1px solid var(--border-color);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.875rem;">
+                    <option value="">Select project...</option>
+                    %s
+                  </select>
+                  <input type="text" id="up-dir" placeholder="Subdirectory (e.g. papers/2024)"
+                    style="padding:0.35rem 0.7rem;border-radius:4px;border:1px solid var(--border-color);
+                           background:var(--bg-tertiary);color:var(--text-primary);font-size:0.875rem;width:260px;">
+                </div>
+                <div id="drop-zone"
+                  style="border:2px dashed var(--border-color);border-radius:8px;padding:2.5rem;
+                         text-align:center;cursor:pointer;color:var(--text-secondary);
+                         font-size:0.875rem;transition:border-color 0.2s;">
+                  Drop PDF here or click to select
+                  <input type="file" id="up-file" accept=".pdf" style="display:none">
+                </div>
+                <div id="up-status" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-secondary);"></div>
+              </div>
+            """.formatted(opts.toString()));
+        }
+
+        sb.append("</main>\n");
         if (!production) {
             sb.append("""
             <script>
@@ -426,6 +523,29 @@ public class PortalServer {
               btn.disabled = false;
               btn.textContent = 'Build';
             }
+            (function(){
+              const dz=document.getElementById('drop-zone'),fi=document.getElementById('up-file'),st=document.getElementById('up-status');
+              if(!dz)return;
+              dz.addEventListener('click',()=>fi.click());
+              dz.addEventListener('dragover',e=>{e.preventDefault();dz.style.borderColor='var(--accent-green)';dz.style.color='var(--accent-green)';});
+              dz.addEventListener('dragleave',()=>{dz.style.borderColor='';dz.style.color='';});
+              dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='';dz.style.color='';uploadPdf(e.dataTransfer.files[0]);});
+              fi.addEventListener('change',()=>uploadPdf(fi.files[0]));
+              async function uploadPdf(file){
+                if(!file||!file.name.endsWith('.pdf')){st.textContent='Please select a PDF file.';return;}
+                const proj=document.getElementById('up-project').value;
+                if(!proj){st.textContent='Please select a project.';return;}
+                const dir=document.getElementById('up-dir').value.trim();
+                st.textContent='Uploading '+file.name+'...';st.style.color='var(--text-secondary)';
+                const url='/api/upload/'+encodeURIComponent(proj)+'?filename='+encodeURIComponent(file.name)+(dir?'&dir='+encodeURIComponent(dir):'');
+                try{
+                  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/pdf'},body:file});
+                  const j=await r.json();
+                  if(j.status==='ok'){st.textContent='Done: '+j.md;st.style.color='var(--accent-green)';}
+                  else{st.textContent='Error: '+(j.error||'unknown');st.style.color='#e06060';}
+                }catch(e){st.textContent='Error: '+e.message;st.style.color='#e06060';}
+              }
+            })();
             async function doReload(btn) {
               const status = document.getElementById('reload-status');
               btn.disabled = true;
@@ -640,8 +760,8 @@ public class PortalServer {
         if (s == null) return;
         try {
             var hits = s.search(queryStr, 1000,
-                new String[]{"title_idx", "doc_id_idx", "path_tokens", "body"},
-                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "body", 1.0f));
+                new String[]{"title_idx", "doc_id_idx", "path_tokens", "meta", "body"},
+                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f));
             for (var hit : hits) {
                 out.add(Map.of(
                     "project",  proj.name(),
@@ -681,8 +801,8 @@ public class PortalServer {
         if (s == null) return "[]";
         try {
             var hits = s.search(queryStr, 20,
-                new String[]{"title_idx", "body"},
-                Map.of("title_idx", 3.0f, "body", 1.0f));
+                new String[]{"title_idx", "meta", "body"},
+                Map.of("title_idx", 3.0f, "meta", 2.0f, "body", 1.0f));
             var sb = new StringBuilder("[");
             boolean first = true;
             for (var hit : hits) {

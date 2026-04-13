@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -64,7 +65,11 @@ public class SearchServer {
      */
     public HttpServer start() throws IOException {
         var server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
-        if (!production) server.createContext("/api/build", this::handleBuild);
+        if (!production) {
+            server.createContext("/api/build", this::handleBuild);
+            server.createContext("/api/upload", this::handleUpload);
+            server.createContext("/upload", this::handleUploadPage);
+        }
         server.createContext("/search", this::handleSearch);
         // MCP endpoint for LLM tool access
         var mcpHandler = new McpHandler(docsDir, searcher, rebuild, localeSearchers);
@@ -119,8 +124,8 @@ public class SearchServer {
     private String search(String queryStr, LuceneSearcher s) {
         try {
             var hits = s.search(queryStr, 20,
-                new String[]{"title_idx", "doc_id_idx", "path_tokens", "body"},
-                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "body", 1.0f));
+                new String[]{"title_idx", "doc_id_idx", "path_tokens", "meta", "body"},
+                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f));
             var sb = new StringBuilder("[");
             boolean first = true;
             for (var hit : hits) {
@@ -167,6 +172,121 @@ public class SearchServer {
 
         byte[] body = Files.readAllBytes(file);
         HttpUtils.respond(ex, 200, HttpUtils.contentType(file.toString()), body);
+    }
+
+    // ---- Upload endpoint ----------------------------------------
+
+    /**
+     * Handles {@code POST /api/upload?dir=subdir&filename=paper.pdf} requests.
+     * Accepts raw PDF bytes, saves the file, extracts text, writes a companion
+     * {@code .md} file, and triggers a rebuild+reindex.
+     */
+    private void handleUpload(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        String filename = HttpUtils.queryParam(ex, "filename");
+        String dir      = HttpUtils.queryParam(ex, "dir");
+
+        if (filename.isBlank() || !filename.toLowerCase().endsWith(".pdf")) {
+            respond(ex, 400, "application/json", "{\"error\":\"filename must end with .pdf\"}");
+            return;
+        }
+        // Sanitize filename — strip any path separators
+        filename = Path.of(filename).getFileName().toString();
+
+        Path targetDir = dir.isBlank() ? docsDir : docsDir.resolve(dir).normalize();
+        if (!targetDir.startsWith(docsDir)) {
+            respond(ex, 400, "application/json", "{\"error\":\"Invalid directory\"}");
+            return;
+        }
+        Files.createDirectories(targetDir);
+
+        Path pdfPath = targetDir.resolve(filename);
+        byte[] pdfBytes = ex.getRequestBody().readAllBytes();
+        Files.write(pdfPath, pdfBytes);
+
+        String stem = filename.substring(0, filename.length() - 4);
+        Path mdPath = targetDir.resolve(stem + ".md");
+        try {
+            String md = PdfExtractor.extract(pdfPath);
+            Files.writeString(mdPath, md, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            System.err.println("PDF extraction failed for " + filename + ": " + e.getMessage());
+            Files.writeString(mdPath,
+                "---\ntitle: \"" + stem + "\"\nsource_pdf: \"" + filename + "\"\n---\n\n(Text extraction failed)",
+                StandardCharsets.UTF_8);
+        }
+
+        rebuild.run();
+        respond(ex, 200, "application/json",
+            "{\"status\":\"ok\",\"pdf\":\"" + filename + "\",\"md\":\"" + stem + ".md\"}");
+    }
+
+    /**
+     * Serves a minimal PDF upload page at {@code GET /upload}.
+     */
+    private void handleUploadPage(HttpExchange ex) throws IOException {
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        respond(ex, 200, "text/html; charset=UTF-8", uploadPageHtml(""));
+    }
+
+    static String uploadPageHtml(String projectPrefix) {
+        String uploadUrl = projectPrefix + "/api/upload";
+        return """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8">
+              <title>Upload PDF</title>
+              <style>
+                body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                     background:#1e1e2e;color:#cdd6f4;margin:0;padding:2rem;}
+                h2{margin-bottom:1rem;}
+                .controls{display:flex;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap;}
+                input[type=text]{padding:0.4rem 0.7rem;border-radius:4px;border:1px solid #585b70;
+                  background:#313244;color:#cdd6f4;font-size:0.875rem;width:280px;}
+                .drop-zone{border:2px dashed #585b70;border-radius:8px;padding:3rem 2rem;
+                  text-align:center;cursor:pointer;color:#a6adc8;transition:border-color 0.2s;}
+                .drop-zone.over{border-color:#a6e3a1;color:#a6e3a1;}
+                #status{margin-top:1rem;font-size:0.875rem;}
+              </style>
+            </head>
+            <body>
+              <h2>Upload PDF</h2>
+              <div class="controls">
+                <input type="text" id="dir" placeholder="Subdirectory (e.g. papers/2024)">
+              </div>
+              <div class="drop-zone" id="dz">
+                Drop PDF here or click to select
+                <input type="file" id="fi" accept=".pdf" style="display:none">
+              </div>
+              <div id="status"></div>
+              <script>
+              const dz=document.getElementById('dz'),fi=document.getElementById('fi'),st=document.getElementById('status');
+              dz.addEventListener('click',()=>fi.click());
+              dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over');});
+              dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
+              dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('over');upload(e.dataTransfer.files[0]);});
+              fi.addEventListener('change',()=>upload(fi.files[0]));
+              async function upload(file){
+                if(!file||!file.name.endsWith('.pdf')){st.textContent='Please select a PDF file.';return;}
+                st.textContent='Uploading '+file.name+'...';
+                const dir=document.getElementById('dir').value.trim();
+                const url='%s?filename='+encodeURIComponent(file.name)+(dir?'&dir='+encodeURIComponent(dir):'');
+                try{
+                  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/pdf'},body:file});
+                  const j=await r.json();
+                  st.textContent=j.status==='ok'?'Done: '+j.md:'Error: '+(j.error||'unknown');
+                }catch(e){st.textContent='Error: '+e.message;}
+              }
+              </script>
+            </body></html>
+            """.formatted(uploadUrl);
     }
 
     private void respond(HttpExchange ex, int code, String ct, String body) throws IOException {
