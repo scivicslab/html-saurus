@@ -1,5 +1,6 @@
 package com.scivicslab.htmlsaurus;
 
+import org.commonmark.ext.autolink.AutolinkExtension;
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension;
 import org.commonmark.ext.gfm.tables.TablesExtension;
 import org.commonmark.ext.heading.anchor.HeadingAnchorExtension;
@@ -39,7 +40,8 @@ class MarkdownConverter {
         var extensions = List.of(
             TablesExtension.create(),
             StrikethroughExtension.create(),
-            HeadingAnchorExtension.create()
+            HeadingAnchorExtension.create(),
+            AutolinkExtension.create()
         );
         this.parser = Parser.builder().extensions(extensions).build();
         this.renderer = HtmlRenderer.builder().extensions(extensions).build();
