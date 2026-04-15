@@ -613,6 +613,11 @@ public class SiteBuilder {
               .append(escapeHtml(logoAlt)).append("\" class=\"site-logo\">");
         }
         sb.append(escapeHtml(siteName)).append("</a>\n");
+        sb.append("  <button class=\"menu-toggle\" id=\"menu-toggle\" aria-label=\"Toggle navigation\" aria-expanded=\"false\">\n");
+        sb.append("    <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\">\n");
+        sb.append("      <line x1=\"3\" y1=\"6\" x2=\"21\" y2=\"6\"/><line x1=\"3\" y1=\"12\" x2=\"21\" y2=\"12\"/><line x1=\"3\" y1=\"18\" x2=\"21\" y2=\"18\"/>\n");
+        sb.append("    </svg>\n");
+        sb.append("  </button>\n");
         sb.append("  <nav class=\"top\">\n");
         for (SiteNode section : root.children()) {
             if (!section.isDir()) continue; // skip top-level .md files like intro.md
@@ -675,11 +680,6 @@ public class SiteBuilder {
         sb.append("    <input id=\"search-input\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\">\n");
         sb.append("    <div id=\"search-results\"></div>\n");
         sb.append("  </div>\n");
-        sb.append("  <button class=\"menu-toggle\" id=\"menu-toggle\" aria-label=\"Toggle navigation\" aria-expanded=\"false\">\n");
-        sb.append("    <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\">\n");
-        sb.append("      <line x1=\"3\" y1=\"6\" x2=\"21\" y2=\"6\"/><line x1=\"3\" y1=\"12\" x2=\"21\" y2=\"12\"/><line x1=\"3\" y1=\"18\" x2=\"21\" y2=\"18\"/>\n");
-        sb.append("    </svg>\n");
-        sb.append("  </button>\n");
         sb.append("</header>\n");
         sb.append("<div class=\"sidebar-overlay\" id=\"sidebar-overlay\"></div>\n");
 
