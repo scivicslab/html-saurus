@@ -688,6 +688,38 @@ public class SiteBuilder {
 
         // Sidebar: show only the active section's children, or all if no section
         sb.append("<nav class=\"side\" id=\"sidebar\">\n");
+        // Mobile-only: top nav sections + language switcher injected at top of sidebar.
+        // Use mob-active / mob-lang-item (not "active" / "lang-item") to avoid
+        // conflicting with existing test selectors on the real sidebar links.
+        sb.append("  <div class=\"mobile-top-nav\">\n");
+        for (SiteNode section : root.children()) {
+            if (!section.isDir()) continue;
+            boolean active = topSection != null && topSection.equals("/" + dirNameForSection(section));
+            String href = section.href() != null ? prefix + section.href().replaceFirst("^/", "") : "#";
+            sb.append("    <a href=\"").append(href).append("\"")
+              .append(active ? " class=\"mob-active\"" : "").append(">")
+              .append(escapeHtml(section.label())).append("</a>\n");
+        }
+        if (allLocales.size() > 1) {
+            sb.append("    <div class=\"mobile-lang\">\n");
+            for (String locale : allLocales) {
+                String basePath2 = (currentLocale == null || currentLocale.equals(defaultLocale))
+                    ? currentPath
+                    : currentPath.replaceFirst("^/" + currentLocale + "(/|$)", "/");
+                if (basePath2.isEmpty()) basePath2 = "/";
+                String targetPath = locale.equals(defaultLocale)
+                    ? basePath2
+                    : "/" + locale + (basePath2.startsWith("/") ? basePath2 : "/" + basePath2);
+                String lhref = siteRootPrefix + targetPath.replaceFirst("^/", "");
+                boolean isCurrent = locale.equals(currentLocale)
+                    || (currentLocale == null && locale.equals(defaultLocale));
+                sb.append("      <a href=\"").append(lhref).append("\" class=\"mob-lang-item")
+                  .append(isCurrent ? " mob-active" : "").append("\">")
+                  .append(escapeHtml(localeLabel(locale))).append("</a>\n");
+            }
+            sb.append("    </div>\n");
+        }
+        sb.append("  </div>\n");
         List<SiteNode> sidebarNodes = root.children();
         if (topSection != null) {
             for (SiteNode section : root.children()) {

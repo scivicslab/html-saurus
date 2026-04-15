@@ -146,6 +146,8 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
 .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45);
                    z-index: 150; }
 .sidebar-overlay.open { display: block; }
+/* ---- Mobile top-nav panel (hidden on desktop, shown inside sidebar on mobile) ---- */
+.mobile-top-nav { display: none; }
 /* ---- Tablet (≤900px): sidebar becomes a slide-in drawer ---- */
 @media (max-width: 900px) {
   .menu-toggle { display: flex; }
@@ -161,6 +163,18 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
   #search-input { width: 160px; }
   #search-input:focus { width: 200px; }
   #search-results { width: 320px; }
+  .mobile-top-nav { display: block; border-bottom: 1px solid var(--c-border);
+                   padding: 0.5rem 0 0.75rem; margin-bottom: 0.5rem; }
+  .mobile-top-nav a { display: block; padding: 0.45rem 1rem; color: var(--c-text);
+                     text-decoration: none; font-size: 0.9rem; border-radius: 4px; }
+  .mobile-top-nav a:hover { background: var(--c-hover); }
+  .mobile-top-nav a.mob-active { color: var(--c-act-text); font-weight: 600; }
+  .mobile-lang { display: flex; flex-wrap: wrap; gap: 0.5rem;
+                padding: 0.4rem 1rem 0; }
+  .mobile-lang .mob-lang-item { font-size: 0.85rem; color: var(--c-text);
+                               text-decoration: none; padding: 2px 8px;
+                               border: 1px solid var(--c-border); border-radius: 3px; }
+  .mobile-lang .mob-lang-item.mob-active { color: var(--c-act-text); border-color: var(--c-act-text); font-weight: 600; }
 }
 /* ---- Mobile (≤480px): further simplify header and content ---- */
 @media (max-width: 480px) {
