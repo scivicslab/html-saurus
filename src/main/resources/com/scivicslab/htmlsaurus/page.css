@@ -119,7 +119,7 @@ nav.side ul li a.active { background: var(--c-act-bg); color: var(--c-act-text);
                 margin-left: 8px; display: none; }
 .cat-children.open { display: block; }
 /* ---- Main ---- */
-main { flex: 1; padding: 2rem 3rem; max-width: 900px; overflow-y: auto; min-width: 0; }
+main { flex: 1; padding: 2rem 3rem; overflow-y: auto; min-width: 0; }
 /* ---- Right-side TOC ---- */
 aside.toc { width: 220px; min-width: 220px; position: sticky; top: 60px;
             height: calc(100vh - 60px); overflow-y: auto; padding: 1.5rem 0.5rem 1rem 0;
@@ -185,7 +185,7 @@ main pre { background: var(--c-pre-bg); border: 1px solid var(--c-border); borde
 .pre-nowrap > pre { white-space: pre; }
 main code { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.875em; }
 main p code, main li code, main td code { background: var(--c-code-bg); padding: 1px 5px; border-radius: 3px; }
-main table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+main table { border-collapse: collapse; width: 100%; margin: 1rem 0; display: block; overflow-x: auto; }
 main th, main td { border: 1px solid var(--c-border); padding: 8px 12px; text-align: left; }
 main th { background: var(--c-th-bg); font-weight: 600; }
 main blockquote { border-left: 4px solid var(--c-bq-border); padding-left: 1rem; color: var(--c-bq-text); margin: 1rem 0; }
