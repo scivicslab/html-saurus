@@ -154,6 +154,7 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
   header nav.top { display: none; }
   #rebuild-btn { display: none; }
   #theme-sel { display: none; }
+  .lang-dropdown { display: none; }
   #search-wrap { margin-left: auto; }
   nav.side { position: fixed; left: -290px; top: 60px; width: 280px; height: calc(100vh - 60px);
              z-index: 200; overflow-y: auto; transition: left 0.25s ease;
