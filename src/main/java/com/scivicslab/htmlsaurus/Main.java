@@ -60,6 +60,38 @@ public class Main {
         } else {
             runSingle(rootDir, port, serve, production);
         }
+
+        if (serve || production) {
+            registerWithGateway(port);
+        }
+    }
+
+    private static void registerWithGateway(int port) {
+        String gatewayUrl = System.getenv("MCP_GATEWAY_URL");
+        if (gatewayUrl == null || gatewayUrl.isBlank()) return;
+
+        String name = "html-saurus-" + port;
+        String url = "http://localhost:" + port;
+        String body = "{\"name\":\"" + name + "\",\"url\":\"" + url
+                + "\",\"description\":\"Documentation Portal (port " + port + ")\"}";
+
+        Thread.ofVirtual().start(() -> {
+            try {
+                java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                        .connectTimeout(java.time.Duration.ofSeconds(5)).build();
+                java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(gatewayUrl + "/api/servers"))
+                        .header("Content-Type", "application/json")
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                        .timeout(java.time.Duration.ofSeconds(5))
+                        .build();
+                java.net.http.HttpResponse<String> response = client.send(request,
+                        java.net.http.HttpResponse.BodyHandlers.ofString());
+                System.out.println("Registered with gateway: " + name + " -> HTTP " + response.statusCode());
+            } catch (Exception e) {
+                System.err.println("Failed to register with gateway: " + e.getMessage());
+            }
+        });
     }
 
     /**
