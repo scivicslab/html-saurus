@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -68,6 +69,10 @@ public class SiteBuilder {
 
     /** Holds metadata about each built page for feed and sitemap generation. */
     private record PageInfo(String title, String absoluteUrl, String summary, String isoDate) {}
+
+    /** Represents a parsed Docusaurus blog post. */
+    private record BlogPost(String slug, String title, LocalDate date,
+                            List<String> tags, String excerpt, String body) {}
 
     /**
      * Creates a SiteBuilder using the parent directory name as the site name (development mode, no i18n).
@@ -183,6 +188,31 @@ public class SiteBuilder {
         Files.createDirectories(outDir);
 
         SiteNode root = navBuilder.build();
+
+        // Parse blog posts before building docs so "Blog" appears in the navbar for all pages.
+        List<BlogPost> blogPosts = new ArrayList<>();
+        Map<String, List<BlogPost>> blogByTag = new LinkedHashMap<>();
+        Path projectRoot = findProjectRoot(docsDir);
+        boolean isNonDefaultLocale = currentLocale != null && !currentLocale.equals(defaultLocale);
+        Path blogSrcDir = isNonDefaultLocale
+                ? projectRoot.resolve("i18n/" + currentLocale + "/docusaurus-plugin-content-blog")
+                : projectRoot.resolve("blog");
+        if (Files.exists(blogSrcDir) && Files.isDirectory(blogSrcDir)) {
+            try (var stream = Files.list(blogSrcDir)) {
+                stream.filter(f -> !Files.isDirectory(f) && f.toString().endsWith(".md"))
+                      .forEach(f -> {
+                          try { blogPosts.add(parseBlogPost(f)); }
+                          catch (IOException e) { System.err.println("WARN: blog parse error: " + f); }
+                      });
+            }
+            blogPosts.sort(Comparator.<BlogPost, LocalDate>comparing(
+                    p -> p.date() != null ? p.date() : LocalDate.EPOCH).reversed());
+            for (BlogPost p : blogPosts) {
+                for (String t : p.tags()) blogByTag.computeIfAbsent(t, k -> new ArrayList<>()).add(p);
+            }
+            root.children().add(buildBlogNavNode(blogPosts, blogByTag));
+        }
+
         List<SiteNode> pageOrder = flattenOrder(root.children());
 
         // Collect all source files; copy non-Markdown assets and create directories immediately.
@@ -293,6 +323,10 @@ public class SiteBuilder {
             generateSitemap();
             generateRssFeed();
             generateJsonFeed();
+        }
+
+        if (!blogPosts.isEmpty()) {
+            buildBlog(blogPosts, blogByTag, root);
         }
     }
 
@@ -826,6 +860,12 @@ public class SiteBuilder {
         }
         sb.append("</ul>\n");
     }
+
+    private static final Pattern BLOG_DATE      = Pattern.compile("^date:\\s*(\\d{4}-\\d{2}-\\d{2})", Pattern.MULTILINE);
+    private static final Pattern BLOG_SLUG_PAT  = Pattern.compile("^slug:\\s*(\\S+)", Pattern.MULTILINE);
+    private static final Pattern BLOG_TAGS_SECT = Pattern.compile("^tags:\\s*\\n((?:[ \\t]+-[ \\t]+\\S.*\\n?)+)", Pattern.MULTILINE);
+    private static final Pattern BLOG_TAG_LINE  = Pattern.compile("[ \\t]+-[ \\t]+(.+)");
+    private static final Pattern BLOG_FILE_DATE = Pattern.compile("^(\\d{4}-\\d{2}-\\d{2})-");
 
     /** Matches {@code <h2>} and {@code <h3>} elements with {@code id} attributes for TOC extraction. */
     private static final Pattern HEADING_PATTERN = Pattern.compile(
@@ -1717,5 +1757,215 @@ public class SiteBuilder {
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
                        .replace("\n", "\\n").replace("\r", "\\r")
                        .replace("\t", "\\t") + "\"";
+    }
+
+    // =========================================================
+    // Blog support
+    // =========================================================
+
+    /** Parses a blog post Markdown file. */
+    private BlogPost parseBlogPost(Path file) throws IOException {
+        String source = Files.readString(file);
+        String rawFm = "";
+        if (source.startsWith("---")) {
+            int end = source.indexOf("---", 3);
+            if (end > 0) rawFm = source.substring(3, end);
+        }
+
+        String[] fm = converter.parseFrontmatter(source);
+        String title = fm[0];
+        String body  = fm[1];
+        if (title.isBlank()) {
+            title = file.getFileName().toString().replaceAll("\\.md$", "")
+                        .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
+        }
+
+        LocalDate date = null;
+        var dm = BLOG_DATE.matcher(rawFm);
+        if (dm.find()) { try { date = LocalDate.parse(dm.group(1)); } catch (Exception ignored) {} }
+        if (date == null) {
+            var fdm = BLOG_FILE_DATE.matcher(file.getFileName().toString());
+            if (fdm.find()) { try { date = LocalDate.parse(fdm.group(1)); } catch (Exception ignored) {} }
+        }
+
+        String slug;
+        var sm = BLOG_SLUG_PAT.matcher(rawFm);
+        slug = sm.find() ? sm.group(1).trim()
+                         : file.getFileName().toString().replaceAll("\\.md$", "")
+                               .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
+
+        List<String> tags = new ArrayList<>();
+        var tm = BLOG_TAGS_SECT.matcher(rawFm);
+        if (tm.find()) {
+            var tlm = BLOG_TAG_LINE.matcher(tm.group(1));
+            while (tlm.find()) tags.add(tlm.group(1).trim());
+        }
+
+        int ti = body.indexOf("<!-- truncate -->");
+        String excerpt = ti >= 0 ? body.substring(0, ti).trim() : body;
+
+        return new BlogPost(slug, title, date, List.copyOf(tags), excerpt, body);
+    }
+
+    /** Strips {@code id} attributes from heading elements so they are excluded from TOC extraction. */
+    private static String stripHeadingIds(String html) {
+        return html.replaceAll("<(h[23])(\\s[^>]*?)\\sid=\"[^\"]*\"", "<$1$2")
+                   .replaceAll("<(h[23])\\sid=\"[^\"]*\"(\\s[^>]*)?>", "<$1$2>");
+    }
+
+    /** Creates a URL-safe ASCII slug from a tag string. */
+    private static String tagToSlug(String tag) {
+        String s = tag.toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+        return s.isEmpty() ? "tag-" + Math.abs(tag.hashCode()) : s;
+    }
+
+    /** Builds the Blog SiteNode added as a top-level navbar section. */
+    private SiteNode buildBlogNavNode(List<BlogPost> posts, Map<String, List<BlogPost>> byTag) {
+        List<SiteNode> tagNodes = new ArrayList<>();
+        for (var entry : byTag.entrySet()) {
+            String tag = entry.getKey();
+            tagNodes.add(new SiteNode(tag + " (" + entry.getValue().size() + ")",
+                    "/blog/tags/" + tagToSlug(tag) + "/", false, List.of(), null));
+        }
+        SiteNode tagsNode = new SiteNode("Tags", "/blog/tags/", true, tagNodes, "/blog/tags/");
+        SiteNode allNode  = new SiteNode("All Posts", "/blog/", false, List.of(), null);
+        return new SiteNode("Blog", "/blog/", true, new ArrayList<>(List.of(allNode, tagsNode)), "/blog/");
+    }
+
+    /** Orchestrates building all blog pages. */
+    private void buildBlog(List<BlogPost> posts, Map<String, List<BlogPost>> byTag, SiteNode navRoot)
+            throws IOException {
+        Files.createDirectories(outDir.resolve("blog/tags"));
+        renderBlogIndex(posts, byTag, navRoot);
+        for (int i = 0; i < posts.size(); i++) renderBlogPostPage(posts.get(i), i, posts, navRoot);
+        renderTagIndex(byTag, navRoot);
+        for (var entry : byTag.entrySet()) renderTagPage(entry.getKey(), entry.getValue(), navRoot);
+    }
+
+    private void renderBlogIndex(List<BlogPost> posts, Map<String, List<BlogPost>> byTag,
+                                  SiteNode navRoot) throws IOException {
+        StringBuilder c = new StringBuilder("<div class=\"blog-list\">\n");
+        for (BlogPost p : posts) {
+            c.append("<article class=\"blog-card\">\n");
+            c.append("  <h2 class=\"blog-card-title\"><a href=\"").append(escapeHtml(p.slug()))
+             .append("/\">").append(escapeHtml(p.title())).append("</a></h2>\n");
+            c.append("  <div class=\"blog-meta\">");
+            if (p.date() != null) c.append("<time>").append(p.date()).append("</time>");
+            if (!p.tags().isEmpty()) {
+                c.append(" · ");
+                for (int i = 0; i < p.tags().size(); i++) {
+                    if (i > 0) c.append(", ");
+                    String tag = p.tags().get(i);
+                    c.append("<a href=\"tags/").append(escapeHtml(tagToSlug(tag)))
+                     .append("/\">").append(escapeHtml(tag)).append("</a>");
+                }
+            }
+            c.append("</div>\n");
+            c.append("  <div class=\"blog-excerpt\">")
+             .append(stripHeadingIds(converter.convertMarkdown(p.excerpt()))).append("</div>\n");
+            c.append("  <a href=\"").append(escapeHtml(p.slug()))
+             .append("/\" class=\"blog-read-more\">Read more →</a>\n");
+            c.append("</article>\n");
+        }
+        c.append("</div>\n");
+
+        Path out = outDir.resolve("blog/index.html");
+        Files.writeString(out, renderPage("Blog", c.toString(), navRoot,
+                "../", "/blog/", "/blog", "blog/index.md",
+                null, null, null, null, null));
+        System.out.println("  " + out);
+    }
+
+    private void renderBlogPostPage(BlogPost post, int idx, List<BlogPost> posts,
+                                     SiteNode navRoot) throws IOException {
+        StringBuilder c = new StringBuilder("<div class=\"blog-post-meta\">");
+        if (post.date() != null) c.append("<time>").append(post.date()).append("</time>");
+        if (!post.tags().isEmpty()) {
+            c.append(" · ");
+            for (int i = 0; i < post.tags().size(); i++) {
+                if (i > 0) c.append(", ");
+                String tag = post.tags().get(i);
+                c.append("<a href=\"../tags/").append(escapeHtml(tagToSlug(tag)))
+                 .append("/\">").append(escapeHtml(tag)).append("</a>");
+            }
+        }
+        c.append("</div>\n");
+        c.append(converter.convertMarkdown(post.body()));
+
+        // Prev = older (higher index), Next = newer (lower index) — posts sorted newest-first
+        String prevHref = null, prevLabel = null, nextHref = null, nextLabel = null;
+        if (idx + 1 < posts.size()) {
+            BlogPost older = posts.get(idx + 1);
+            prevHref = "../" + older.slug() + "/";
+            prevLabel = older.title();
+        }
+        if (idx > 0) {
+            BlogPost newer = posts.get(idx - 1);
+            nextHref = "../" + newer.slug() + "/";
+            nextLabel = newer.title();
+        }
+
+        Path out = outDir.resolve("blog/" + post.slug() + "/index.html");
+        Files.createDirectories(out.getParent());
+        Files.writeString(out, renderPage(post.title(), c.toString(), navRoot,
+                "../../", "/blog/" + post.slug() + "/", "/blog",
+                "blog/" + post.slug() + ".md",
+                prevHref, prevLabel, nextHref, nextLabel,
+                post.date() != null ? post.date().toString() : null));
+        System.out.println("  " + out);
+    }
+
+    private void renderTagIndex(Map<String, List<BlogPost>> byTag, SiteNode navRoot) throws IOException {
+        StringBuilder c = new StringBuilder("<div class=\"blog-tags-index\">\n");
+        for (var entry : byTag.entrySet()) {
+            String tag = entry.getKey();
+            c.append("<a class=\"blog-tag-chip\" href=\"").append(escapeHtml(tagToSlug(tag)))
+             .append("/\">").append(escapeHtml(tag))
+             .append(" <span>").append(entry.getValue().size()).append("</span></a>\n");
+        }
+        c.append("</div>\n");
+
+        Path out = outDir.resolve("blog/tags/index.html");
+        Files.writeString(out, renderPage("Tags", c.toString(), navRoot,
+                "../../", "/blog/tags/", "/blog", "blog/tags/index.md",
+                null, null, null, null, null));
+        System.out.println("  " + out);
+    }
+
+    private void renderTagPage(String tag, List<BlogPost> posts, SiteNode navRoot) throws IOException {
+        String tagSlug = tagToSlug(tag);
+        StringBuilder c = new StringBuilder("<div class=\"blog-list\">\n");
+        for (BlogPost p : posts) {
+            c.append("<article class=\"blog-card\">\n");
+            c.append("  <h2 class=\"blog-card-title\"><a href=\"../../")
+             .append(escapeHtml(p.slug())).append("/\">")
+             .append(escapeHtml(p.title())).append("</a></h2>\n");
+            c.append("  <div class=\"blog-meta\">");
+            if (p.date() != null) c.append("<time>").append(p.date()).append("</time>");
+            if (!p.tags().isEmpty()) {
+                c.append(" · ");
+                for (int i = 0; i < p.tags().size(); i++) {
+                    if (i > 0) c.append(", ");
+                    String t = p.tags().get(i);
+                    c.append("<a href=\"../").append(escapeHtml(tagToSlug(t)))
+                     .append("/\">").append(escapeHtml(t)).append("</a>");
+                }
+            }
+            c.append("</div>\n");
+            c.append("  <div class=\"blog-excerpt\">")
+             .append(stripHeadingIds(converter.convertMarkdown(p.excerpt()))).append("</div>\n");
+            c.append("  <a href=\"../../").append(escapeHtml(p.slug()))
+             .append("/\" class=\"blog-read-more\">Read more →</a>\n");
+            c.append("</article>\n");
+        }
+        c.append("</div>\n");
+
+        Path out = outDir.resolve("blog/tags/" + tagSlug + "/index.html");
+        Files.createDirectories(out.getParent());
+        Files.writeString(out, renderPage(tag, c.toString(), navRoot,
+                "../../../", "/blog/tags/" + tagSlug + "/", "/blog",
+                "blog/tags/" + tagSlug + ".md",
+                null, null, null, null, null));
+        System.out.println("  " + out);
     }
 }

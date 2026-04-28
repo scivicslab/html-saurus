@@ -471,13 +471,13 @@ class ProductionModeE2ETest {
         }
 
         @Test
-        @DisplayName("F-2: navbar contains exactly 5 items")
+        @DisplayName("F-2: navbar contains exactly 6 items (5 docs sections + Blog)")
         void navbarItems_count_fiveItems() {
             page.navigate(url("/guides/top_page/"));
 
             List<ElementHandle> navLinks = page.querySelectorAll("header nav.top a");
-            assertEquals(5, navLinks.size(),
-                    "Navbar must contain exactly 5 items matching docusaurus.config.ts");
+            assertEquals(6, navLinks.size(),
+                    "Navbar must contain exactly 6 items (5 docusaurus.config.ts sections + Blog)");
         }
 
         @Test
@@ -494,7 +494,8 @@ class ProductionModeE2ETest {
                     "各種申請等",
                     "活用方法",
                     "稼働状況",
-                    "成果報告");
+                    "成果報告",
+                    "Blog");
 
             assertEquals(expected, labels,
                     "Navbar labels must match docusaurus.config.ts order translated via i18n/ja/navbar.json: " + expected);
@@ -521,8 +522,8 @@ class ProductionModeE2ETest {
             page.navigate(url("/application/terms_and_policies/user_issurance_criteria/"));
 
             List<ElementHandle> navLinks = page.querySelectorAll("header nav.top a");
-            assertEquals(5, navLinks.size(),
-                    "Navbar must still show 5 items on Applications section page");
+            assertEquals(6, navLinks.size(),
+                    "Navbar must still show 6 items on Applications section page");
 
             ElementHandle activeItem = page.querySelector("header nav.top a.active");
             assertNotNull(activeItem, "An active navbar item must be present on Applications page");

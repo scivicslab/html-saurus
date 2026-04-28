@@ -854,7 +854,7 @@ public class PortalServer {
                 "default-src 'self'; " +
                 "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
                 "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
-                "img-src 'self' data:; " +
+                "img-src 'self' data: https://dtn1.ddbj.nig.ac.jp:10443; " +
                 "font-src 'self' https://cdn.jsdelivr.net; " +
                 "connect-src 'self'; " +
                 "frame-ancestors 'none';");

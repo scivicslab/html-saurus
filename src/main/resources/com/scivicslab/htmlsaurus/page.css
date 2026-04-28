@@ -257,6 +257,43 @@ main img { max-width: 100%; }
 .admonition-title { font-weight: 700; font-size: 0.875rem; text-transform: uppercase;
                     letter-spacing: 0.05em; margin-bottom: 0.5rem; }
 .admonition-body > *:last-child { margin-bottom: 0; }
+/* ---- Collapsible details/summary ---- */
+main details { border: 1px solid var(--c-border); border-radius: 6px;
+               margin: 1rem 0; background: var(--c-bg); overflow: hidden; }
+main details > summary { list-style: none; cursor: pointer; user-select: none;
+                         padding: 0.55rem 10rem 0.55rem 2.2rem;
+                         background: var(--c-sidebar-bg);
+                         font-weight: 600; font-size: 0.92rem; color: var(--c-heading);
+                         position: relative; transition: background 0.15s; }
+main details > summary::-webkit-details-marker { display: none; }
+main details > summary::marker { content: ""; }
+main details > summary::before { content: ""; position: absolute;
+                                 left: 0.9rem; top: 50%;
+                                 width: 0; height: 0;
+                                 border-left: 6px solid var(--c-act-text);
+                                 border-top: 5px solid transparent;
+                                 border-bottom: 5px solid transparent;
+                                 transform: translateY(-50%);
+                                 transition: transform 0.15s ease; }
+main details[open] > summary::before { transform: translateY(-50%) rotate(90deg); }
+main details > summary::after { content: "クリックで展開"; position: absolute;
+                                right: 0.9rem; top: 50%; transform: translateY(-50%);
+                                font-size: 0.72rem; font-weight: 500;
+                                color: var(--c-act-text); letter-spacing: 0.02em;
+                                padding: 2px 8px; border: 1px solid var(--c-act-text);
+                                border-radius: 3px; }
+main details[open] > summary::after { content: "クリックで折りたたみ"; }
+main details > summary:hover { background: var(--c-hover); }
+main details > summary:hover::after { background: var(--c-act-bg); }
+main details[open] > summary { border-bottom: 1px solid var(--c-border); }
+main details[open] > *:not(summary) { margin-left: 1rem; margin-right: 1rem; }
+main details[open] > summary + * { margin-top: 0.75rem; }
+main details[open] > *:not(summary):last-child { margin-bottom: 1rem; }
+@media (max-width: 600px) {
+  main details > summary { padding-right: 2.5rem; }
+  main details > summary::after { content: "▾"; padding: 0 4px; }
+  main details[open] > summary::after { content: "▴"; }
+}
 /* ---- Source footer ---- */
 .source-footer { margin-top: 3rem; padding-top: 0.75rem; border-top: 1px solid var(--c-border);
                  font-size: 0.75rem; color: var(--c-arrow);
@@ -276,3 +313,32 @@ main img { max-width: 100%; }
 .page-nav-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
                   letter-spacing: 0.05em; color: var(--c-arrow); }
 .page-nav-title { font-size: 0.9rem; font-weight: 600; color: var(--c-text); }
+/* ---- Blog ---- */
+.blog-list { display: flex; flex-direction: column; gap: 2rem; }
+.blog-card { border: 1px solid var(--c-border); border-radius: 8px;
+             padding: 1.5rem; background: var(--c-bg); }
+.blog-card-title { font-size: 1.2rem; margin-bottom: 0.5rem; }
+.blog-card-title a { color: var(--c-act-text); text-decoration: none; }
+.blog-card-title a:hover { text-decoration: underline; }
+.blog-meta { font-size: 0.85rem; color: var(--c-arrow); margin-bottom: 0.75rem; }
+.blog-meta time { font-weight: 600; }
+.blog-meta a { color: var(--c-act-text); text-decoration: none; }
+.blog-meta a:hover { text-decoration: underline; }
+.blog-excerpt { font-size: 0.95rem; line-height: 1.7; color: var(--c-text); }
+.blog-excerpt p { margin-bottom: 0.5rem; }
+.blog-read-more { display: inline-block; margin-top: 0.75rem; font-size: 0.875rem;
+                  color: var(--c-act-text); text-decoration: none; font-weight: 600; }
+.blog-read-more:hover { text-decoration: underline; }
+.blog-post-meta { font-size: 0.85rem; color: var(--c-arrow); margin-bottom: 1.5rem;
+                  padding-bottom: 0.75rem; border-bottom: 1px solid var(--c-border); }
+.blog-post-meta time { font-weight: 600; }
+.blog-post-meta a { color: var(--c-act-text); text-decoration: none; }
+.blog-post-meta a:hover { text-decoration: underline; }
+.blog-tags-index { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.blog-tag-chip { display: inline-flex; align-items: center; gap: 0.4rem;
+                 padding: 0.35rem 0.85rem; border-radius: 999px;
+                 background: var(--c-act-bg); color: var(--c-act-text);
+                 text-decoration: none; font-size: 0.875rem; font-weight: 600; }
+.blog-tag-chip span { background: var(--c-act-text); color: var(--c-bg);
+                      border-radius: 999px; padding: 0 0.4rem; font-size: 0.75rem; }
+.blog-tag-chip:hover { opacity: 0.8; }
