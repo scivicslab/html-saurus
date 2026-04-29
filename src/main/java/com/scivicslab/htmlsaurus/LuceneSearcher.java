@@ -1,7 +1,6 @@
 package com.scivicslab.htmlsaurus;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.core.KeywordAnalyzer;
 import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.index.DirectoryReader;
@@ -30,7 +29,8 @@ class LuceneSearcher implements Closeable {
     private final Path indexDir;
     private final Analyzer analyzer = new PerFieldAnalyzerWrapper(
             new JapaneseAnalyzer(),
-            Map.of("doc_id_idx", new KeywordAnalyzer(), "path_tokens", new KeywordAnalyzer()));
+            Map.of("doc_id_idx", SearchIndexer.underscoreAnalyzer(),
+                   "path_tokens", SearchIndexer.underscoreAnalyzer()));
     private NIOFSDirectory directory;
     private DirectoryReader reader;
 

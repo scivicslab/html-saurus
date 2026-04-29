@@ -1,9 +1,12 @@
 package com.scivicslab.htmlsaurus;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.core.KeywordAnalyzer;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.Tokenizer;
+import org.apache.lucene.analysis.core.LowerCaseFilter;
 import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
+import org.apache.lucene.analysis.pattern.PatternTokenizer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
@@ -13,6 +16,7 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Builds a Lucene full-text search index from Markdown files in a Docusaurus {@code docs/} directory.
@@ -65,9 +69,8 @@ public class SearchIndexer {
      */
     public void index() throws IOException {
         Analyzer baseAnalyzer = isJapanese() ? new JapaneseAnalyzer() : new StandardAnalyzer();
-        KeywordAnalyzer kw = new KeywordAnalyzer();
         Analyzer analyzer = new PerFieldAnalyzerWrapper(baseAnalyzer,
-                Map.of("doc_id_idx", kw, "path_tokens", kw));
+                Map.of("doc_id_idx", underscoreAnalyzer(), "path_tokens", underscoreAnalyzer()));
         var config = new IndexWriterConfig(analyzer);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
 
@@ -88,6 +91,18 @@ public class SearchIndexer {
 
     private boolean isJapanese() {
         return locale == null || locale.equals("ja");
+    }
+
+    /** Splits on underscores and lowercases each token for case-insensitive segment search. */
+    static Analyzer underscoreAnalyzer() {
+        return new Analyzer() {
+            @Override
+            protected TokenStreamComponents createComponents(String fieldName) {
+                Tokenizer tokenizer = new PatternTokenizer(Pattern.compile("_"), -1);
+                TokenStream filter = new LowerCaseFilter(tokenizer);
+                return new TokenStreamComponents(tokenizer, filter);
+            }
+        };
     }
 
     /**
