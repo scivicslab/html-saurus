@@ -342,3 +342,23 @@ main details[open] > *:not(summary):last-child { margin-bottom: 1rem; }
 .blog-tag-chip span { background: var(--c-act-text); color: var(--c-bg);
                       border-radius: 999px; padding: 0 0.4rem; font-size: 0.75rem; }
 .blog-tag-chip:hover { opacity: 0.8; }
+/* ---- Blog paginator ---- */
+.blog-paginator { display: flex; align-items: center; gap: 0.75rem;
+                  margin-top: 2.5rem; padding-top: 1.5rem;
+                  border-top: 1px solid var(--c-border); flex-wrap: wrap; }
+.paginator-pages { display: flex; align-items: center; gap: 0.4rem; }
+.paginator-page, .paginator-prev, .paginator-next {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2rem; height: 2rem; padding: 0 0.6rem;
+  border: 1px solid var(--c-border); border-radius: 4px;
+  color: var(--c-act-text); text-decoration: none; font-size: 0.875rem; }
+.paginator-page:hover, .paginator-prev:hover, .paginator-next:hover {
+  background: var(--c-act-bg); }
+.paginator-current { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2rem; height: 2rem; padding: 0 0.6rem;
+  background: var(--c-nav-accent); color: #fff;
+  border-radius: 4px; font-size: 0.875rem; font-weight: 700; }
+.paginator-disabled { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2rem; height: 2rem; padding: 0 0.6rem;
+  color: var(--c-border); border: 1px solid var(--c-border);
+  border-radius: 4px; font-size: 0.875rem; cursor: default; }
