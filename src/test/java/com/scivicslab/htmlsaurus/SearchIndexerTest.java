@@ -195,7 +195,7 @@ class SearchIndexerTest {
     // ---- Stored field values --------------------------------------------
 
     @Nested
-    @DisplayName("stored field values: title and summary")
+    @DisplayName("stored field values: title and body")
     class StoredFieldValues {
 
         @Test
@@ -217,8 +217,8 @@ class SearchIndexerTest {
         }
 
         @Test
-        @DisplayName("summary field contains up to 250 chars of body text")
-        void summaryField_upTo250Chars() throws IOException {
+        @DisplayName("body field stores full text (used for snippet generation and MoreLikeThis)")
+        void bodyField_storedFullText() throws IOException {
             Path docsDir = createDocsDir("docs");
             String longBody = "word ".repeat(100); // 500 chars
             writeDoc(docsDir, "page.md", "Title", longBody);
@@ -230,13 +230,9 @@ class SearchIndexerTest {
                  var reader = DirectoryReader.open(dir)) {
                 var sf = reader.storedFields();
                 var doc = sf.document(0);
-                String summary = doc.get("summary");
-                assertNotNull(summary, "summary field must be stored");
-                assertTrue(summary.endsWith("…"),
-                        "summary > 250 chars must end with ellipsis");
-                // The plain text before ellipsis is at most 250 chars
-                assertTrue(summary.length() <= 260,
-                        "summary must not be much longer than 250 chars");
+                String body = doc.get("body");
+                assertNotNull(body, "body field must be stored");
+                assertTrue(body.length() >= 490, "body must contain full text");
             }
         }
     }

@@ -6,7 +6,7 @@
 
     <groupId>com.scivicslab</groupId>
     <artifactId>html-saurus</artifactId>
-    <version>1.9.0</version>
+    <version>1.9.1</version>
     <packaging>jar</packaging>
 
     <properties>
@@ -30,6 +30,21 @@
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-analysis-kuromoji</artifactId>
+            <version>9.11.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-queries</artifactId>
+            <version>9.11.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-analysis-common</artifactId>
+            <version>9.11.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-highlighter</artifactId>
             <version>9.11.0</version>
         </dependency>
         <dependency>
@@ -137,7 +152,7 @@
                         <phase>package</phase>
                         <goals><goal>shade</goal></goals>
                         <configuration>
-                            <finalName>html-saurus</finalName>
+                            <finalName>html-saurus-${project.version}</finalName>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>

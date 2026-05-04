@@ -1,12 +1,14 @@
 package com.scivicslab.htmlsaurus;
 
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.AnalyzerWrapper;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.analysis.core.LowerCaseFilter;
 import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.pattern.PatternTokenizer;
+import org.apache.lucene.analysis.shingle.ShingleFilter;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
@@ -70,7 +72,9 @@ public class SearchIndexer {
     public void index() throws IOException {
         Analyzer baseAnalyzer = isJapanese() ? new JapaneseAnalyzer() : new StandardAnalyzer();
         Analyzer analyzer = new PerFieldAnalyzerWrapper(baseAnalyzer,
-                Map.of("doc_id_idx", underscoreAnalyzer(), "path_tokens", underscoreAnalyzer()));
+                Map.of("doc_id_idx", underscoreAnalyzer(),
+                       "path_tokens", underscoreAnalyzer(),
+                       "body_ng", shingleAnalyzer(baseAnalyzer)));
         var config = new IndexWriterConfig(analyzer);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
 
@@ -91,6 +95,26 @@ public class SearchIndexer {
 
     private boolean isJapanese() {
         return locale == null || locale.equals("ja");
+    }
+
+    /**
+     * Wraps the given base analyzer with a ShingleFilter(2,2) to produce bigrams alongside
+     * unigrams. "外部ネットワーク" → ["外部", "ネットワーク", "外部 ネットワーク"], so compound
+     * terms become distinct tokens and MoreLikeThis can discriminate "外部ネットワーク" from
+     * "外部状態機械" even though both share the unigram "外部".
+     */
+    static Analyzer shingleAnalyzer(Analyzer base) {
+        return new AnalyzerWrapper(base.getReuseStrategy()) {
+            @Override
+            protected Analyzer getWrappedAnalyzer(String fieldName) { return base; }
+
+            @Override
+            protected TokenStreamComponents wrapComponents(String fieldName, TokenStreamComponents components) {
+                ShingleFilter shingle = new ShingleFilter(components.getTokenStream(), 2, 2);
+                shingle.setOutputUnigrams(true);
+                return new TokenStreamComponents(components.getSource(), shingle);
+            }
+        };
     }
 
     /** Splits on underscores and lowercases each token for case-insensitive segment search. */
@@ -148,7 +172,6 @@ public class SearchIndexer {
         }
 
         String plainText = stripMarkdown(body);
-        String summary = plainText.length() > 250 ? plainText.substring(0, 250) + "…" : plainText;
 
         Path rel = docsDir.relativize(mdFile);
         String relStr = rel.toString().replace('\\', '/');
@@ -185,10 +208,9 @@ public class SearchIndexer {
         Document doc = new Document();
         doc.add(new StoredField("path", href));
         doc.add(new StoredField("title", title));
-        doc.add(new StoredField("summary", summary));
-        // title_idx and doc_id_idx are boosted at query time; body is not stored (only indexed)
         doc.add(new TextField("title_idx", title, Field.Store.NO));
-        doc.add(new TextField("body", plainText, Field.Store.NO));
+        doc.add(new TextField("body", plainText, Field.Store.YES));
+        doc.add(new TextField("body_ng", plainText, Field.Store.NO));
         String meta = (authors + " " + year + " " + journal).trim();
         if (!meta.isBlank()) {
             doc.add(new TextField("meta", meta, Field.Store.NO));

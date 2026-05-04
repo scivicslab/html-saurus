@@ -148,6 +148,10 @@ class McpHandler {
                 "Regenerate static HTML and search index from the current Markdown sources.",
                 """
                 {"type":"object","properties":{},"required":[]}"""),
+            toolDef("related-documents",
+                "Find documents similar to a given document using TF-IDF (MoreLikeThis). Useful for discovering related topics.",
+                """
+                {"type":"object","properties":{"path":{"type":"string","description":"Relative path to the .md file to find related documents for"},"max_results":{"type":"integer","description":"Maximum results to return (default 5)"}},"required":["path"]}"""),
             toolDef("upload-pdf",
                 "Import a PDF file into the docs directory. Copies the PDF, extracts text, writes a companion .md file with YAML frontmatter (title, authors, year, journal), and triggers a rebuild.",
                 """
@@ -162,11 +166,12 @@ class McpHandler {
         if (args == null) args = Map.of();
 
         return switch (toolName) {
-            case "search-docs"    -> toolSearchDocs(args);
-            case "list-documents" -> toolListDocuments(args);
-            case "read-document"  -> toolReadDocument(args);
-            case "edit-document"  -> toolEditDocument(args);
-            case "rebuild-site"   -> toolRebuildSite();
+            case "search-docs"        -> toolSearchDocs(args);
+            case "list-documents"     -> toolListDocuments(args);
+            case "read-document"      -> toolReadDocument(args);
+            case "edit-document"      -> toolEditDocument(args);
+            case "rebuild-site"       -> toolRebuildSite();
+            case "related-documents"  -> toolRelatedDocuments(args);
             case "upload-pdf"     -> toolUploadPdf(args);
             case null -> errorJson(-32602, "Missing tool name");
             default -> errorJson(-32602, "Unknown tool: " + toolName);
@@ -184,12 +189,32 @@ class McpHandler {
         Number maxNum = McpJsonParser.getNumber(args, "max_results");
         int maxResults = maxNum != null ? maxNum.intValue() : 20;
 
-        LuceneSearcher s = (locale != null && !locale.isEmpty() && localeSearchers.containsKey(locale))
-            ? localeSearchers.get(locale) : searcher;
+        String[] fields = {"title_idx", "doc_id_idx", "path_tokens", "meta", "body"};
+        Map<String, Float> boosts = Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f,
+                                           "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f);
 
-        var hits = s.search(query, maxResults,
-            new String[]{"title_idx", "doc_id_idx", "path_tokens", "meta", "body"},
-            Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f));
+        List<LuceneSearcher.Hit> hits;
+        if (locale != null && !locale.isEmpty() && localeSearchers.containsKey(locale)) {
+            // Locale explicitly specified: use that searcher only
+            hits = localeSearchers.get(locale).search(query, maxResults, fields, boosts);
+        } else {
+            // No locale: aggregate across default + all project searchers
+            List<LuceneSearcher> all = new java.util.ArrayList<>();
+            if (searcher != null) all.add(searcher);
+            all.addAll(localeSearchers.values());
+
+            var seen = new java.util.LinkedHashSet<String>();
+            hits = new java.util.ArrayList<>();
+            for (LuceneSearcher s : all) {
+                for (LuceneSearcher.Hit h : s.search(query, maxResults, fields, boosts)) {
+                    if (seen.add(h.path())) {
+                        hits.add(h);
+                        if (hits.size() >= maxResults) break;
+                    }
+                }
+                if (hits.size() >= maxResults) break;
+            }
+        }
 
         var sb = new StringBuilder();
         if (hits.isEmpty()) {
@@ -289,6 +314,42 @@ class McpHandler {
         rebuild.run();
         long ms = System.currentTimeMillis() - start;
         return toolResult("Site rebuilt successfully in " + ms + " ms.");
+    }
+
+    private String toolRelatedDocuments(Map<String, Object> args) throws Exception {
+        String pathStr = McpJsonParser.getString(args, "path");
+        if (pathStr == null || pathStr.isBlank()) {
+            return toolError("Path is required");
+        }
+        Number maxNum = McpJsonParser.getNumber(args, "max_results");
+        int maxResults = maxNum != null ? maxNum.intValue() : 5;
+
+        // Try default searcher first, then all project/locale searchers until the doc is found
+        List<LuceneSearcher> candidates = new java.util.ArrayList<>();
+        if (searcher != null) candidates.add(searcher);
+        candidates.addAll(localeSearchers.values());
+
+        List<LuceneSearcher.Hit> hits = List.of();
+        for (LuceneSearcher s : candidates) {
+            hits = s.moreLikeThis(pathStr, maxResults);
+            if (!hits.isEmpty()) break;
+        }
+
+        var sb = new StringBuilder();
+        if (hits.isEmpty()) {
+            sb.append("No related documents found for: ").append(pathStr);
+        } else {
+            sb.append("Related documents (").append(hits.size()).append("):\n\n");
+            for (var hit : hits) {
+                sb.append("- **").append(hit.title()).append("**\n");
+                sb.append("  Path: ").append(hit.path()).append("\n");
+                if (!hit.summary().isEmpty()) {
+                    sb.append("  Summary: ").append(hit.summary()).append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+        return toolResult(sb.toString());
     }
 
     private String toolUploadPdf(Map<String, Object> args) throws IOException {
