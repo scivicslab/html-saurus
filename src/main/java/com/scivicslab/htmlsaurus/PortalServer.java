@@ -992,32 +992,54 @@ public class PortalServer {
                     locale = proj.defaultLocale();
                 }
 
-                // Find the right searcher for this locale
-                String searcherKey = searcherLocales.entrySet().stream()
-                    .filter(e -> e.getKey().equals(projectName) || e.getKey().equals(projectName + ":" + locale))
-                    .filter(e -> locale.equals(e.getValue()))
-                    .map(Map.Entry::getKey)
-                    .findFirst()
-                    .orElse(projectName);
-                LuceneSearcher s = searchers.get(searcherKey);
-
-                if (s != null) {
-                    String bodyText = s.getBodyForPath(pagePath);
-                    if (!bodyText.isBlank()) {
-                        try {
-                            var hits = moreLikeThisAcrossProjects(bodyText, locale, pagePath);
-                            for (var hit : hits) {
-                                if (!first) sb.append(",");
-                                first = false;
-                                sb.append("{")
-                                  .append("\"title\":").append(jsonStr(hit.get("title"))).append(",")
-                                  .append("\"path\":").append(jsonStr(hit.get("path"))).append(",")
-                                  .append("\"summary\":").append(jsonStr(hit.get("summary")))
-                                  .append("}");
-                            }
-                        } catch (Exception e) {
-                            System.err.println("Related docs error: " + e.getMessage());
+                // Try all searchers for this project (any locale) to find the body text
+                String bodyText = "";
+                String altPath = pagePath.endsWith(".html")
+                    ? pagePath.substring(0, pagePath.length() - 5) + "/"
+                    : pagePath.replaceAll("/$", "") + ".html";
+                for (var entry : searchers.entrySet()) {
+                    String key = entry.getKey();
+                    if (!key.equals(projectName) && !key.startsWith(projectName + ":")) continue;
+                    LuceneSearcher candidate = entry.getValue();
+                    String t = candidate.getBodyForPath(pagePath);
+                    if (t.isBlank()) t = candidate.getBodyForPath(altPath);
+                    if (!t.isBlank()) { bodyText = t; break; }
+                }
+                // Fallback: read body text directly from static HTML file
+                if (bodyText.isBlank()) {
+                    try {
+                        Path htmlFile = proj.staticDir().resolve(pagePath.replaceFirst("^/", ""));
+                        if (!java.nio.file.Files.exists(htmlFile) && altPath != null) {
+                            htmlFile = proj.staticDir().resolve(altPath.replaceFirst("^/", "").replaceAll("/$", "/index.html"));
                         }
+                        if (java.nio.file.Files.exists(htmlFile)) {
+                            String raw = java.nio.file.Files.readString(htmlFile);
+                            // Strip tags with a simple regex — good enough for MLT input
+                            bodyText = raw.replaceAll("(?s)<script[^>]*>.*?</script>", " ")
+                                          .replaceAll("(?s)<style[^>]*>.*?</style>", " ")
+                                          .replaceAll("<[^>]+>", " ")
+                                          .replaceAll("\\s+", " ")
+                                          .trim();
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Related docs HTML fallback failed: " + e.getMessage());
+                    }
+                }
+
+                if (!bodyText.isBlank()) {
+                    try {
+                        var hits = moreLikeThisAcrossProjects(bodyText, locale, pagePath);
+                        for (var hit : hits) {
+                            if (!first) sb.append(",");
+                            first = false;
+                            sb.append("{")
+                              .append("\"title\":").append(jsonStr(hit.get("title"))).append(",")
+                              .append("\"path\":").append(jsonStr(hit.get("path"))).append(",")
+                              .append("\"summary\":").append(jsonStr(hit.get("summary")))
+                              .append("}");
+                        }
+                    } catch (Exception e) {
+                        System.err.println("Related docs error: " + e.getMessage());
                     }
                 }
             }
@@ -1213,7 +1235,7 @@ public class PortalServer {
             <div id="related-docs">
               <div class="related-header">
                 <span class="related-icon">🔗</span>
-                <span class="related-title">Related Documents</span>
+                <span class="related-title">Related Documents (autogenerated)</span>
               </div>
               <ul id="related-list"></ul>
             </div>

@@ -198,12 +198,27 @@ public class SiteBuilder {
                 ? projectRoot.resolve("i18n/" + currentLocale + "/docusaurus-plugin-content-blog")
                 : projectRoot.resolve("blog");
         if (Files.exists(blogSrcDir) && Files.isDirectory(blogSrcDir)) {
-            try (var stream = Files.list(blogSrcDir)) {
-                stream.filter(f -> !Files.isDirectory(f) && f.toString().endsWith(".md"))
-                      .forEach(f -> {
-                          try { blogPosts.add(parseBlogPost(f)); }
-                          catch (IOException e) { System.err.println("WARN: blog parse error: " + f); }
-                      });
+            try (var topStream = Files.list(blogSrcDir)) {
+                topStream.forEach(entry -> {
+                    try {
+                        if (!Files.isDirectory(entry) && entry.toString().endsWith(".md")) {
+                            blogPosts.add(parseBlogPost(entry));
+                        } else if (Files.isDirectory(entry)) {
+                            Path idx = entry.resolve("index.md");
+                            if (Files.exists(idx)) {
+                                blogPosts.add(parseBlogPost(idx));
+                            } else {
+                                try (var inner = Files.list(entry)) {
+                                    inner.filter(p -> !Files.isDirectory(p) && p.toString().endsWith(".md"))
+                                         .findFirst().ifPresent(p -> {
+                                             try { blogPosts.add(parseBlogPost(p)); }
+                                             catch (IOException e) { System.err.println("WARN: blog parse error: " + p); }
+                                         });
+                                }
+                            }
+                        }
+                    } catch (IOException e) { System.err.println("WARN: blog scan error: " + entry); }
+                });
             }
             blogPosts.sort(Comparator.<BlogPost, LocalDate>comparing(
                     p -> p.date() != null ? p.date() : LocalDate.EPOCH).reversed());
@@ -1789,12 +1804,24 @@ public class SiteBuilder {
             var fdm = BLOG_FILE_DATE.matcher(file.getFileName().toString());
             if (fdm.find()) { try { date = LocalDate.parse(fdm.group(1)); } catch (Exception ignored) {} }
         }
+        if (date == null) {
+            // Folder-based post: try parent directory name (e.g. 2026-04-05-slug/index.md)
+            var ddm = BLOG_FILE_DATE.matcher(file.getParent().getFileName().toString());
+            if (ddm.find()) { try { date = LocalDate.parse(ddm.group(1)); } catch (Exception ignored) {} }
+        }
 
         String slug;
         var sm = BLOG_SLUG_PAT.matcher(rawFm);
-        slug = sm.find() ? sm.group(1).trim()
-                         : file.getFileName().toString().replaceAll("\\.md$", "")
-                               .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
+        if (sm.find()) {
+            slug = sm.group(1).trim();
+        } else if (file.getFileName().toString().equals("index.md")) {
+            // Folder-based post without slug in frontmatter: use directory name
+            slug = file.getParent().getFileName().toString()
+                       .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
+        } else {
+            slug = file.getFileName().toString().replaceAll("\\.md$", "")
+                       .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
+        }
 
         List<String> tags = new ArrayList<>();
         var tm = BLOG_TAGS_SECT.matcher(rawFm);
@@ -1804,6 +1831,7 @@ public class SiteBuilder {
         }
 
         int ti = body.indexOf("<!-- truncate -->");
+        if (ti < 0) ti = body.indexOf("<!--truncate-->");
         String excerpt = ti >= 0 ? body.substring(0, ti).trim() : body;
 
         return new BlogPost(slug, title, date, List.copyOf(tags), excerpt, body);
