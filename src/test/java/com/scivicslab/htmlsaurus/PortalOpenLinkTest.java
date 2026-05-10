@@ -2,6 +2,7 @@ package com.scivicslab.htmlsaurus;
 
 import com.microsoft.playwright.*;
 import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Verifies that clicking the project name link on a portal row opens the project
  * in a NEW tab, not in the same tab (which would hide the portal).
  */
+@Tag("S3")
 class PortalOpenLinkTest {
 
     @TempDir

@@ -52,31 +52,40 @@ The fat JAR is produced at `target/html-saurus.jar` (no other dependencies neede
 
 ## Usage
 
-### Single-project mode
+### 1. Build-only mode (primary use case)
 
-Point html-saurus at any Docusaurus project directory:
+Convert a Docusaurus project's `docs/` to static HTML and exit. No server is started.
 
 ```bash
-# Serve the docs/ directory in the current Docusaurus project
-java -jar html-saurus.jar --serve
+# Build the project in the current directory
+cd /path/to/my-docusaurus-project
+java -jar html-saurus.jar
 
-# Specify a project directory explicitly
-java -jar html-saurus.jar /path/to/my-docusaurus-project --serve
-
-# Build static HTML only (no server)
+# Or specify the project directory explicitly
 java -jar html-saurus.jar /path/to/my-docusaurus-project
-
-# Watch for file changes and rebuild automatically
-java -jar html-saurus.jar --serve --watch
-
-# Use a custom port (default: 8080)
-java -jar html-saurus.jar --serve --port 3000
 ```
 
 Generated HTML is written to `<project>/static-html/`.
 The Lucene search index is written to `<project>/search-index/`.
 
-### Portal mode — serve multiple Docusaurus projects at once
+This is the fastest way to regenerate output after editing Markdown files. Useful in CI pipelines, cron jobs, or any environment where you do not need a running server.
+
+### 2. Single-project server mode
+
+Build and start a development HTTP server for one project:
+
+```bash
+# Serve the current directory's project (default port: 8080)
+java -jar html-saurus.jar --serve
+
+# Specify a project directory and a custom port
+java -jar html-saurus.jar /path/to/my-docusaurus-project --serve --port 3000
+
+# Watch for file changes and rebuild automatically
+java -jar html-saurus.jar --serve --watch
+```
+
+### 3. Portal mode — serve multiple Docusaurus projects at once
 
 Portal mode scans a root directory for all Docusaurus projects (any subdirectory containing `docs/` and `docusaurus.config.js` or `docusaurus.config.ts`) and serves them together under a single server with a project index page.
 

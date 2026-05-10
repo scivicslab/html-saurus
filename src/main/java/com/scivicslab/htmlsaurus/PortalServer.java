@@ -544,6 +544,9 @@ public class PortalServer {
               btn.disabled = false;
               btn.textContent = 'Build';
             }
+            document.getElementById('find-related-input').addEventListener('keydown', function(e) {
+              if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); doFindRelated(); }
+            });
             async function doFindRelated() {
               const btn = document.getElementById('find-related-btn');
               const status = document.getElementById('find-related-status');
@@ -752,6 +755,7 @@ public class PortalServer {
             </header>
             <main>
             """.formatted(escHtml(q),
+                          escHtml(q),
                           "ja".equals(finalLang) ? "checked" : "",
                           "en".equals(finalLang) ? "checked" : ""));
 

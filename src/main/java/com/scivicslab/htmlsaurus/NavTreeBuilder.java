@@ -40,22 +40,29 @@ class NavTreeBuilder {
     private final MarkdownConverter converter;
     private final String currentLocale;
     private final String defaultLocale;
+    /**
+     * Default-locale docs root used for fallback when a translated file is absent.
+     * Null when building the default locale itself.
+     */
+    private final Path fallbackDocsDir;
 
     /**
-     * @param docsDir       source directory containing Markdown files
-     * @param production    {@code true} to generate production-style directory URLs
-     * @param converter     Markdown converter used for frontmatter extraction during tree building
-     * @param currentLocale locale code of this build (e.g., "en"), or null for default
-     * @param defaultLocale default locale from docusaurus.config (e.g., "ja"), or null
+     * @param docsDir         source directory containing Markdown files
+     * @param production      {@code true} to generate production-style directory URLs
+     * @param converter       Markdown converter used for frontmatter extraction during tree building
+     * @param currentLocale   locale code of this build (e.g., "en"), or null for default
+     * @param defaultLocale   default locale from docusaurus.config (e.g., "ja"), or null
+     * @param fallbackDocsDir default-locale docs root for sidebar fallback; null if not needed
      */
     NavTreeBuilder(Path docsDir, boolean production, MarkdownConverter converter,
-                   String currentLocale, String defaultLocale) {
+                   String currentLocale, String defaultLocale, Path fallbackDocsDir) {
         this.docsDir = docsDir;
         this.projectRoot = findProjectRoot(docsDir);
         this.production = production;
         this.converter = converter;
         this.currentLocale = currentLocale;
         this.defaultLocale = defaultLocale;
+        this.fallbackDocsDir = fallbackDocsDir;
     }
 
     /**
@@ -80,6 +87,9 @@ class NavTreeBuilder {
      * @throws IOException if file I/O fails
      */
     SiteNode build() throws IOException {
+        if (fallbackDocsDir != null && !fallbackDocsDir.equals(docsDir) && Files.isDirectory(fallbackDocsDir)) {
+            return reorderFromDocusaurusConfig(buildTreeMerged(fallbackDocsDir, docsDir));
+        }
         return reorderFromDocusaurusConfig(buildTree(docsDir));
     }
 
@@ -204,6 +214,113 @@ class NavTreeBuilder {
             if (Files.exists(p)) return p;
         }
         return null;
+    }
+
+    /**
+     * Builds the navigation tree using the default-locale directory as the structural reference,
+     * substituting locale-specific files wherever they exist (Docusaurus fallback behaviour).
+     *
+     * <p>For each entry in {@code defaultDir}: if a counterpart exists in {@code localeDir},
+     * the locale file is used for title/content; otherwise the default file is used.
+     * Hrefs are always computed relative to {@code fallbackDocsDir} so URLs are locale-neutral.</p>
+     *
+     * @param defaultDir the directory in the default-locale docs tree (structural reference)
+     * @param localeDir  the corresponding directory in the current-locale docs tree (may be absent)
+     * @throws IOException if file I/O fails
+     */
+    private SiteNode buildTreeMerged(Path defaultDir, Path localeDir) throws IOException {
+        List<Path> defaultEntries;
+        try (var stream = Files.list(defaultDir)) {
+            defaultEntries = stream.sorted(Comparator.comparing(p -> sortKey(p.getFileName().toString()))).toList();
+        }
+
+        String dirBase = SiteBuilder.stripNumericPrefix(defaultDir.getFileName().toString());
+        List<Path> mdFiles = defaultEntries.stream()
+            .filter(e -> !Files.isDirectory(e) && e.toString().endsWith(".md"))
+            .toList();
+        boolean hasSubdirs = defaultEntries.stream().anyMatch(Files::isDirectory);
+
+        // Find the same-name .md in default dir; use locale counterpart if it exists
+        Path sameNameMdDefault = null;
+        for (Path md : mdFiles) {
+            String mdBase = SiteBuilder.stripNumericPrefix(SiteBuilder.stripExtension(md.getFileName().toString()));
+            if (dirBase.equals(mdBase)) { sameNameMdDefault = md; break; }
+        }
+        Path effectiveSameNameMd = sameNameMdDefault;
+        if (sameNameMdDefault != null) {
+            Path localeCp = localeDir.resolve(sameNameMdDefault.getFileName());
+            if (Files.exists(localeCp)) effectiveSameNameMd = localeCp;
+        }
+
+        // Pattern 1: same-name .md only, no subdirs → leaf page
+        if (sameNameMdDefault != null && !hasSubdirs && mdFiles.size() == 1) {
+            String[] fm = converter.parseFrontmatter(Files.readString(effectiveSameNameMd));
+            String title = fm[0].isBlank() ? dirBase : fm[0];
+            String fmId = SiteBuilder.stripNumericPrefix(fm[2]);
+            Path dirRel = fallbackDocsDir.relativize(defaultDir);
+            String href;
+            if (!fmId.isEmpty()) {
+                String parentPath = dirRel.getParent() == null ? "" : dirRel.getParent().toString().replace('\\', '/');
+                String parentClean = parentPath.isEmpty() ? "" : SiteBuilder.cleanRelPath(parentPath) + "/";
+                href = "/" + parentClean + fmId + (production ? "/" : ".html");
+            } else {
+                href = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
+            }
+            return new SiteNode(title, href, false, List.of(), null);
+        }
+
+        // Category label: prefer locale _category_.json, fall back to default
+        String label;
+        String catHref = null;
+        List<SiteNode> children = new ArrayList<>();
+        if (effectiveSameNameMd != null) {
+            String[] fm = converter.parseFrontmatter(Files.readString(effectiveSameNameMd));
+            label = fm[0].isBlank() ? dirBase : fm[0];
+            String fmId = SiteBuilder.stripNumericPrefix(fm[2]);
+            Path dirRel = fallbackDocsDir.relativize(defaultDir);
+            if (!fmId.isEmpty()) {
+                String parentPath = dirRel.getParent() == null ? "" : dirRel.getParent().toString().replace('\\', '/');
+                String parentClean = parentPath.isEmpty() ? "" : SiteBuilder.cleanRelPath(parentPath) + "/";
+                catHref = "/" + parentClean + fmId + (production ? "/" : ".html");
+            } else {
+                catHref = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
+            }
+        } else {
+            // Prefer locale _category_.json label, fall back to default
+            Path localeCat = localeDir.resolve("_category_.json");
+            label = Files.exists(localeCat) ? readCategoryLabel(localeDir) : readCategoryLabel(defaultDir);
+        }
+
+        for (Path defaultEntry : defaultEntries) {
+            if (defaultEntry.equals(sameNameMdDefault)) continue;
+            if (Files.isDirectory(defaultEntry)) {
+                Path localeSubDir = localeDir.resolve(defaultEntry.getFileName());
+                // If locale subdir absent, pass defaultEntry so all children fall back to default
+                Path effectiveLocaleSubDir = Files.isDirectory(localeSubDir) ? localeSubDir : defaultEntry;
+                children.add(buildTreeMerged(defaultEntry, effectiveLocaleSubDir));
+            } else if (defaultEntry.toString().endsWith(".md")) {
+                Path localeCp = localeDir.resolve(defaultEntry.getFileName());
+                Path effectiveEntry = Files.exists(localeCp) ? localeCp : defaultEntry;
+                String[] fm = converter.parseFrontmatter(Files.readString(effectiveEntry));
+                String title = fm[0].isBlank()
+                    ? SiteBuilder.stripNumericPrefix(SiteBuilder.stripExtension(defaultEntry.getFileName().toString())) : fm[0];
+                String fmId = SiteBuilder.stripNumericPrefix(fm[2]);
+                // href always relative to fallbackDocsDir (same structure as localeDir)
+                Path rel = fallbackDocsDir.relativize(defaultEntry);
+                String href;
+                if (!fmId.isEmpty()) {
+                    String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
+                    String parentClean = parentPath.isEmpty() ? "" : SiteBuilder.cleanRelPath(parentPath) + "/";
+                    href = "/" + parentClean + fmId + (production ? "/" : ".html");
+                } else {
+                    href = "/" + SiteBuilder.cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", "")) + (production ? "/" : ".html");
+                }
+                children.add(new SiteNode(title, href, false, List.of(), null));
+            }
+        }
+
+        String navHref = catHref != null ? catHref : firstHref(children);
+        return new SiteNode(label, navHref, true, children, catHref);
     }
 
     /**

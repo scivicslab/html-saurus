@@ -3,6 +3,7 @@ package com.scivicslab.htmlsaurus;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -77,6 +78,7 @@ class ModeTest {
     // ---- Mode 1: Build-only ----------------------------------------
 
     @Nested
+    @Tag("S1")
     @DisplayName("Mode 1 – Build-only")
     class BuildOnlyMode {
 
@@ -127,6 +129,7 @@ class ModeTest {
     // ---- Mode 2: Single (dev) vs Mode 4: Production ----------------
 
     @Nested
+    @Tag("S2")
     @DisplayName("Mode 2 – Single (dev) HTML output")
     class SingleDevMode {
 
@@ -152,6 +155,7 @@ class ModeTest {
     }
 
     @Nested
+    @Tag("S4")
     @DisplayName("Mode 4 – Production HTML output")
     class ProductionMode {
 
@@ -181,6 +185,7 @@ class ModeTest {
     // ---- Mode 3: Portal ----------------------------------------
 
     @Nested
+    @Tag("S3")
     @DisplayName("Mode 3 – Portal mode")
     class PortalMode {
 

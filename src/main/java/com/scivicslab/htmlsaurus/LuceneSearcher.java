@@ -7,6 +7,7 @@ import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.queries.mlt.MoreLikeThis;
 import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
+import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.BoostQuery;
@@ -85,6 +86,9 @@ class LuceneSearcher implements Closeable {
         var expr = LuceneQueryBuilder.build(fields, boosts, queryStr);
         logger.info("query expr: " + expr);
         var parser = new MultiFieldQueryParser(fields, analyzer, boosts);
+        // AND operator: all tokens in a query must match; prevents partial-token false positives
+        // when underscore-split fields (doc_id_idx, path_tokens) tokenize the query.
+        parser.setDefaultOperator(QueryParser.Operator.AND);
         var q = parser.parse(expr);
         var hits = searcher.search(q, maxHits);
         var stored = searcher.storedFields();

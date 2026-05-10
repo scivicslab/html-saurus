@@ -5,6 +5,7 @@ import org.apache.lucene.search.*;
 import org.apache.lucene.store.NIOFSDirectory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -30,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li>title and summary fields are stored.</li>
  * </ul>
  */
+@Tag("S1.05")
 class SearchIndexerTest {
 
     @TempDir
