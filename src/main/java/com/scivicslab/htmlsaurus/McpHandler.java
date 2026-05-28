@@ -1,5 +1,6 @@
 package com.scivicslab.htmlsaurus;
 
+import com.scivicslab.pojoactor.core.ActorRef;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
@@ -34,21 +35,21 @@ class McpHandler {
     private static final String SERVER_VERSION = "1.4.0";
 
     private final Path docsDir;
-    private final LuceneSearcher searcher;
+    private final ActorRef<LuceneSearcher> searcher;
     private final Runnable rebuild;
-    private final Map<String, LuceneSearcher> localeSearchers;
+    private final Map<String, ActorRef<LuceneSearcher>> localeSearchers;
 
     private final Map<String, String> sessions = new ConcurrentHashMap<>();
     private final AtomicLong sessionCounter = new AtomicLong();
 
     /**
      * @param docsDir         the docs/ directory containing raw Markdown source files
-     * @param searcher        the default Lucene searcher for full-text search
+     * @param searcher        the default Lucene searcher actor for full-text search
      * @param rebuild         callback to trigger a full rebuild (build + reindex)
-     * @param localeSearchers locale-specific searchers (may be empty)
+     * @param localeSearchers locale-specific searcher actors (may be empty)
      */
-    McpHandler(Path docsDir, LuceneSearcher searcher, Runnable rebuild,
-               Map<String, LuceneSearcher> localeSearchers) {
+    McpHandler(Path docsDir, ActorRef<LuceneSearcher> searcher, Runnable rebuild,
+               Map<String, ActorRef<LuceneSearcher>> localeSearchers) {
         this.docsDir = docsDir;
         this.searcher = searcher;
         this.rebuild = rebuild;
@@ -196,17 +197,18 @@ class McpHandler {
         List<LuceneSearcher.Hit> hits;
         if (locale != null && !locale.isEmpty() && localeSearchers.containsKey(locale)) {
             // Locale explicitly specified: use that searcher only
-            hits = localeSearchers.get(locale).search(query, maxResults, fields, boosts);
+            ActorRef<LuceneSearcher> locRef = localeSearchers.get(locale);
+            hits = locRef.ask(s -> { try { return s.search(query, maxResults, fields, boosts); } catch (Exception e) { throw new RuntimeException(e); } }).join();
         } else {
             // No locale: aggregate across default + all project searchers
-            List<LuceneSearcher> all = new java.util.ArrayList<>();
+            List<ActorRef<LuceneSearcher>> all = new java.util.ArrayList<>();
             if (searcher != null) all.add(searcher);
             all.addAll(localeSearchers.values());
 
             var seen = new java.util.LinkedHashSet<String>();
             hits = new java.util.ArrayList<>();
-            for (LuceneSearcher s : all) {
-                for (LuceneSearcher.Hit h : s.search(query, maxResults, fields, boosts)) {
+            for (ActorRef<LuceneSearcher> sRef : all) {
+                for (LuceneSearcher.Hit h : sRef.ask(s -> { try { return s.search(query, maxResults, fields, boosts); } catch (Exception e) { throw new RuntimeException(e); } }).join()) {
                     if (seen.add(h.path())) {
                         hits.add(h);
                         if (hits.size() >= maxResults) break;
@@ -325,13 +327,13 @@ class McpHandler {
         int maxResults = maxNum != null ? maxNum.intValue() : 5;
 
         // Try default searcher first, then all project/locale searchers until the doc is found
-        List<LuceneSearcher> candidates = new java.util.ArrayList<>();
+        List<ActorRef<LuceneSearcher>> candidates = new java.util.ArrayList<>();
         if (searcher != null) candidates.add(searcher);
         candidates.addAll(localeSearchers.values());
 
         List<LuceneSearcher.Hit> hits = List.of();
-        for (LuceneSearcher s : candidates) {
-            hits = s.moreLikeThis(pathStr, maxResults);
+        for (ActorRef<LuceneSearcher> sRef : candidates) {
+            hits = sRef.ask(s -> { try { return s.moreLikeThis(pathStr, maxResults); } catch (Exception e) { throw new RuntimeException(e); } }).join();
             if (!hits.isEmpty()) break;
         }
 

@@ -30,7 +30,9 @@ import java.util.logging.Logger;
  *
  * <p>Uses {@link DirectoryReader#openIfChanged} to cheaply pick up index updates without
  * reopening the underlying directory on every query. The analyzer is created once and reused.
- * All public methods are {@code synchronized} so the instance is safe to share across threads.
+ *
+ * <p>Thread safety is provided by the caller wrapping this instance in a POJO-actor
+ * ({@code ActorRef<LuceneSearcher>}). All public methods are therefore unsynchronized.
  */
 class LuceneSearcher implements Closeable {
 
@@ -76,8 +78,8 @@ class LuceneSearcher implements Closeable {
      * Searches the index and returns up to {@code maxHits} results.
      * Returns an empty list if the query is blank or the index does not yet exist.
      */
-    synchronized List<Hit> search(String queryStr, int maxHits,
-                                  String[] fields, Map<String, Float> boosts) throws Exception {
+    List<Hit> search(String queryStr, int maxHits,
+                     String[] fields, Map<String, Float> boosts) throws Exception {
         if (queryStr.isBlank()) return List.of();
         ensureOpen();
         refreshReader();
@@ -124,7 +126,7 @@ class LuceneSearcher implements Closeable {
      * Returns documents similar to the one at {@code docPath} using MoreLikeThis (TF-IDF).
      * The source document is excluded from the results.
      */
-    synchronized List<Hit> moreLikeThis(String docPath, int maxHits) throws Exception {
+    List<Hit> moreLikeThis(String docPath, int maxHits) throws Exception {
         if (docPath == null || docPath.isBlank()) return List.of();
         ensureOpen();
         refreshReader();
@@ -205,7 +207,7 @@ class LuceneSearcher implements Closeable {
      * Returns documents similar to the given raw text using MoreLikeThis (TF-IDF).
      * Unlike {@link #moreLikeThis}, this method accepts arbitrary text rather than a document path.
      */
-    synchronized List<Hit> moreLikeThisText(String text, int maxHits) throws Exception {
+    List<Hit> moreLikeThisText(String text, int maxHits) throws Exception {
         if (text == null || text.isBlank()) return List.of();
         ensureOpen();
         refreshReader();
@@ -243,7 +245,7 @@ class LuceneSearcher implements Closeable {
      * Returns the stored {@code body} field for the document matching the given path.
      * Performs a linear scan over all leaf readers. Returns an empty string if not found.
      */
-    synchronized String getBodyForPath(String path) {
+    String getBodyForPath(String path) {
         if (path == null || path.isBlank()) return "";
         try {
             ensureOpen();
@@ -268,7 +270,7 @@ class LuceneSearcher implements Closeable {
     }
 
     /** Returns the current {@link DirectoryReader}, opening and refreshing it if needed. */
-    synchronized DirectoryReader getReader() throws IOException {
+    DirectoryReader getReader() throws IOException {
         ensureOpen();
         refreshReader();
         return reader;
@@ -278,7 +280,7 @@ class LuceneSearcher implements Closeable {
     Analyzer getAnalyzer() { return analyzer; }
 
     /** Returns {@code true} if the index directory exists and can be opened. */
-    synchronized boolean isAvailable() {
+    boolean isAvailable() {
         try {
             ensureOpen();
             return reader != null;
@@ -288,7 +290,7 @@ class LuceneSearcher implements Closeable {
     }
 
     @Override
-    public synchronized void close() {
+    public void close() {
         try { if (reader != null) reader.close(); } catch (IOException ignored) {}
         try { if (directory != null) directory.close(); } catch (IOException ignored) {}
         analyzer.close();

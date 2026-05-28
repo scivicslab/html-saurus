@@ -6,7 +6,7 @@
 
     <groupId>com.scivicslab</groupId>
     <artifactId>html-saurus</artifactId>
-    <version>1.11.0</version>
+    <version>2.0.0</version>
     <packaging>jar</packaging>
 
     <properties>
@@ -71,6 +71,13 @@
             <groupId>org.commonmark</groupId>
             <artifactId>commonmark-ext-autolink</artifactId>
             <version>0.22.0</version>
+        </dependency>
+
+        <!-- POJO-actor: lightweight actor framework -->
+        <dependency>
+            <groupId>com.scivicslab</groupId>
+            <artifactId>pojo-actor</artifactId>
+            <version>3.5.0</version>
         </dependency>
 
         <!-- PDF text extraction -->

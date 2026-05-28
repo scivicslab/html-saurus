@@ -15,6 +15,9 @@ class PageRenderer {
 
     private static final String PAGE_CSS = loadResource("page.css");
 
+    // Top navbar: show this many primary sections inline; the rest collapse into a "More" dropdown.
+    private static final int NAV_PRIMARY_ITEMS = 5;
+
     private static final Pattern NUM_PREFIX = Pattern.compile("^(\\d+)_(.*)$");
 
     private static final Pattern HEADING_PATTERN = Pattern.compile(
@@ -123,14 +126,42 @@ class PageRenderer {
         sb.append("    </svg>\n");
         sb.append("  </button>\n");
         sb.append("  <nav class=\"top\">\n");
+        List<SiteNode> dirSections = new ArrayList<>();
         for (SiteNode section : root.children()) {
-            if (!section.isDir()) continue;
+            if (section.isDir()) dirSections.add(section);
+        }
+        int inlineCount = Math.min(NAV_PRIMARY_ITEMS, dirSections.size());
+        for (int i = 0; i < inlineCount; i++) {
+            SiteNode section = dirSections.get(i);
             boolean active = topSection != null &&
                 topSection.equals("/" + dirNameForSection(section));
             String href = section.href() != null ? prefix + section.href().replaceFirst("^/", "") : "#";
             sb.append("    <a href=\"").append(href).append("\"")
               .append(active ? " class=\"active\"" : "").append(">")
               .append(escapeHtml(section.label())).append("</a>\n");
+        }
+        if (dirSections.size() > inlineCount) {
+            // Overflow sections collapse into a "More" dropdown.
+            StringBuilder menu = new StringBuilder();
+            boolean moreActive = false;
+            for (int i = inlineCount; i < dirSections.size(); i++) {
+                SiteNode section = dirSections.get(i);
+                boolean active = topSection != null &&
+                    topSection.equals("/" + dirNameForSection(section));
+                if (active) moreActive = true;
+                String href = section.href() != null ? prefix + section.href().replaceFirst("^/", "") : "#";
+                menu.append("      <a href=\"").append(href).append("\" class=\"nav-more-item")
+                    .append(active ? " active" : "").append("\">")
+                    .append(escapeHtml(section.label())).append("</a>\n");
+            }
+            sb.append("    <div class=\"nav-more-dropdown\">\n");
+            sb.append("      <button class=\"nav-more-btn")
+              .append(moreActive ? " active" : "")
+              .append("\">More &#9662;</button>\n");
+            sb.append("      <div class=\"nav-more-menu\">\n");
+            sb.append(menu);
+            sb.append("      </div>\n");
+            sb.append("    </div>\n");
         }
         sb.append("  </nav>\n");
         if (!production) {

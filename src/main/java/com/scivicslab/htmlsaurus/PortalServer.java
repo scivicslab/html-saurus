@@ -1,5 +1,7 @@
 package com.scivicslab.htmlsaurus;
 
+import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.pojoactor.core.ActorSystem;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
@@ -33,7 +35,8 @@ public class PortalServer {
 
     private final List<Project> projects;
     private final Map<String, Project> projectMap;
-    private final Map<String, LuceneSearcher> searchers = new LinkedHashMap<>();
+    private final ActorSystem searcherSystem = new ActorSystem("searcher-system");
+    private final Map<String, ActorRef<LuceneSearcher>> searchers = new LinkedHashMap<>();
     /** Maps searcher key → locale string for language-filtered search. */
     private final Map<String, String> searcherLocales = new LinkedHashMap<>();
     private final int port;
@@ -61,7 +64,7 @@ public class PortalServer {
             projects.add(proj);
             projectMap.put(name, proj);
             // Default index uses the project's defaultLocale analyzer
-            searchers.put(name, new LuceneSearcher(proj.indexDir(), proj.defaultLocale()));
+            searchers.put(name, searcherSystem.actorOf(name, new LuceneSearcher(proj.indexDir(), proj.defaultLocale())));
             searcherLocales.put(name, proj.defaultLocale());
             // Load locale-specific indexes from search-index/<locale>/
             try {
@@ -71,7 +74,7 @@ public class PortalServer {
                         .forEach(locDir -> {
                             String loc = locDir.getFileName().toString();
                             String key = name + ":" + loc;
-                            searchers.put(key, new LuceneSearcher(locDir, loc));
+                            searchers.put(key, searcherSystem.actorOf(key, new LuceneSearcher(locDir, loc)));
                             searcherLocales.put(key, loc);
                         });
                 }
@@ -80,7 +83,7 @@ public class PortalServer {
             }
         }
         // MCP handler: in portal mode, use worksDir as root so all projects' docs/ are accessible
-        LuceneSearcher defaultSearcher = searchers.values().stream().findFirst().orElse(null);
+        ActorRef<LuceneSearcher> defaultSearcher = searchers.values().stream().findFirst().orElse(null);
         Runnable rebuildAll = () -> {
             for (Project p : projects) {
                 Main.build(p.projectDir().resolve("docs"), p.staticDir(), production);
@@ -101,6 +104,7 @@ public class PortalServer {
         server.createContext("/", this::handleAll);
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
+        Runtime.getRuntime().addShutdownHook(new Thread(searcherSystem::terminate));
         System.out.println("Portal at http://localhost:" + server.getAddress().getPort());
         System.out.println("Press Ctrl+C to stop.");
         return server;
@@ -171,6 +175,18 @@ public class PortalServer {
             return;
         }
 
+        // Related documents page (SSR): GET /related?path=...
+        if (path.equals("/related")) {
+            handleRelatedPage(ex);
+            return;
+        }
+
+        // Find-related page (SSR): POST /find-related (non-production only)
+        if (!production && path.equals("/find-related")) {
+            handleFindRelatedPage(ex);
+            return;
+        }
+
         // Split: /<project>[/<rest>]
         String stripped = path.startsWith("/") ? path.substring(1) : path;
         int slash = stripped.indexOf('/');
@@ -225,6 +241,8 @@ public class PortalServer {
                     Project proj = new Project(name, p, p.resolve("static-html"), p.resolve("search-index"), defaultLocale);
                     projects.add(proj);
                     projectMap.put(name, proj);
+                    searchers.put(name, searcherSystem.actorOf(name, new LuceneSearcher(proj.indexDir(), defaultLocale)));
+                    searcherLocales.put(name, defaultLocale);
                     System.out.println("  Added: " + name);
                     added++;
                 }
@@ -467,9 +485,6 @@ public class PortalServer {
                   </span>
                   <span id="find-related-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
                 </div>
-                <div id="find-related-results" style="margin-top:1rem;display:none;">
-                  <div id="find-related-list"></div>
-                </div>
               </div>
             """);
         }
@@ -547,62 +562,27 @@ public class PortalServer {
             document.getElementById('find-related-input').addEventListener('keydown', function(e) {
               if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); doFindRelated(); }
             });
-            async function doFindRelated() {
-              const btn = document.getElementById('find-related-btn');
+            function doFindRelated() {
               const status = document.getElementById('find-related-status');
-              const results = document.getElementById('find-related-results');
-              const list = document.getElementById('find-related-list');
               const text = document.getElementById('find-related-input').value.trim();
               const langEl = document.querySelector('input[name="find-related-lang"]:checked');
               const lang = langEl ? langEl.value : 'ja';
               if (!text) { status.textContent = 'Please enter some text.'; return; }
-              btn.disabled = true;
-              status.textContent = 'Searching...';
-              results.style.display = 'none';
-              list.innerHTML = '';
-              try {
-                const r = await fetch('/api/find-related?lang=' + encodeURIComponent(lang), {
-                  method: 'POST',
-                  headers: {'Content-Type': 'text/plain; charset=UTF-8'},
-                  body: text
-                });
-                const docs = await r.json();
-                if (docs.length === 0) {
-                  status.textContent = 'No related documents found.';
-                } else {
-                  status.textContent = docs.length + ' result(s)';
-                  status.style.color = 'var(--accent-green)';
-                  docs.forEach(function(d) {
-                    const rawPath = d.path || '';
-                    const trimmed = rawPath.startsWith('/') ? rawPath.substring(1) : rawPath;
-                    const parts = trimmed.split('/');
-                    const project = parts[0] || '';
-                    const pageParts = parts.slice(1);
-                    const breadcrumb = pageParts
-                      .map(function(s){ return s.replace(/^[0-9]+_/, '').replace(/[.]html$/, ''); })
-                      .filter(Boolean).join(' \u203a ');
-                    const a = document.createElement('a');
-                    a.href = d.path;
-                    a.target = '_blank';
-                    a.rel = 'noopener noreferrer';
-                    a.style.cssText = 'background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:1rem 1.25rem;margin-bottom:0.75rem;text-decoration:none;display:block;color:inherit;';
-                    a.innerHTML =
-                      '<div style="font-size:0.72rem;font-weight:700;color:var(--accent-green);text-transform:uppercase;letter-spacing:0.05em;">' + escHtmlJs(project) + '</div>' +
-                      '<div style="font-size:1rem;font-weight:600;color:var(--text-primary);margin:0.2rem 0;">' + escHtmlJs(d.title || d.path) + '</div>' +
-                      (breadcrumb ? '<div style="font-size:0.75rem;color:var(--accent-green);margin-bottom:0.3rem;">' + escHtmlJs(breadcrumb) + '</div>' : '') +
-                      (d.summary ? '<div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.5;">' + escHtmlJs(d.summary) + '</div>' : '');
-                    list.appendChild(a);
-                  });
-                  results.style.display = 'block';
-                }
-                function escHtmlJs(s) {
-                  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-                }
-              } catch (e) {
-                status.textContent = 'Error: ' + e.message;
-                status.style.color = '#e06060';
-              }
-              btn.disabled = false;
+              const form = document.createElement('form');
+              form.method = 'POST';
+              form.action = '/find-related';
+              form.target = '_blank';
+              form.style.display = 'none';
+              const tInput = document.createElement('input');
+              tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
+              const lInput = document.createElement('input');
+              lInput.type = 'hidden'; lInput.name = 'lang'; lInput.value = lang;
+              form.appendChild(tInput); form.appendChild(lInput);
+              document.body.appendChild(form);
+              form.submit();
+              document.body.removeChild(form);
+              status.textContent = 'Opened in new tab.';
+              status.style.color = 'var(--accent-green)';
             }
             async function doReindexAll(btn) {
               const status = document.getElementById('reindex-all-status');
@@ -665,7 +645,7 @@ public class PortalServer {
     // ---- Search results page (SSR) ------------------------------
 
     /** Number of search results displayed per page. */
-    private static final int PAGE_SIZE = 100;
+    private static final int PAGE_SIZE = 20;
 
     /**
      * Handles {@code GET /search?q=...&page=N} requests. Performs a cross-project search
@@ -853,12 +833,12 @@ public class PortalServer {
             String key = entry.getKey();
             String keyLocale = searcherLocales.get(key);
             if (keyLocale == null || !keyLocale.equals(lang)) continue;
-            LuceneSearcher s = entry.getValue();
-            if (!s.isAvailable()) continue;
+            ActorRef<LuceneSearcher> sRef = entry.getValue();
+            if (!sRef.ask(LuceneSearcher::isAvailable).join()) continue;
             try {
-                readers.add(s.getReader());
+                readers.add(sRef.ask(s -> { try { return s.getReader(); } catch (IOException e) { throw new RuntimeException(e); } }).join());
                 projNames.add(key);
-            } catch (IOException e) {
+            } catch (Exception e) {
                 System.err.println("Cannot open reader for " + key + ": " + e.getMessage());
             }
         }
@@ -876,7 +856,7 @@ public class PortalServer {
             var expr = LuceneQueryBuilder.build(SEARCH_FIELDS, SEARCH_BOOSTS, q);
             var parser = new MultiFieldQueryParser(SEARCH_FIELDS, analyzer, SEARCH_BOOSTS);
             var query = parser.parse(expr);
-            var topDocs = globalSearcher.search(query, 100);
+            var topDocs = globalSearcher.search(query, 1000);
             var stored = globalSearcher.storedFields();
 
             List<Map<String, String>> results = new ArrayList<>();
@@ -907,10 +887,10 @@ public class PortalServer {
 
     /** Queries a single project's Lucene index and appends matching results to the output list. */
     private void collectHits(String queryStr, Project proj, List<Map<String, String>> out) {
-        LuceneSearcher s = searchers.get(proj.name());
-        if (s == null) return;
+        ActorRef<LuceneSearcher> sRef = searchers.get(proj.name());
+        if (sRef == null) return;
         try {
-            var hits = s.search(queryStr, 1000, SEARCH_FIELDS, SEARCH_BOOSTS);
+            var hits = sRef.ask(s -> { try { return s.search(queryStr, 1000, SEARCH_FIELDS, SEARCH_BOOSTS); } catch (Exception e) { throw new RuntimeException(e); } }).join();
             for (var hit : hits) {
                 out.add(Map.of(
                     "project",  proj.name(),
@@ -934,8 +914,8 @@ public class PortalServer {
         String q = HttpUtils.queryParam(ex, "q");
         String locale = HttpUtils.queryParam(ex, "locale");
         String key = (!locale.isEmpty()) ? proj.name() + ":" + locale : proj.name();
-        LuceneSearcher s = searchers.getOrDefault(key, searchers.get(proj.name()));
-        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", searchWithSearcher(q, proj, s));
+        ActorRef<LuceneSearcher> sRef = searchers.getOrDefault(key, searchers.get(proj.name()));
+        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", searchWithSearcher(q, proj, sRef));
     }
 
     /**
@@ -946,10 +926,10 @@ public class PortalServer {
         return searchWithSearcher(queryStr, proj, searchers.get(proj.name()));
     }
 
-    private String searchWithSearcher(String queryStr, Project proj, LuceneSearcher s) {
-        if (s == null) return "[]";
+    private String searchWithSearcher(String queryStr, Project proj, ActorRef<LuceneSearcher> sRef) {
+        if (sRef == null) return "[]";
         try {
-            var hits = s.search(queryStr, 20, SEARCH_FIELDS, SEARCH_BOOSTS);
+            var hits = sRef.ask(s -> { try { return s.search(queryStr, 20, SEARCH_FIELDS, SEARCH_BOOSTS); } catch (Exception e) { throw new RuntimeException(e); } }).join();
             var sb = new StringBuilder("[");
             boolean first = true;
             for (var hit : hits) {
@@ -975,78 +955,17 @@ public class PortalServer {
     /** GET /api/related?path=/project/some/page.html — returns up to 20 related docs as JSON. */
     private void handleRelated(HttpExchange ex) throws IOException {
         String docPath = queryParam(ex, "path");
+        List<Map<String, String>> hits = relatedDocsFor(docPath);
         var sb = new StringBuilder("[");
         boolean first = true;
-        if (docPath != null && !docPath.isBlank()) {
-            // Strip leading /projectName to get the path within the project index
-            String stripped = docPath.startsWith("/") ? docPath.substring(1) : docPath;
-            int slash = stripped.indexOf('/');
-            String projectName = slash >= 0 ? stripped.substring(0, slash) : stripped;
-            String pagePath = slash >= 0 ? stripped.substring(slash) : "/";
-
-            Project proj = projectMap.get(projectName);
-            if (proj != null) {
-                // Determine locale from pagePath prefix
-                String locale;
-                if (pagePath.startsWith("/en/")) {
-                    locale = "en";
-                } else if (pagePath.startsWith("/ja/")) {
-                    locale = "ja";
-                } else {
-                    locale = proj.defaultLocale();
-                }
-
-                // Try all searchers for this project (any locale) to find the body text
-                String bodyText = "";
-                String altPath = pagePath.endsWith(".html")
-                    ? pagePath.substring(0, pagePath.length() - 5) + "/"
-                    : pagePath.replaceAll("/$", "") + ".html";
-                for (var entry : searchers.entrySet()) {
-                    String key = entry.getKey();
-                    if (!key.equals(projectName) && !key.startsWith(projectName + ":")) continue;
-                    LuceneSearcher candidate = entry.getValue();
-                    String t = candidate.getBodyForPath(pagePath);
-                    if (t.isBlank()) t = candidate.getBodyForPath(altPath);
-                    if (!t.isBlank()) { bodyText = t; break; }
-                }
-                // Fallback: read body text directly from static HTML file
-                if (bodyText.isBlank()) {
-                    try {
-                        Path htmlFile = proj.staticDir().resolve(pagePath.replaceFirst("^/", ""));
-                        if (!java.nio.file.Files.exists(htmlFile) && altPath != null) {
-                            htmlFile = proj.staticDir().resolve(altPath.replaceFirst("^/", "").replaceAll("/$", "/index.html"));
-                        }
-                        if (java.nio.file.Files.exists(htmlFile)) {
-                            String raw = java.nio.file.Files.readString(htmlFile);
-                            // Strip tags with a simple regex — good enough for MLT input
-                            bodyText = raw.replaceAll("(?s)<script[^>]*>.*?</script>", " ")
-                                          .replaceAll("(?s)<style[^>]*>.*?</style>", " ")
-                                          .replaceAll("<[^>]+>", " ")
-                                          .replaceAll("\\s+", " ")
-                                          .trim();
-                        }
-                    } catch (Exception e) {
-                        System.err.println("Related docs HTML fallback failed: " + e.getMessage());
-                    }
-                }
-
-                if (!bodyText.isBlank()) {
-                    try {
-                        var hits = moreLikeThisAcrossProjects(bodyText, locale, pagePath);
-                        for (var hit : hits) {
-                            if (!first) sb.append(",");
-                            first = false;
-                            sb.append("{")
-                              .append("\"title\":").append(jsonStr(hit.get("title"))).append(",")
-                              .append("\"path\":").append(jsonStr(hit.get("path"))).append(",")
-                              .append("\"summary\":").append(jsonStr(hit.get("summary")))
-                              .append("}");
-                        }
-                    } catch (Exception e) {
-                        System.err.println("Related docs error: " + e.getMessage());
-                    }
-                }
-            }
+        for (var hit : hits) {
+            if (!first) sb.append(",");
+            first = false;
+            sb.append("{")
+              .append("\"title\":").append(jsonStr(hit.get("title"))).append(",")
+              .append("\"path\":").append(jsonStr(hit.get("path"))).append(",")
+              .append("\"summary\":").append(jsonStr(hit.get("summary")))
+              .append("}");
         }
         sb.append("]");
         byte[] body = sb.toString().getBytes(StandardCharsets.UTF_8);
@@ -1054,6 +973,150 @@ public class PortalServer {
         ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         ex.sendResponseHeaders(200, body.length);
         try (var out = ex.getResponseBody()) { out.write(body); }
+    }
+
+    /** GET /related?path=/project/some/page.html — renders an HTML page with up to 20 related docs. */
+    private void handleRelatedPage(HttpExchange ex) throws IOException {
+        String docPath = queryParam(ex, "path");
+        List<Map<String, String>> hits = relatedDocsFor(docPath);
+
+        var sb = new StringBuilder();
+        sb.append("""
+            <!DOCTYPE html>
+            <html lang="ja">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Related: %s</title>
+              <style>
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                       background: #f6f7f8; min-height: 100vh; }
+                header { background: #1c1e21; color: #fff; padding: 1rem 2rem;
+                         display: flex; align-items: center; gap: 1.5rem; }
+                header a.home { color: #fff; text-decoration: none; font-weight: 700; font-size: 1.1rem; }
+                header a.home:hover { color: #aaa; }
+                main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
+                .source-link { font-size: 0.875rem; color: #555; margin-bottom: 1.5rem; }
+                .source-link a { color: #2e8555; text-decoration: none; }
+                .source-link a:hover { text-decoration: underline; }
+                .result-count { color: #666; font-size: 0.875rem; margin-bottom: 1.5rem; }
+                .result-count strong { color: #1c1e21; }
+                .result { background: #fff; border: 1px solid #e3e4e5; border-radius: 8px;
+                          padding: 1rem 1.25rem; margin-bottom: 0.75rem;
+                          text-decoration: none; display: block; color: inherit;
+                          transition: box-shadow 0.15s, border-color 0.15s; }
+                .result:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.08); border-color: #3578e5; }
+                .result-project { font-size: 0.72rem; font-weight: 700; color: #3578e5;
+                                  text-transform: uppercase; letter-spacing: 0.05em; }
+                .result-title { font-size: 1rem; font-weight: 600; color: #1c1e21; margin: 0.2rem 0; }
+                .result-breadcrumb { font-size: 0.75rem; color: #3578e5; margin-bottom: 0.3rem; }
+                .result-summary { font-size: 0.82rem; color: #666; line-height: 1.5; }
+                .no-results { color: #888; text-align: center; padding: 3rem; }
+              </style>
+            </head>
+            <body>
+            <header>
+              <a class="home" href="/">Documentation Portal</a>
+            </header>
+            <main>
+            """.formatted(escHtml(docPath)));
+
+        if (!docPath.isBlank()) {
+            sb.append("<p class=\"source-link\">Related documents for: <a href=\"")
+              .append(escHtml(docPath)).append("\">").append(escHtml(docPath)).append("</a></p>\n");
+        }
+
+        sb.append("<p class=\"result-count\"><strong>").append(hits.size())
+          .append("</strong> related document(s) found</p>\n");
+
+        if (hits.isEmpty()) {
+            sb.append("<p class=\"no-results\">No related documents found.</p>\n");
+        } else {
+            for (var hit : hits) {
+                String href = hit.get("path");
+                // Extract project name from path prefix (e.g. /project/...)
+                String displayProject = "";
+                if (href != null && href.startsWith("/")) {
+                    int sl = href.indexOf('/', 1);
+                    displayProject = sl > 0 ? href.substring(1, sl) : href.substring(1);
+                }
+                sb.append("<a class=\"result\" href=\"").append(escHtml(href != null ? href : "#")).append("\">\n");
+                sb.append("  <div class=\"result-project\">").append(escHtml(displayProject)).append("</div>\n");
+                sb.append("  <div class=\"result-title\">").append(escHtml(hit.get("title") != null ? hit.get("title") : "")).append("</div>\n");
+                sb.append("  <div class=\"result-breadcrumb\">").append(escHtml(pathToBreadcrumb(href))).append("</div>\n");
+                sb.append("  <div class=\"result-summary\">").append(escHtml(hit.get("summary") != null ? hit.get("summary") : "")).append("</div>\n");
+                sb.append("</a>\n");
+            }
+        }
+
+        sb.append("</main>\n</body>\n</html>\n");
+        respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
+    }
+
+    /**
+     * Extracts up to 20 related documents for the given portal-relative document path
+     * (e.g. {@code /project/some/page.html}).  Used by both the JSON API and the HTML page.
+     */
+    private List<Map<String, String>> relatedDocsFor(String docPath) {
+        if (docPath == null || docPath.isBlank()) return List.of();
+
+        String stripped = docPath.startsWith("/") ? docPath.substring(1) : docPath;
+        int slash = stripped.indexOf('/');
+        String projectName = slash >= 0 ? stripped.substring(0, slash) : stripped;
+        String pagePath = slash >= 0 ? stripped.substring(slash) : "/";
+
+        Project proj = projectMap.get(projectName);
+        if (proj == null) return List.of();
+
+        // Determine locale from pagePath prefix
+        String locale;
+        if (pagePath.startsWith("/en/")) locale = "en";
+        else if (pagePath.startsWith("/ja/")) locale = "ja";
+        else locale = proj.defaultLocale();
+
+        // Try all searchers for this project (any locale) to find the body text
+        String bodyText = "";
+        String altPath = pagePath.endsWith(".html")
+            ? pagePath.substring(0, pagePath.length() - 5) + "/"
+            : pagePath.replaceAll("/$", "") + ".html";
+        for (var entry : searchers.entrySet()) {
+            String key = entry.getKey();
+            if (!key.equals(projectName) && !key.startsWith(projectName + ":")) continue;
+            ActorRef<LuceneSearcher> candidate = entry.getValue();
+            final String fp = pagePath, fa = altPath;
+            String t = candidate.ask(s -> s.getBodyForPath(fp)).join();
+            if (t.isBlank()) t = candidate.ask(s -> s.getBodyForPath(fa)).join();
+            if (!t.isBlank()) { bodyText = t; break; }
+        }
+        // Fallback: read body text directly from static HTML file
+        if (bodyText.isBlank()) {
+            try {
+                Path htmlFile = proj.staticDir().resolve(pagePath.replaceFirst("^/", ""));
+                if (!Files.exists(htmlFile)) {
+                    htmlFile = proj.staticDir().resolve(altPath.replaceFirst("^/", "").replaceAll("/$", "/index.html"));
+                }
+                if (Files.exists(htmlFile)) {
+                    String raw = Files.readString(htmlFile);
+                    bodyText = raw.replaceAll("(?s)<script[^>]*>.*?</script>", " ")
+                                  .replaceAll("(?s)<style[^>]*>.*?</style>", " ")
+                                  .replaceAll("<[^>]+>", " ")
+                                  .replaceAll("\\s+", " ")
+                                  .trim();
+                }
+            } catch (Exception e) {
+                System.err.println("Related docs HTML fallback failed: " + e.getMessage());
+            }
+        }
+
+        if (bodyText.isBlank()) return List.of();
+
+        try {
+            return moreLikeThisAcrossProjects(bodyText, locale, pagePath);
+        } catch (Exception e) {
+            System.err.println("Related docs error: " + e.getMessage());
+            return List.of();
+        }
     }
 
     /** POST /api/find-related?lang=ja — body is plain text; returns top 20 related docs globally ranked by score. */
@@ -1093,6 +1156,115 @@ public class PortalServer {
         try (var out = ex.getResponseBody()) { out.write(body); }
     }
 
+    /** POST /find-related — form submission; renders an HTML page with up to 20 similar docs. */
+    private void handleFindRelatedPage(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        String rawBody = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, String> params = parseFormBody(rawBody);
+        String text = params.getOrDefault("text", "").strip();
+        String lang = params.getOrDefault("lang", "ja");
+        if (lang.isBlank()) lang = "ja";
+
+        List<Map<String, String>> hits;
+        try {
+            hits = moreLikeThisAcrossProjects(text, lang, "");
+        } catch (Exception e) {
+            System.err.println("find-related page error: " + e.getMessage());
+            hits = List.of();
+        }
+
+        String snippet = text.length() > 120 ? text.substring(0, 120) + "…" : text;
+        var sb = new StringBuilder();
+        sb.append("""
+            <!DOCTYPE html>
+            <html lang="ja">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Find Related Documents</title>
+              <style>
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                       background: #f6f7f8; min-height: 100vh; }
+                header { background: #1c1e21; color: #fff; padding: 1rem 2rem;
+                         display: flex; align-items: center; gap: 1.5rem; }
+                header a.home { color: #fff; text-decoration: none; font-weight: 700; font-size: 1.1rem; }
+                header a.home:hover { color: #aaa; }
+                main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
+                .query-box { background: #fff; border: 1px solid #e3e4e5; border-radius: 8px;
+                             padding: 1rem 1.25rem; margin-bottom: 1.5rem;
+                             font-size: 0.875rem; color: #555; }
+                .query-label { font-weight: 700; color: #1c1e21; margin-bottom: 0.4rem; }
+                .query-text { color: #555; white-space: pre-wrap; word-break: break-word; }
+                .result-count { color: #666; font-size: 0.875rem; margin-bottom: 1.5rem; }
+                .result-count strong { color: #1c1e21; }
+                .result { background: #fff; border: 1px solid #e3e4e5; border-radius: 8px;
+                          padding: 1rem 1.25rem; margin-bottom: 0.75rem;
+                          text-decoration: none; display: block; color: inherit;
+                          transition: box-shadow 0.15s, border-color 0.15s; }
+                .result:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.08); border-color: #3578e5; }
+                .result-project { font-size: 0.72rem; font-weight: 700; color: #3578e5;
+                                  text-transform: uppercase; letter-spacing: 0.05em; }
+                .result-title { font-size: 1rem; font-weight: 600; color: #1c1e21; margin: 0.2rem 0; }
+                .result-breadcrumb { font-size: 0.75rem; color: #3578e5; margin-bottom: 0.3rem; }
+                .result-summary { font-size: 0.82rem; color: #666; line-height: 1.5; }
+                .no-results { color: #888; text-align: center; padding: 3rem; }
+              </style>
+            </head>
+            <body>
+            <header>
+              <a class="home" href="/">Documentation Portal</a>
+            </header>
+            <main>
+            """);
+
+        sb.append("<div class=\"query-box\"><div class=\"query-label\">Query text:</div>")
+          .append("<div class=\"query-text\">").append(escHtml(snippet)).append("</div></div>\n");
+
+        sb.append("<p class=\"result-count\"><strong>").append(hits.size())
+          .append("</strong> related document(s) found</p>\n");
+
+        if (hits.isEmpty()) {
+            sb.append("<p class=\"no-results\">No related documents found.</p>\n");
+        } else {
+            for (var hit : hits) {
+                String href = hit.get("path");
+                String displayProject = "";
+                if (href != null && href.startsWith("/")) {
+                    int sl = href.indexOf('/', 1);
+                    displayProject = sl > 0 ? href.substring(1, sl) : href.substring(1);
+                }
+                sb.append("<a class=\"result\" href=\"").append(escHtml(href != null ? href : "#")).append("\">\n");
+                sb.append("  <div class=\"result-project\">").append(escHtml(displayProject)).append("</div>\n");
+                sb.append("  <div class=\"result-title\">").append(escHtml(hit.get("title") != null ? hit.get("title") : "")).append("</div>\n");
+                sb.append("  <div class=\"result-breadcrumb\">").append(escHtml(pathToBreadcrumb(href))).append("</div>\n");
+                sb.append("  <div class=\"result-summary\">").append(escHtml(hit.get("summary") != null ? hit.get("summary") : "")).append("</div>\n");
+                sb.append("</a>\n");
+            }
+        }
+
+        sb.append("</main>\n</body>\n</html>\n");
+        respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
+    }
+
+    private Map<String, String> parseFormBody(String body) {
+        Map<String, String> params = new java.util.HashMap<>();
+        if (body == null || body.isBlank()) return params;
+        for (String pair : body.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq < 0) continue;
+            try {
+                String key = java.net.URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8);
+                String val = java.net.URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                params.put(key, val);
+            } catch (Exception ignored) {}
+        }
+        return params;
+    }
+
     // ---- MoreLikeThis across projects ---------------------------
 
     /**
@@ -1102,7 +1274,7 @@ public class PortalServer {
      * @param bodyText    source text to compare against
      * @param locale      target locale ("ja" or "en")
      * @param excludePath page path to exclude from results (empty string to exclude nothing)
-     * @return up to 20 result maps with keys: title, path (project-prefixed), summary
+     * @return up to 50 result maps with keys: title, path (project-prefixed), summary
      */
     private List<Map<String, String>> moreLikeThisAcrossProjects(String bodyText, String locale,
                                                                   String excludePath) throws Exception {
@@ -1114,12 +1286,12 @@ public class PortalServer {
             String key = entry.getKey();
             String keyLocale = searcherLocales.get(key);
             if (keyLocale == null || !keyLocale.equals(locale)) continue;
-            LuceneSearcher s = entry.getValue();
-            if (!s.isAvailable()) continue;
+            ActorRef<LuceneSearcher> sRef = entry.getValue();
+            if (!sRef.ask(LuceneSearcher::isAvailable).join()) continue;
             try {
-                readers.add(s.getReader());
+                readers.add(sRef.ask(s -> { try { return s.getReader(); } catch (IOException e) { throw new RuntimeException(e); } }).join());
                 keys.add(key);
-            } catch (IOException e) {
+            } catch (Exception e) {
                 System.err.println("Cannot open reader for " + key + ": " + e.getMessage());
             }
         }
@@ -1141,13 +1313,13 @@ public class PortalServer {
 
         var query = mlt.like("body", new java.io.StringReader(bodyText));
         var globalSearcher = new IndexSearcher(mr);
-        var topDocs = globalSearcher.search(query, (20 + 1) * 3);
+        var topDocs = globalSearcher.search(query, (50 + 1) * 3);
         var stored = globalSearcher.storedFields();
 
         List<Map<String, String>> results = new ArrayList<>();
         java.util.Set<String> seen = new java.util.LinkedHashSet<>();
         for (var sd : topDocs.scoreDocs) {
-            if (results.size() >= 20) break;
+            if (results.size() >= 50) break;
             var doc = stored.document(sd.doc);
             String path = doc.get("path") != null ? doc.get("path") : "";
             if (!excludePath.isEmpty() && excludePath.equals(path)) continue;
@@ -1261,6 +1433,14 @@ public class PortalServer {
                     li.appendChild(a);
                     ul.appendChild(li);
                   });
+                  var footer = document.createElement('div');
+                  footer.style.cssText = 'margin-top:.6rem;font-size:.8rem;';
+                  var seeAll = document.createElement('a');
+                  seeAll.href = '/related?path=' + encodeURIComponent(path);
+                  seeAll.textContent = 'See all ' + docs.length + ' related documents →';
+                  seeAll.style.cssText = 'color:#1a4fa0;text-decoration:none;';
+                  footer.appendChild(seeAll);
+                  box.appendChild(footer);
                   box.style.display = 'block';
                 });
             })();

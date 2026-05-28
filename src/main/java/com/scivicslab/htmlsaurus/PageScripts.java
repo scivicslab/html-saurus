@@ -382,16 +382,16 @@ class PageScripts {
                 container.appendChild(pre);
               });
             })();
-            // Language dropdown toggle
+            // Language dropdown and "More" overflow dropdown toggle
             (function() {
-              document.querySelectorAll('.lang-btn').forEach(function(btn) {
+              document.querySelectorAll('.lang-btn, .nav-more-btn').forEach(function(btn) {
                 btn.addEventListener('click', function(e) {
                   e.stopPropagation();
                   btn.parentElement.classList.toggle('open');
                 });
               });
               document.addEventListener('click', function() {
-                document.querySelectorAll('.lang-dropdown.open').forEach(function(d) {
+                document.querySelectorAll('.lang-dropdown.open, .nav-more-dropdown.open').forEach(function(d) {
                   d.classList.remove('open');
                 });
               });

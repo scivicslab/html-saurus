@@ -1,5 +1,7 @@
 package com.scivicslab.htmlsaurus;
 
+import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.pojoactor.core.ActorSystem;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -24,8 +26,9 @@ public class SearchServer {
     private final int port;
     private final Runnable rebuild;
     private final boolean production;
-    private final LuceneSearcher searcher;
-    private final Map<String, LuceneSearcher> localeSearchers = new HashMap<>();
+    private final ActorSystem searcherSystem = new ActorSystem("searcher-system");
+    private final ActorRef<LuceneSearcher> searcher;
+    private final Map<String, ActorRef<LuceneSearcher>> localeSearchers = new HashMap<>();
 
     /**
      * @param staticDir  directory containing the generated static HTML files
@@ -42,14 +45,16 @@ public class SearchServer {
         this.port = port;
         this.rebuild = rebuild;
         this.production = production;
-        this.searcher = new LuceneSearcher(indexDir);
+        this.searcher = searcherSystem.actorOf("default", new LuceneSearcher(indexDir));
         // Load locale-specific indexes from search-index/<locale>/
         try {
             if (Files.isDirectory(indexDir)) {
                 Files.list(indexDir)
                     .filter(Files::isDirectory)
-                    .forEach(locDir -> localeSearchers.put(
-                        locDir.getFileName().toString(), new LuceneSearcher(locDir)));
+                    .forEach(locDir -> {
+                        String loc = locDir.getFileName().toString();
+                        localeSearchers.put(loc, searcherSystem.actorOf(loc, new LuceneSearcher(locDir)));
+                    });
             }
         } catch (IOException e) {
             System.err.println("Warning: could not scan locale indexes: " + e.getMessage());
@@ -77,6 +82,7 @@ public class SearchServer {
         server.createContext("/", this::handleStatic);
         server.setExecutor(null);
         server.start();
+        Runtime.getRuntime().addShutdownHook(new Thread(searcherSystem::terminate));
         System.out.println("Serving at http://localhost:" + server.getAddress().getPort());
         System.out.println("Press Ctrl+C to stop.");
         return server;
@@ -108,9 +114,9 @@ public class SearchServer {
     private void handleSearch(HttpExchange ex) throws IOException {
         String q = HttpUtils.queryParam(ex, "q");
         String locale = HttpUtils.queryParam(ex, "locale");
-        LuceneSearcher s = (!locale.isEmpty() && localeSearchers.containsKey(locale))
+        ActorRef<LuceneSearcher> sRef = (!locale.isEmpty() && localeSearchers.containsKey(locale))
             ? localeSearchers.get(locale) : searcher;
-        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", search(q, s));
+        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", search(q, sRef));
     }
 
     /**
@@ -121,11 +127,12 @@ public class SearchServer {
      * @param queryStr the user's search query; blank returns an empty array
      * @return JSON array string of search results
      */
-    private String search(String queryStr, LuceneSearcher s) {
+    private String search(String queryStr, ActorRef<LuceneSearcher> sRef) {
         try {
-            var hits = s.search(queryStr, 20,
+            var hits = sRef.ask(s -> { try { return s.search(queryStr, 20,
                 new String[]{"title_idx", "doc_id_idx", "path_tokens", "meta", "body"},
                 Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f));
+            } catch (Exception e) { throw new RuntimeException(e); } }).join();
             var sb = new StringBuilder("[");
             boolean first = true;
             for (var hit : hits) {
