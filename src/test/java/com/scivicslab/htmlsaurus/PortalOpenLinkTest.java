@@ -35,7 +35,7 @@ class PortalOpenLinkTest {
                 "<html><body><h1>myproject</h1></body></html>");
 
         // --- Start portal server on a random port (port 0) ---
-        PortalServer portalServer = new PortalServer(tempDir, List.of(projectDir), 0, false);
+        PortalServer portalServer = new PortalServer(tempDir, List.of(projectDir), 0, false, null);
         HttpServer server = portalServer.start();
         int port = server.getAddress().getPort();
         String portalUrl = "http://localhost:" + port + "/";

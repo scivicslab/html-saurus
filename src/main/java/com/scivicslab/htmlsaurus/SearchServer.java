@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -29,22 +30,36 @@ public class SearchServer {
     private final ActorSystem searcherSystem = new ActorSystem("searcher-system");
     private final ActorRef<LuceneSearcher> searcher;
     private final Map<String, ActorRef<LuceneSearcher>> localeSearchers = new HashMap<>();
+    /** Semantic related-docs keyed by served path; empty when no vectors are available. */
+    private final Map<String, List<Map<String, String>>> semanticRelated;
+    /** In-memory semantic index (document vectors) for query-to-doc search; may be null. */
+    private final SemanticIndex semanticIndex;
+    /** Embedding client used to embed search queries at request time. */
+    private final EmbeddingClient embed;
+    /** Maximum results returned by semantic query search. */
+    private static final int SEARCH_TOP_N = 20;
 
     /**
-     * @param staticDir  directory containing the generated static HTML files
-     * @param indexDir   directory containing the Lucene search index
-     * @param port       HTTP port to listen on
-     * @param rebuild    callback to trigger a full rebuild (build + reindex)
-     * @param production {@code true} to disable the {@code /api/build} endpoint
-     * @param docsDir    source directory containing raw Markdown files (for MCP tools)
+     * @param staticDir     directory containing the generated static HTML files
+     * @param indexDir      directory containing the Lucene search index
+     * @param port          HTTP port to listen on
+     * @param rebuild       callback to trigger a full rebuild (build + reindex)
+     * @param production    {@code true} to disable the {@code /api/build} endpoint
+     * @param docsDir       source directory containing raw Markdown files (for MCP tools)
+     * @param semanticIndex in-memory semantic neighbour index (may be {@code null})
      */
     public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild,
-                        boolean production, Path docsDir) {
+                        boolean production, Path docsDir, SemanticIndex semanticIndex) {
         this.staticDir = staticDir;
         this.docsDir = docsDir;
         this.port = port;
         this.rebuild = rebuild;
         this.production = production;
+        // Single-project mode: served URLs have no project prefix, so the key is the bare path.
+        this.semanticRelated = semanticIndex == null ? Map.of()
+                : semanticIndex.servedMap((projectName, path) -> path);
+        this.semanticIndex = semanticIndex;
+        this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
         this.searcher = searcherSystem.actorOf("default", new LuceneSearcher(indexDir));
         // Load locale-specific indexes from search-index/<locale>/
         try {
@@ -76,6 +91,10 @@ public class SearchServer {
             server.createContext("/upload", this::handleUploadPage);
         }
         server.createContext("/search", this::handleSearch);
+        server.createContext("/api/related-semantic", this::handleRelatedSemantic);
+        server.createContext("/related-semantic", this::handleRelatedSemanticPage);
+        server.createContext("/api/search-semantic", this::handleSearchSemantic);
+        server.createContext("/search-semantic", this::handleSearchSemanticPage);
         // MCP endpoint for LLM tool access
         var mcpHandler = new McpHandler(docsDir, searcher, rebuild, localeSearchers);
         server.createContext("/mcp", mcpHandler::handle);
@@ -151,6 +170,45 @@ public class SearchServer {
         }
     }
 
+    // ---- Semantic related-docs endpoints ------------------------
+
+    /** GET /api/related-semantic?path=... — precomputed embedding-based neighbours as JSON. */
+    private void handleRelatedSemantic(HttpExchange ex) throws IOException {
+        RelatedDocsView.writeJson(ex, semanticRelated.getOrDefault(HttpUtils.queryParam(ex, "path"), List.of()));
+    }
+
+    /** GET /related-semantic?path=... — standalone HTML page of embedding-based related docs. */
+    private void handleRelatedSemanticPage(HttpExchange ex) throws IOException {
+        String docPath = HttpUtils.queryParam(ex, "path");
+        HttpUtils.respond(ex, 200, "text/html; charset=UTF-8",
+                RelatedDocsView.pageHtml("Related (semantic)", docPath,
+                        semanticRelated.getOrDefault(docPath, List.of())));
+    }
+
+    /** GET /api/search-semantic?q=... — query-to-doc semantic search as JSON. */
+    private void handleSearchSemantic(HttpExchange ex) throws IOException {
+        RelatedDocsView.writeJson(ex, semanticSearch(HttpUtils.queryParam(ex, "q")));
+    }
+
+    /** GET /search-semantic?q=... — semantic search results page (with a query box). */
+    private void handleSearchSemanticPage(HttpExchange ex) throws IOException {
+        String q = HttpUtils.queryParam(ex, "q");
+        HttpUtils.respond(ex, 200, "text/html; charset=UTF-8",
+                RelatedDocsView.searchResultsPage(q, semanticSearch(q)));
+    }
+
+    /** Embeds the query and ranks all documents by cosine; empty if no index/query or the embed server is down. */
+    private List<Map<String, String>> semanticSearch(String q) {
+        if (semanticIndex == null || q == null || q.isBlank()) {
+            return List.of();
+        }
+        float[] qv = embed.embed(q);
+        if (qv == null) {
+            return List.of();
+        }
+        return semanticIndex.search(qv, SEARCH_TOP_N, (projectName, path) -> path);
+    }
+
     // ---- Static file endpoint -----------------------------------
 
     /**
@@ -178,7 +236,14 @@ public class SearchServer {
         }
 
         byte[] body = Files.readAllBytes(file);
-        HttpUtils.respond(ex, 200, HttpUtils.contentType(file.toString()), body);
+        String ct = HttpUtils.contentType(file.toString());
+        if (ct.startsWith("text/html")) {
+            // Inject the semantic related-docs widget; the key is the bare served path.
+            String html = new String(body, StandardCharsets.UTF_8);
+            html = RelatedDocsView.injectBeforeBodyEnd(html, RelatedDocsView.semanticWidget(path));
+            body = html.getBytes(StandardCharsets.UTF_8);
+        }
+        HttpUtils.respond(ex, 200, ct, body);
     }
 
     // ---- Upload endpoint ----------------------------------------

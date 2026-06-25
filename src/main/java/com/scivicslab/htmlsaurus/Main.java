@@ -115,8 +115,10 @@ public class Main {
         if (serve) {
             // Build search index only when serving; build-only mode does not need it.
             reindexAll(projectDir, production);
+            ensureSemanticVectors(List.of(projectDir));
+            SemanticIndex semanticIndex = SemanticIndex.load(List.of(projectDir), SEMANTIC_TOP_K);
             Runnable rebuild = () -> { build(docsDir, outDir, false); reindexAll(projectDir, false); };
-            new SearchServer(outDir, indexDir, port, rebuild, production, docsDir).start();
+            new SearchServer(outDir, indexDir, port, rebuild, production, docsDir, semanticIndex).start();
         }
     }
 
@@ -154,8 +156,51 @@ public class Main {
         }
 
         if (serve) {
-            new PortalServer(worksDir, projects, port, production).start();
+            // Bind the port and start serving FIRST, using whatever semantic vectors are already
+            // cached. Building the whole corpus' embeddings (ensureSemanticVectors) can take many
+            // minutes; running it before the bind kept the port closed long enough for the process
+            // supervisor (quarkus AI workspace) to mark html-saurus Failed. start() is non-blocking
+            // and the HttpServer serves on its own thread pool, so full-text search is available
+            // immediately while this (main) thread refreshes the semantic vectors. The refreshed
+            // vectors take effect on the next restart; after the first build they are cached, so
+            // subsequent restarts bind and have semantic search ready quickly.
+            SemanticIndex semanticIndex = SemanticIndex.load(projects, SEMANTIC_TOP_K);
+            new PortalServer(worksDir, projects, port, production, semanticIndex).start();
+            System.out.println("Portal serving on http://0.0.0.0:" + port
+                    + "  (full-text ready; refreshing semantic vectors, effective next restart...)");
+            ensureSemanticVectors(projects);
+            System.out.println("Semantic vectors refresh complete.");
         }
+    }
+
+    /** Number of semantic neighbours kept per document. */
+    static final int SEMANTIC_TOP_K = 20;
+
+    /**
+     * Ensures each project's embedding vector cache ({@code search-embedding/vectors.bin})
+     * is present and not older than its {@code search-index/}, (re)building stale ones via
+     * the shared embedding server. The model is NOT run in-process: each document's text is
+     * sent over HTTP (default {@link EmbeddingClient#DEFAULT_BASE_URL}; override with
+     * {@code EMBEDDING_SERVER_URL}).
+     *
+     * <p>If the embedding server is unreachable, this logs a warning and returns: stale or
+     * missing projects keep whatever cached vectors they already have (possibly none), so the
+     * semantic widget shows fewer/no results, while the independent TF-IDF related-docs and
+     * the portal itself are unaffected.
+     *
+     * @param projects Docusaurus project directories whose built indexes are embedded
+     */
+    static void ensureSemanticVectors(List<Path> projects) {
+        String url = System.getenv("EMBEDDING_SERVER_URL");
+        EmbeddingClient embed = new EmbeddingClient(url);
+        if (!embed.isReachable()) {
+            System.err.println("WARNING: embedding server not reachable at " + embed.baseUrl()
+                    + " — semantic vectors not (re)built this run; using any cached vectors. "
+                    + "(TF-IDF related-docs unaffected.) Set EMBEDDING_SERVER_URL to override.");
+            return;
+        }
+        System.out.println("Ensuring semantic vectors via " + embed.baseUrl() + " ...");
+        SemanticIndexer.ensureVectors(projects, embed);
     }
 
     /**

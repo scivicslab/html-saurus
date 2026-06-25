@@ -43,6 +43,14 @@ public class PortalServer {
     private final boolean production;
     private final Path worksDir;
     private McpHandler mcpHandler;
+    /** Precomputed semantic (embedding-based) related docs: portalPath -> list of {path,title,summary}. */
+    private final Map<String, List<Map<String, String>>> semanticRelated;
+    /** In-memory semantic index (document vectors) for query-to-doc search; may be null. */
+    private final SemanticIndex semanticIndex;
+    /** Embedding client used to embed search queries at request time. */
+    private final EmbeddingClient embed;
+    /** Maximum results returned by semantic query search. */
+    private static final int SEARCH_TOP_N = 20;
 
     /**
      * @param worksDir    root directory containing all Docusaurus projects (used for reload)
@@ -50,7 +58,8 @@ public class PortalServer {
      * @param port        HTTP port to listen on (0 for a system-assigned port)
      * @param production  {@code true} to disable the {@code /api/build} endpoint
      */
-    public PortalServer(Path worksDir, List<Path> projectDirs, int port, boolean production) {
+    public PortalServer(Path worksDir, List<Path> projectDirs, int port, boolean production,
+                        SemanticIndex semanticIndex) {
         this.worksDir = worksDir;
         this.port = port;
         this.production = production;
@@ -91,6 +100,14 @@ public class PortalServer {
             }
         };
         this.mcpHandler = new McpHandler(worksDir, defaultSearcher, rebuildAll, searchers);
+
+        // Semantic related-docs: render the in-memory neighbour index into portal URLs
+        // (project-prefixed: /<project>/<page>). Empty index -> empty map -> widget shows nothing.
+        this.semanticRelated = semanticIndex == null ? Map.of()
+                : semanticIndex.servedMap((projectName, path) -> "/" + projectName + path);
+        this.semanticIndex = semanticIndex;
+        this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
+        System.out.println("Semantic related-docs: " + semanticRelated.size() + " entries (in-memory)");
     }
 
     /**
@@ -163,6 +180,18 @@ public class PortalServer {
             return;
         }
 
+        // Semantic (embedding-based) related documents API (JSON): GET /api/related-semantic?path=...
+        if (path.equals("/api/related-semantic")) {
+            handleRelatedSemantic(ex);
+            return;
+        }
+
+        // Semantic query search API (JSON): GET /api/search-semantic?q=...
+        if (path.equals("/api/search-semantic")) {
+            handleSearchSemantic(ex);
+            return;
+        }
+
         // Text similarity API: POST /api/find-related (non-production only)
         if (!production && path.equals("/api/find-related")) {
             handleFindRelated(ex);
@@ -178,6 +207,18 @@ public class PortalServer {
         // Related documents page (SSR): GET /related?path=...
         if (path.equals("/related")) {
             handleRelatedPage(ex);
+            return;
+        }
+
+        // Semantic related documents page (SSR): GET /related-semantic?path=...
+        if (path.equals("/related-semantic")) {
+            handleRelatedSemanticPage(ex);
+            return;
+        }
+
+        // Semantic query search page (SSR): GET /search-semantic?q=...
+        if (path.equals("/search-semantic")) {
+            handleSearchSemanticPage(ex);
             return;
         }
 
@@ -571,7 +612,6 @@ public class PortalServer {
               const form = document.createElement('form');
               form.method = 'POST';
               form.action = '/find-related';
-              form.target = '_blank';
               form.style.display = 'none';
               const tInput = document.createElement('input');
               tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
@@ -752,7 +792,7 @@ public class PortalServer {
             } else {
                 for (var hit : hits) {
                     String href = "/" + hit.get("project") + hit.get("pagePath");
-                    sb.append("<a class=\"result\" href=\"").append(escHtml(href)).append("\" target=\"_blank\" rel=\"noopener noreferrer\">\n");
+                    sb.append("<a class=\"result\" href=\"").append(escHtml(href)).append("\">\n");
                     sb.append("  <div class=\"result-project\">").append(escHtml(hit.get("project"))).append("</div>\n");
                     sb.append("  <div class=\"result-title\">").append(escHtml(hit.get("title"))).append("</div>\n");
                     sb.append("  <div class=\"result-breadcrumb\">").append(escHtml(pathToBreadcrumb(hit.get("pagePath")))).append("</div>\n");
@@ -952,106 +992,52 @@ public class PortalServer {
 
     // ---- Related documents API ----------------------------------
 
-    /** GET /api/related?path=/project/some/page.html — returns up to 20 related docs as JSON. */
+    /** GET /api/related?path=/project/some/page.html — returns up to 20 TF-IDF related docs as JSON. */
     private void handleRelated(HttpExchange ex) throws IOException {
-        String docPath = queryParam(ex, "path");
-        List<Map<String, String>> hits = relatedDocsFor(docPath);
-        var sb = new StringBuilder("[");
-        boolean first = true;
-        for (var hit : hits) {
-            if (!first) sb.append(",");
-            first = false;
-            sb.append("{")
-              .append("\"title\":").append(jsonStr(hit.get("title"))).append(",")
-              .append("\"path\":").append(jsonStr(hit.get("path"))).append(",")
-              .append("\"summary\":").append(jsonStr(hit.get("summary")))
-              .append("}");
-        }
-        sb.append("]");
-        byte[] body = sb.toString().getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.sendResponseHeaders(200, body.length);
-        try (var out = ex.getResponseBody()) { out.write(body); }
+        RelatedDocsView.writeJson(ex, relatedDocsFor(queryParam(ex, "path")));
     }
 
-    /** GET /related?path=/project/some/page.html — renders an HTML page with up to 20 related docs. */
+    /** GET /api/related-semantic?path=... — returns the precomputed embedding-based neighbours as JSON. */
+    private void handleRelatedSemantic(HttpExchange ex) throws IOException {
+        RelatedDocsView.writeJson(ex, semanticRelated.getOrDefault(queryParam(ex, "path"), List.of()));
+    }
+
+    /** GET /api/search-semantic?q=... — query-to-doc semantic search as JSON. */
+    private void handleSearchSemantic(HttpExchange ex) throws IOException {
+        RelatedDocsView.writeJson(ex, semanticSearch(queryParam(ex, "q")));
+    }
+
+    /** GET /search-semantic?q=... — semantic search results page (with a query box). */
+    private void handleSearchSemanticPage(HttpExchange ex) throws IOException {
+        String q = queryParam(ex, "q");
+        respond(ex, 200, "text/html; charset=UTF-8", RelatedDocsView.searchResultsPage(q, semanticSearch(q)));
+    }
+
+    /** Embeds the query and ranks all documents by cosine; empty if no index/query or the embed server is down. */
+    private List<Map<String, String>> semanticSearch(String q) {
+        if (semanticIndex == null || q == null || q.isBlank()) {
+            return List.of();
+        }
+        float[] qv = embed.embed(q);
+        if (qv == null) {
+            return List.of();
+        }
+        return semanticIndex.search(qv, SEARCH_TOP_N, (projectName, path) -> "/" + projectName + path);
+    }
+
+    /** GET /related?path=... — renders an HTML page with the TF-IDF related docs. */
     private void handleRelatedPage(HttpExchange ex) throws IOException {
         String docPath = queryParam(ex, "path");
-        List<Map<String, String>> hits = relatedDocsFor(docPath);
+        respond(ex, 200, "text/html; charset=UTF-8",
+                RelatedDocsView.pageHtml("Related", docPath, relatedDocsFor(docPath)));
+    }
 
-        var sb = new StringBuilder();
-        sb.append("""
-            <!DOCTYPE html>
-            <html lang="ja">
-            <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Related: %s</title>
-              <style>
-                * { box-sizing: border-box; margin: 0; padding: 0; }
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                       background: #f6f7f8; min-height: 100vh; }
-                header { background: #1c1e21; color: #fff; padding: 1rem 2rem;
-                         display: flex; align-items: center; gap: 1.5rem; }
-                header a.home { color: #fff; text-decoration: none; font-weight: 700; font-size: 1.1rem; }
-                header a.home:hover { color: #aaa; }
-                main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
-                .source-link { font-size: 0.875rem; color: #555; margin-bottom: 1.5rem; }
-                .source-link a { color: #2e8555; text-decoration: none; }
-                .source-link a:hover { text-decoration: underline; }
-                .result-count { color: #666; font-size: 0.875rem; margin-bottom: 1.5rem; }
-                .result-count strong { color: #1c1e21; }
-                .result { background: #fff; border: 1px solid #e3e4e5; border-radius: 8px;
-                          padding: 1rem 1.25rem; margin-bottom: 0.75rem;
-                          text-decoration: none; display: block; color: inherit;
-                          transition: box-shadow 0.15s, border-color 0.15s; }
-                .result:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.08); border-color: #3578e5; }
-                .result-project { font-size: 0.72rem; font-weight: 700; color: #3578e5;
-                                  text-transform: uppercase; letter-spacing: 0.05em; }
-                .result-title { font-size: 1rem; font-weight: 600; color: #1c1e21; margin: 0.2rem 0; }
-                .result-breadcrumb { font-size: 0.75rem; color: #3578e5; margin-bottom: 0.3rem; }
-                .result-summary { font-size: 0.82rem; color: #666; line-height: 1.5; }
-                .no-results { color: #888; text-align: center; padding: 3rem; }
-              </style>
-            </head>
-            <body>
-            <header>
-              <a class="home" href="/">Documentation Portal</a>
-            </header>
-            <main>
-            """.formatted(escHtml(docPath)));
-
-        if (!docPath.isBlank()) {
-            sb.append("<p class=\"source-link\">Related documents for: <a href=\"")
-              .append(escHtml(docPath)).append("\">").append(escHtml(docPath)).append("</a></p>\n");
-        }
-
-        sb.append("<p class=\"result-count\"><strong>").append(hits.size())
-          .append("</strong> related document(s) found</p>\n");
-
-        if (hits.isEmpty()) {
-            sb.append("<p class=\"no-results\">No related documents found.</p>\n");
-        } else {
-            for (var hit : hits) {
-                String href = hit.get("path");
-                // Extract project name from path prefix (e.g. /project/...)
-                String displayProject = "";
-                if (href != null && href.startsWith("/")) {
-                    int sl = href.indexOf('/', 1);
-                    displayProject = sl > 0 ? href.substring(1, sl) : href.substring(1);
-                }
-                sb.append("<a class=\"result\" href=\"").append(escHtml(href != null ? href : "#")).append("\">\n");
-                sb.append("  <div class=\"result-project\">").append(escHtml(displayProject)).append("</div>\n");
-                sb.append("  <div class=\"result-title\">").append(escHtml(hit.get("title") != null ? hit.get("title") : "")).append("</div>\n");
-                sb.append("  <div class=\"result-breadcrumb\">").append(escHtml(pathToBreadcrumb(href))).append("</div>\n");
-                sb.append("  <div class=\"result-summary\">").append(escHtml(hit.get("summary") != null ? hit.get("summary") : "")).append("</div>\n");
-                sb.append("</a>\n");
-            }
-        }
-
-        sb.append("</main>\n</body>\n</html>\n");
-        respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
+    /** GET /related-semantic?path=... — renders an HTML page with the embedding-based related docs. */
+    private void handleRelatedSemanticPage(HttpExchange ex) throws IOException {
+        String docPath = queryParam(ex, "path");
+        respond(ex, 200, "text/html; charset=UTF-8",
+                RelatedDocsView.pageHtml("Related (semantic)", docPath,
+                        semanticRelated.getOrDefault(docPath, List.of())));
     }
 
     /**
@@ -1446,9 +1432,11 @@ public class PortalServer {
             })();
             </script>
             """.formatted(jsonStr(docPath));
-        int idx = html.lastIndexOf("</body>");
-        if (idx >= 0) return html.substring(0, idx) + script + html.substring(idx);
-        return html + script;
+
+        // Second, independent widget: embedding-based (semantic) related documents,
+        // shared with single-project mode (SearchServer) via RelatedDocsView.
+        String semScript = RelatedDocsView.semanticWidget(docPath);
+        return RelatedDocsView.injectBeforeBodyEnd(html, script + semScript);
     }
 
     // ---- Helpers ------------------------------------------------
