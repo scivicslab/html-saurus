@@ -48,12 +48,12 @@ final class SemanticIndexer {
     /** Vector cache file name within {@link #EMBED_DIR}. */
     static final String VECTORS_FILE = "vectors.bin";
     private static final int MAGIC = 0x53454d56;   // "SEMV"
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;   // bumped: vectors now carry docId + srcPath
 
     private SemanticIndexer() {}
 
     /** One document with its (project-relative) path, title, locale, summary, and pooled vector. */
-    record DocVec(String path, String title, String locale, String summary, float[] vec) {}
+    record DocVec(String path, String title, String locale, String summary, String docId, String srcPath, float[] vec) {}
 
     /**
      * Ensures every project's {@code search-embedding/vectors.bin} is present and
@@ -126,7 +126,7 @@ final class SemanticIndexer {
             // body snippet when there is none.
             String summary = (d.description() != null && !d.description().isBlank())
                     ? d.description() : summarize(d.body);
-            docs.add(new DocVec(d.path, d.title, d.locale, summary, vec));
+            docs.add(new DocVec(d.path, d.title, d.locale, summary, d.docId(), d.srcPath(), vec));
         }
         if (docs.isEmpty()) {
             // Every embedding failed (likely the server is down): do NOT write an empty
@@ -141,7 +141,8 @@ final class SemanticIndexer {
     }
 
     /** Source fields read out of one Lucene document. */
-    private record RawDoc(String path, String title, String body, String locale, String description) {}
+    private record RawDoc(String path, String title, String body, String locale, String description,
+                          String docId, String srcPath) {}
 
     /** Reads every locale index of one project and appends its documents to {@code out}. */
     private static void collectProject(Path projectDir, List<RawDoc> out) throws IOException {
@@ -181,7 +182,9 @@ final class SemanticIndexer {
                     }
                     String title = doc.get("title") != null ? doc.get("title") : "";
                     String description = doc.get("description") != null ? doc.get("description") : "";
-                    out.add(new RawDoc(path, title, body, locale, description));
+                    String docId = doc.get("doc_id") != null ? doc.get("doc_id") : "";
+                    String srcPath = doc.get("src_path") != null ? doc.get("src_path") : "";
+                    out.add(new RawDoc(path, title, body, locale, description, docId, srcPath));
                 }
             }
         } catch (IOException e) {
@@ -287,6 +290,8 @@ final class SemanticIndexer {
                 out.writeUTF(d.title());
                 out.writeUTF(d.locale());
                 out.writeUTF(d.summary());
+                out.writeUTF(d.docId());
+                out.writeUTF(d.srcPath());
                 for (float f : d.vec()) {
                     out.writeFloat(f);
                 }
@@ -316,11 +321,13 @@ final class SemanticIndexer {
                 String title = in.readUTF();
                 String locale = in.readUTF();
                 String summary = in.readUTF();
+                String docId = in.readUTF();
+                String srcPath = in.readUTF();
                 float[] v = new float[dim];
                 for (int j = 0; j < dim; j++) {
                     v[j] = in.readFloat();
                 }
-                docs.add(new DocVec(path, title, locale, summary, v));
+                docs.add(new DocVec(path, title, locale, summary, docId, srcPath, v));
             }
             return docs;
         } catch (IOException e) {

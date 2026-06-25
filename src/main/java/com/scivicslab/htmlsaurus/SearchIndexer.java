@@ -228,6 +228,8 @@ public class SearchIndexer {
         Document doc = new Document();
         doc.add(new StoredField("path", href));
         doc.add(new StoredField("title", title));
+        // Absolute source path of the .md file, so search results can carry the full path.
+        doc.add(new StoredField("src_path", mdFile.toAbsolutePath().toString()));
         // Authored short summary from frontmatter (preferred over a body snippet at search time).
         doc.add(new StoredField("description", description));
         doc.add(new TextField("title_idx", title, Field.Store.NO));

@@ -62,9 +62,9 @@ class SemanticIndexerTest {
     @Test
     void writeReadVectors_roundTrip_preservesAllFields(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(SemanticIndexer.EMBED_DIR).resolve(SemanticIndexer.VECTORS_FILE);
-        var d1 = new SemanticIndexer.DocVec("/a.html", "Title A", "ja", "summary a",
+        var d1 = new SemanticIndexer.DocVec("/a.html", "Title A", "ja", "summary a", "idA", "/src/a.md",
                 new float[]{0.1f, 0.2f, 0.3f});
-        var d2 = new SemanticIndexer.DocVec("/b.html", "タイトルB", "en", "概要 b",
+        var d2 = new SemanticIndexer.DocVec("/b.html", "タイトルB", "en", "概要 b", "idB", "/src/b.md",
                 new float[]{0.4f, 0.5f, 0.6f});
         SemanticIndexer.writeVectors(file, List.of(d1, d2));
 

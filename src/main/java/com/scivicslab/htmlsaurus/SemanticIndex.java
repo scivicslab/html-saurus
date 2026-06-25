@@ -129,7 +129,9 @@ final class SemanticIndex {
             for (int j : neighbours[i]) {
                 Entry ej = entries.get(j);
                 hits.add(Map.of(
+                        "id", ej.doc.docId(),
                         "path", urlFn.apply(ej.projectName, ej.doc.path()),
+                        "srcPath", ej.doc.srcPath(),
                         "title", ej.doc.title(),
                         "summary", ej.doc.summary()));
             }
@@ -165,7 +167,9 @@ final class SemanticIndex {
         for (int k = 0; k < Math.min(topN, scored.size()); k++) {
             Entry e = entries.get(scored.get(k).idx());
             hits.add(Map.of(
+                    "id", e.doc().docId(),
                     "path", urlFn.apply(e.projectName(), e.doc().path()),
+                    "srcPath", e.doc().srcPath(),
                     "title", e.doc().title(),
                     "summary", e.doc().summary()));
         }

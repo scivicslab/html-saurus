@@ -839,9 +839,12 @@ public class PortalServer {
             if (!first) sb.append(",");
             first = false;
             sb.append("{")
+              .append("\"id\":").append(jsonStr(hit.get("id"))).append(",")
               .append("\"title\":").append(jsonStr(hit.get("title"))).append(",")
               .append("\"project\":").append(jsonStr(hit.get("project"))).append(",")
               .append("\"pagePath\":").append(jsonStr(hit.get("pagePath"))).append(",")
+              .append("\"path\":").append(jsonStr(hit.get("path"))).append(",")
+              .append("\"srcPath\":").append(jsonStr(hit.get("srcPath"))).append(",")
               .append("\"summary\":").append(jsonStr(hit.get("summary")))
               .append("}");
         }
@@ -913,10 +916,15 @@ public class PortalServer {
                 // Strip project name prefix from the searcher key to get the display project name
                 String key = projNames.get(projIdx);
                 String displayProject = key.contains(":") ? key.substring(0, key.indexOf(':')) : key;
+                String pagePath = doc.get("path") != null ? doc.get("path") : "";
                 results.add(Map.of(
                     "project",  displayProject,
-                    "title",    doc.get("title") != null ? doc.get("title") : "",
-                    "pagePath", doc.get("path")  != null ? doc.get("path")  : "",
+                    "id",       doc.get("doc_id")   != null ? doc.get("doc_id")   : "",
+                    "title",    doc.get("title")    != null ? doc.get("title")    : "",
+                    "pagePath", pagePath,
+                    // Served URL (project-prefixed), matching the HTML result href, so a fetch can read the page.
+                    "path",     "/" + displayProject + pagePath,
+                    "srcPath",  doc.get("src_path") != null ? doc.get("src_path") : "",
                     "summary",  snippet
                 ));
             }

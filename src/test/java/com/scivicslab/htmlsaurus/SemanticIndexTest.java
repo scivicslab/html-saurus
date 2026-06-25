@@ -21,9 +21,9 @@ class SemanticIndexTest {
     private static Path buildProject(Path root) throws IOException {
         Path proj = root.resolve("doc_test");
         Path vfile = proj.resolve(SemanticIndexer.EMBED_DIR).resolve(SemanticIndexer.VECTORS_FILE);
-        var a = new SemanticIndexer.DocVec("/a.html", "A", "ja", "sa", new float[]{1f, 0f, 0f});
-        var b = new SemanticIndexer.DocVec("/b.html", "B", "ja", "sb", new float[]{0f, 1f, 0f});
-        var c = new SemanticIndexer.DocVec("/c.html", "C", "ja", "sc", new float[]{0f, 0f, 1f});
+        var a = new SemanticIndexer.DocVec("/a.html", "A", "ja", "sa", "idA", "/src/a.md", new float[]{1f, 0f, 0f});
+        var b = new SemanticIndexer.DocVec("/b.html", "B", "ja", "sb", "idB", "/src/b.md", new float[]{0f, 1f, 0f});
+        var c = new SemanticIndexer.DocVec("/c.html", "C", "ja", "sc", "idC", "/src/c.md", new float[]{0f, 0f, 1f});
         SemanticIndexer.writeVectors(vfile, List.of(a, b, c));
         return proj;
     }

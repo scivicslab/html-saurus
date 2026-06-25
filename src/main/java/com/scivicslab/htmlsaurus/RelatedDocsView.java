@@ -22,7 +22,9 @@ final class RelatedDocsView {
 
     private RelatedDocsView() {}
 
-    /** Writes a hit list as a JSON array of {@code {title,path,summary}} objects. */
+    /** Writes a hit list as a JSON array of {@code {id,title,path,srcPath,summary}} objects.
+     *  {@code id} (doc id) and {@code srcPath} (absolute source .md path) are emitted when present
+     *  in the hit map; absent keys serialize as JSON null. */
     static void writeJson(HttpExchange ex, List<Map<String, String>> hits) throws IOException {
         var sb = new StringBuilder("[");
         boolean first = true;
@@ -30,8 +32,10 @@ final class RelatedDocsView {
             if (!first) sb.append(",");
             first = false;
             sb.append("{")
+              .append("\"id\":").append(HttpUtils.jsonStr(hit.get("id"))).append(",")
               .append("\"title\":").append(HttpUtils.jsonStr(hit.get("title"))).append(",")
               .append("\"path\":").append(HttpUtils.jsonStr(hit.get("path"))).append(",")
+              .append("\"srcPath\":").append(HttpUtils.jsonStr(hit.get("srcPath"))).append(",")
               .append("\"summary\":").append(HttpUtils.jsonStr(hit.get("summary")))
               .append("}");
         }
