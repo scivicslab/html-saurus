@@ -122,7 +122,11 @@ final class SemanticIndexer {
                 failed++;
                 continue;
             }
-            docs.add(new DocVec(d.path, d.title, d.locale, summarize(d.body), vec));
+            // Prefer the authored frontmatter description as the displayed summary; fall back to a
+            // body snippet when there is none.
+            String summary = (d.description() != null && !d.description().isBlank())
+                    ? d.description() : summarize(d.body);
+            docs.add(new DocVec(d.path, d.title, d.locale, summary, vec));
         }
         if (docs.isEmpty()) {
             // Every embedding failed (likely the server is down): do NOT write an empty
@@ -137,7 +141,7 @@ final class SemanticIndexer {
     }
 
     /** Source fields read out of one Lucene document. */
-    private record RawDoc(String path, String title, String body, String locale) {}
+    private record RawDoc(String path, String title, String body, String locale, String description) {}
 
     /** Reads every locale index of one project and appends its documents to {@code out}. */
     private static void collectProject(Path projectDir, List<RawDoc> out) throws IOException {
@@ -176,7 +180,8 @@ final class SemanticIndexer {
                         continue;
                     }
                     String title = doc.get("title") != null ? doc.get("title") : "";
-                    out.add(new RawDoc(path, title, body, locale));
+                    String description = doc.get("description") != null ? doc.get("description") : "";
+                    out.add(new RawDoc(path, title, body, locale, description));
                 }
             }
         } catch (IOException e) {

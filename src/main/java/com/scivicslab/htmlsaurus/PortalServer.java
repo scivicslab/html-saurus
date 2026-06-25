@@ -907,7 +907,9 @@ public class PortalServer {
                 }
                 var doc = stored.document(sd.doc);
                 String body = doc.get("body") != null ? doc.get("body") : "";
-                String snippet = body.length() > 250 ? body.substring(0, 250) + "…" : body;
+                String desc = doc.get("description");
+                String snippet = (desc != null && !desc.isBlank()) ? desc
+                    : (body.length() > 250 ? body.substring(0, 250) + "…" : body);
                 // Strip project name prefix from the searcher key to get the display project name
                 String key = projNames.get(projIdx);
                 String displayProject = key.contains(":") ? key.substring(0, key.indexOf(':')) : key;
@@ -1320,7 +1322,9 @@ public class PortalServer {
             String projectName = key.contains(":") ? key.substring(0, key.indexOf(':')) : key;
 
             String body = doc.get("body") != null ? doc.get("body") : "";
-            String snippet = body.length() > 250 ? body.substring(0, 250) + "…" : body;
+            String desc = doc.get("description");
+            String snippet = (desc != null && !desc.isBlank()) ? desc
+                : (body.length() > 250 ? body.substring(0, 250) + "…" : body);
             results.add(Map.of(
                 "title",   doc.get("title") != null ? doc.get("title") : "",
                 "path",    "/" + projectName + path,

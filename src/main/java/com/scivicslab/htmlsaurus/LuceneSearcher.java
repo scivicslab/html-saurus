@@ -109,9 +109,12 @@ class LuceneSearcher implements Closeable {
             var hit = hits.scoreDocs[i];
             var doc = stored.document(hit.doc);
             String body = doc.get("body") != null ? doc.get("body") : "";
-            String snippet = (snippets != null && snippets[i] != null)
-                ? snippets[i]
-                : (body.length() > 250 ? body.substring(0, 250) + "…" : body);
+            String desc = doc.get("description");
+            String snippet = (desc != null && !desc.isBlank())
+                ? desc
+                : (snippets != null && snippets[i] != null)
+                    ? snippets[i]
+                    : (body.length() > 250 ? body.substring(0, 250) + "…" : body);
             results.add(new Hit(
                 doc.get("title") != null ? doc.get("title") : "",
                 doc.get("path")  != null ? doc.get("path")  : "",
@@ -192,7 +195,9 @@ class LuceneSearcher implements Closeable {
             String path = doc.get("path") != null ? doc.get("path") : "";
             if (!seen.add(path)) continue; // deduplicate
             String b = doc.get("body") != null ? doc.get("body") : "";
-            String snippet = b.length() > 250 ? b.substring(0, 250) + "…" : b;
+            String descB = doc.get("description");
+            String snippet = (descB != null && !descB.isBlank()) ? descB
+                : (b.length() > 250 ? b.substring(0, 250) + "…" : b);
             results.add(new Hit(
                 doc.get("title") != null ? doc.get("title") : "",
                 path,
@@ -229,7 +234,9 @@ class LuceneSearcher implements Closeable {
         for (var hit : hits.scoreDocs) {
             var doc = stored.document(hit.doc);
             String b = doc.get("body") != null ? doc.get("body") : "";
-            String snippet = b.length() > 250 ? b.substring(0, 250) + "…" : b;
+            String descB = doc.get("description");
+            String snippet = (descB != null && !descB.isBlank()) ? descB
+                : (b.length() > 250 ? b.substring(0, 250) + "…" : b);
             results.add(new Hit(
                 doc.get("title") != null ? doc.get("title") : "",
                 doc.get("path")  != null ? doc.get("path")  : "",

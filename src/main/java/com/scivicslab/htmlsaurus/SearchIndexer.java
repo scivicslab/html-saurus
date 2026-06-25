@@ -142,6 +142,7 @@ public class SearchIndexer {
         String authors = "";
         String year = "";
         String journal = "";
+        String description = "";
         String body = source;
         if (source.startsWith("---")) {
             int end = source.indexOf("\n---", 3);
@@ -159,6 +160,8 @@ public class SearchIndexer {
                         year = line.substring(5).trim().replaceAll("^\"|\"$", "");
                     } else if (line.startsWith("journal:")) {
                         journal = line.substring(8).trim().replaceAll("^\"|\"$", "");
+                    } else if (line.startsWith("description:")) {
+                        description = line.substring(12).trim().replaceAll("^\"|\"$", "");
                     }
                 }
             }
@@ -208,6 +211,8 @@ public class SearchIndexer {
         Document doc = new Document();
         doc.add(new StoredField("path", href));
         doc.add(new StoredField("title", title));
+        // Authored short summary from frontmatter (preferred over a body snippet at search time).
+        doc.add(new StoredField("description", description));
         doc.add(new TextField("title_idx", title, Field.Store.NO));
         doc.add(new TextField("body", plainText, Field.Store.YES));
         doc.add(new TextField("body_ng", plainText, Field.Store.NO));
