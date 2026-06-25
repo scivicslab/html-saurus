@@ -149,7 +149,9 @@ public class SearchIndexer {
             if (end != -1) {
                 String fm = source.substring(3, end);
                 body = source.substring(end + 4).stripLeading();
-                for (String line : fm.split("\n")) {
+                String[] fmLines = fm.split("\n", -1);
+                for (int li = 0; li < fmLines.length; li++) {
+                    String line = fmLines[li];
                     if (line.startsWith("title:")) {
                         title = line.substring(6).trim().replaceAll("^\"|\"$", "");
                     } else if (line.startsWith("id:")) {
@@ -161,7 +163,22 @@ public class SearchIndexer {
                     } else if (line.startsWith("journal:")) {
                         journal = line.substring(8).trim().replaceAll("^\"|\"$", "");
                     } else if (line.startsWith("description:")) {
-                        description = line.substring(12).trim().replaceAll("^\"|\"$", "");
+                        String val = line.substring(12).trim();
+                        if (val.startsWith("|") || val.startsWith(">")) {
+                            // YAML block scalar: the value is the following indented (or blank) lines.
+                            StringBuilder sb = new StringBuilder();
+                            int j = li + 1;
+                            while (j < fmLines.length
+                                    && (fmLines[j].isBlank() || fmLines[j].startsWith(" ") || fmLines[j].startsWith("\t"))) {
+                                if (sb.length() > 0) sb.append("\n");
+                                sb.append(fmLines[j].strip());
+                                j++;
+                            }
+                            description = sb.toString().strip();
+                            li = j - 1;
+                        } else {
+                            description = val.replaceAll("^\"|\"$", "");
+                        }
                     }
                 }
             }
