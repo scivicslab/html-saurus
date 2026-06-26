@@ -75,18 +75,31 @@ final class SemanticIndexer {
         }
     }
 
-    /** True if the vector cache is missing or older than the project's search index. */
+    /** True if the vector cache is missing, of an outdated VERSION, or older than the search index. */
     private static boolean isStale(Path projectDir) {
         Path vectors = projectDir.resolve(EMBED_DIR).resolve(VECTORS_FILE);
         Path searchIndex = projectDir.resolve("search-index");
         if (!Files.exists(vectors)) {
             return Files.isDirectory(searchIndex);   // need building only if there is an index
         }
+        if (!isCurrentVersion(vectors)) {
+            return true;   // wrong cache format/version -> must rebuild (mtime is irrelevant)
+        }
         try {
             long vecTime = Files.getLastModifiedTime(vectors).toMillis();
             return newestMTime(searchIndex) > vecTime;
         } catch (IOException e) {
             return true;
+        }
+    }
+
+    /** Reads only the cache header and returns whether it matches the current MAGIC and VERSION. */
+    private static boolean isCurrentVersion(Path vectors) {
+        try (DataInputStream in = new DataInputStream(
+                new BufferedInputStream(Files.newInputStream(vectors)))) {
+            return in.readInt() == MAGIC && in.readInt() == VERSION;
+        } catch (IOException e) {
+            return false;
         }
     }
 
