@@ -1,0 +1,11 @@
+# Keyword map (deterministic curated pointers)
+# Format:  subject > axis > term1, term2, ... : docRef1, docRef2, ...
+#   - A rule fires when ALL trigger terms appear in the prompt (case-insensitive substring).
+#   - Express alternatives as SEPARATE lines (same refs, a different trigger).
+#   - docRef is a document id (shown in search results) or a fragment of its path.
+#   - '#' starts a comment; blank lines are ignored.
+
+コーディング規約 > usage > 命名規則 : CodingStandard_260401_oo01
+コーディング規約 > usage > メソッド名 : CodingStandard_260401_oo01
+文書リトリーバル > internals > search_docs, 決定論 : DeterministicDocRetrieval_260625_oo01
+Slurm > usage > Slurm, ジョブ : Slurm

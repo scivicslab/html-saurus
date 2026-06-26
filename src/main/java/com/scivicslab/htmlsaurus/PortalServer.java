@@ -51,6 +51,10 @@ public class PortalServer {
     private final EmbeddingClient embed;
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
+    /** Deterministic keyword&rarr;document table (curated pointers), surfaced above search results. */
+    private volatile KeywordMap keywordMap;
+    /** On-disk path of the keyword map file (read on startup, rewritten by the editor). */
+    private final Path keywordMapPath;
 
     /**
      * @param worksDir    root directory containing all Docusaurus projects (used for reload)
@@ -108,6 +112,21 @@ public class PortalServer {
         this.semanticIndex = semanticIndex;
         this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
         System.out.println("Semantic related-docs: " + semanticRelated.size() + " entries (in-memory)");
+
+        // Deterministic keyword->document table. Default location is <worksDir>/html-saurus/keyword-map.tsv
+        // (a git-tracked, writable file); override with -Dhtmlsaurus.keywordmap.path or KEYWORD_MAP_PATH.
+        this.keywordMapPath = resolveKeywordMapPath(worksDir);
+        this.keywordMap = KeywordMap.load(keywordMapPath);
+        System.out.println("Keyword map: " + keywordMap.size() + " rule(s) from " + keywordMapPath);
+    }
+
+    /** Resolves the keyword-map file path from system property, env, or the default under worksDir. */
+    private static Path resolveKeywordMapPath(Path worksDir) {
+        String prop = System.getProperty("htmlsaurus.keywordmap.path");
+        if (prop != null && !prop.isBlank()) return Path.of(prop.trim());
+        String env = System.getenv("KEYWORD_MAP_PATH");
+        if (env != null && !env.isBlank()) return Path.of(env.trim());
+        return worksDir.resolve("html-saurus").resolve("keyword-map.tsv");
     }
 
     /**
@@ -195,6 +214,22 @@ public class PortalServer {
         // Text similarity API: POST /api/find-related (non-production only)
         if (!production && path.equals("/api/find-related")) {
             handleFindRelated(ex);
+            return;
+        }
+
+        // Deterministic keyword->document lookup (JSON): GET /api/keyword-map?q=... (all modes; search_docs uses it)
+        if (path.equals("/api/keyword-map") && !"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            handleKeywordMapLookup(ex);
+            return;
+        }
+        // Save the keyword map (non-production only): POST /api/keyword-map  (body = raw file content)
+        if (!production && path.equals("/api/keyword-map")) {
+            handleKeywordMapSave(ex);
+            return;
+        }
+        // Keyword map editor page (non-production only): GET /keyword-map-editor
+        if (!production && path.equals("/keyword-map-editor")) {
+            handleKeywordMapEditor(ex);
             return;
         }
 
@@ -319,6 +354,137 @@ public class PortalServer {
             System.err.println("Reindex all error: " + e.getMessage());
             respond(ex, 500, "application/json", "{\"error\":\"Reindex failed\"}");
         }
+    }
+
+    // ---- Keyword map (deterministic curated pointers) -----------
+
+    /**
+     * Handles {@code GET /api/keyword-map?q=<prompt>}. Returns the curated document pointers whose
+     * trigger terms all appear in the prompt, as a JSON array of {@code {id,title,path,srcPath,summary}}.
+     * Available in all modes because {@code search_docs} relies on it.
+     */
+    private void handleKeywordMapLookup(HttpExchange ex) throws IOException {
+        String q = queryParam(ex, "q");
+        List<Map<String, String>> hits = keywordMap.lookup(q, this::resolveDocRef);
+        RelatedDocsView.writeJson(ex, hits);
+    }
+
+    /**
+     * Handles {@code POST /api/keyword-map}. The request body is the raw table file content; it is
+     * written to {@link #keywordMapPath} and the in-memory map is reloaded. Non-production only.
+     */
+    private synchronized void handleKeywordMapSave(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        try {
+            String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            if (keywordMapPath.getParent() != null) {
+                Files.createDirectories(keywordMapPath.getParent());
+            }
+            Files.writeString(keywordMapPath, body, StandardCharsets.UTF_8);
+            this.keywordMap = KeywordMap.load(keywordMapPath);
+            respond(ex, 200, "application/json",
+                "{\"status\":\"ok\",\"rules\":" + keywordMap.size() + "}");
+        } catch (Exception e) {
+            System.err.println("Keyword map save error: " + e.getMessage());
+            respond(ex, 500, "application/json", "{\"error\":\"Save failed\"}");
+        }
+    }
+
+    /** Handles {@code GET /keyword-map-editor}: a textarea editor for the keyword map. Non-production only. */
+    private void handleKeywordMapEditor(HttpExchange ex) throws IOException {
+        String content = "";
+        try {
+            if (Files.exists(keywordMapPath)) {
+                content = Files.readString(keywordMapPath, StandardCharsets.UTF_8);
+            }
+        } catch (IOException e) {
+            content = "# could not read " + keywordMapPath + ": " + e.getMessage();
+        }
+        String html = """
+            <!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Keyword Map Editor</title>
+            <style>
+              body{font-family:system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;
+                   background:#1e1e2e;color:#cdd6f4;}
+              a{color:#89b4fa;} h1{font-size:1.3rem;}
+              textarea{width:100%%;height:60vh;padding:0.8rem;border-radius:6px;border:1px solid #585b70;
+                   background:#313244;color:#cdd6f4;font-family:ui-monospace,monospace;font-size:0.85rem;
+                   line-height:1.5;resize:vertical;}
+              button{margin-top:0.8rem;padding:0.4rem 1.1rem;border-radius:5px;border:1px solid #585b70;
+                   background:#313244;color:#cdd6f4;cursor:pointer;font-size:0.9rem;}
+              button:hover{border-color:#a6e3a1;color:#a6e3a1;}
+              #status{margin-left:0.8rem;font-size:0.85rem;color:#a6adc8;}
+              pre.help{background:#313244;padding:0.6rem 0.8rem;border-radius:6px;font-size:0.8rem;
+                   color:#a6adc8;white-space:pre-wrap;}
+            </style></head><body>
+            <p><a href="/">&larr; Portal</a></p>
+            <h1>Keyword Map Editor</h1>
+            <p style="font-size:0.85rem;color:#a6adc8;">One rule per line. A rule fires when ALL its trigger
+            terms appear in the prompt (case-insensitive substring). Saved to: <code>%s</code></p>
+            <pre class="help">subject &gt; axis &gt; term1, term2, ... : docRef1, docRef2, ...
+# '#' starts a comment; blank lines are ignored.
+# docRef is a document id (shown in search results) or a fragment of its path.
+# example:
+# Slurm &gt; usage, 使い方 &gt; Slurm, sbatch, squeue : Slurm</pre>
+            <textarea id="map">%s</textarea><br>
+            <button onclick="save()">Save</button><span id="status"></span>
+            <script>
+              async function save(){
+                const s=document.getElementById('status');
+                s.textContent='Saving...';
+                try{
+                  const r=await fetch('/api/keyword-map',{method:'POST',
+                    headers:{'Content-Type':'text/plain; charset=UTF-8'},
+                    body:document.getElementById('map').value});
+                  const j=await r.json();
+                  s.textContent = j.status==='ok' ? ('Saved. '+j.rules+' rule(s).') : ('Error: '+(j.error||'unknown'));
+                }catch(e){ s.textContent='Error: '+e; }
+              }
+            </script>
+            </body></html>
+            """.formatted(escHtml(keywordMapPath.toString()), escHtml(content));
+        respond(ex, 200, "text/html; charset=UTF-8", html);
+    }
+
+    /**
+     * Resolves a document reference (a document id, or a fragment of its source/served path) to an
+     * enriched hit map ({@code id,title,path,srcPath,summary}) by querying the full-text index.
+     * Prefers an exact document-id match, then a path-fragment match, then the top hit. Returns
+     * {@code null} when nothing matches.
+     */
+    private Map<String, String> resolveDocRef(String ref) {
+        if (ref == null || ref.isBlank()) {
+            return null;
+        }
+        List<String> langs = List.of("ja", "en");
+        // 1) exact document-id match
+        for (String lang : langs) {
+            for (Map<String, String> m : globalSearch(ref, lang)) {
+                if (ref.equalsIgnoreCase(m.getOrDefault("id", ""))) {
+                    return m;
+                }
+            }
+        }
+        // 2) path-fragment match (source .md or served path contains the reference)
+        for (String lang : langs) {
+            for (Map<String, String> m : globalSearch(ref, lang)) {
+                if (m.getOrDefault("srcPath", "").contains(ref) || m.getOrDefault("path", "").contains(ref)) {
+                    return m;
+                }
+            }
+        }
+        // 3) best-effort: top hit
+        for (String lang : langs) {
+            List<Map<String, String>> hits = globalSearch(ref, lang);
+            if (!hits.isEmpty()) {
+                return hits.get(0);
+            }
+        }
+        return null;
     }
 
     // ---- Build API endpoint -------------------------------------
@@ -490,6 +656,7 @@ public class PortalServer {
                 <span class="build-status" id="reload-status"></span>
                 <button class="btn" id="reindex-all-btn" onclick="doReindexAll(this)">Reindex All</button>
                 <span class="build-status" id="reindex-all-status"></span>
+                <a class="btn" href="/keyword-map-editor">Keyword Map</a>
             """);
         }
         sb.append("""
