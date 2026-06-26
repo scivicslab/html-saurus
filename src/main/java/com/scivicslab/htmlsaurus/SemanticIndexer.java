@@ -48,7 +48,7 @@ final class SemanticIndexer {
     /** Vector cache file name within {@link #EMBED_DIR}. */
     static final String VECTORS_FILE = "vectors.bin";
     private static final int MAGIC = 0x53454d56;   // "SEMV"
-    private static final int VERSION = 2;   // bumped: vectors now carry docId + srcPath
+    private static final int VERSION = 3;   // v2: docId+srcPath; v3: embed description (not body) when present
 
     private SemanticIndexer() {}
 
@@ -117,15 +117,18 @@ final class SemanticIndexer {
         List<DocVec> docs = new ArrayList<>(raw.size());
         int failed = 0;
         for (RawDoc d : raw) {
-            float[] vec = embedDocument(d.body, embed);
+            boolean hasDesc = d.description() != null && !d.description().isBlank();
+            // (v') Embed the authored frontmatter description when present — a short, single-shot,
+            // sharp vector that fits the embedding model's input limit and does not blur the topic
+            // by mean-pooling many body chunks. Fall back to mean-pooled body chunks only when there
+            // is no description.
+            float[] vec = embedDocument(hasDesc ? d.description() : d.body, embed);
             if (vec == null) {
                 failed++;
                 continue;
             }
-            // Prefer the authored frontmatter description as the displayed summary; fall back to a
-            // body snippet when there is none.
-            String summary = (d.description() != null && !d.description().isBlank())
-                    ? d.description() : summarize(d.body);
+            // The displayed summary uses the same description (or a body snippet when absent).
+            String summary = hasDesc ? d.description() : summarize(d.body);
             docs.add(new DocVec(d.path, d.title, d.locale, summary, d.docId(), d.srcPath(), vec));
         }
         if (docs.isEmpty()) {
