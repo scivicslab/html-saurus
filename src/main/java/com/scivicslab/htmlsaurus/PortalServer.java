@@ -223,6 +223,12 @@ public class PortalServer {
             return;
         }
 
+        // Table-of-contents proximity: docs in the same grouping directory (JSON): GET /api/siblings?id=...
+        if (path.equals("/api/siblings")) {
+            handleSiblings(ex);
+            return;
+        }
+
         // Deterministic keyword->document lookup (JSON): GET /api/keyword-map?q=... (all modes; search_docs uses it)
         if (path.equals("/api/keyword-map") && !"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             handleKeywordMapLookup(ex);
@@ -481,6 +487,104 @@ public class PortalServer {
             + "\"srcPath\":" + jsonStr(m.getOrDefault("srcPath", ""))
             + "}";
         respond(ex, 200, "application/json; charset=UTF-8", json);
+    }
+
+    /**
+     * Handles {@code GET /api/siblings?id=<docId>} (alias {@code ?ref=...}). Returns the documents that
+     * live in the same grouping directory as the referenced document — "table of contents" proximity —
+     * as a JSON array of {@code {id,title,path,srcPath,summary}}. With the one-document-per-subdirectory
+     * layout, the grouping directory is the parent of the document's own subdirectory, and siblings are
+     * the documents under the other subdirectories directly within it (it does NOT cross into a different
+     * grouping subdirectory). For a flat directory holding several {@code .md} files, siblings are the
+     * other {@code .md} files in that same directory.
+     */
+    private void handleSiblings(HttpExchange ex) throws IOException {
+        String ref = queryParam(ex, "id");
+        if (ref.isBlank()) ref = queryParam(ex, "ref");
+        if (ref.isBlank()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing id\"}");
+            return;
+        }
+        Map<String, String> self = resolveDocRef(ref);
+        if (self == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"not found\",\"id\":" + jsonStr(ref) + "}");
+            return;
+        }
+        RelatedDocsView.writeJson(ex, directorySiblings(self.getOrDefault("srcPath", "")));
+    }
+
+    /** Collects the sibling documents (same grouping directory) for a source {@code .md} path. */
+    private List<Map<String, String>> directorySiblings(String srcPath) {
+        List<Map<String, String>> out = new ArrayList<>();
+        if (srcPath == null || srcPath.isBlank()) return out;
+        try {
+            Path mdFile = Path.of(srcPath).toAbsolutePath().normalize();
+            Path docDir = mdFile.getParent();
+            if (docDir == null) return out;
+            boolean nested = countMarkdown(docDir) <= 1;          // one-doc-per-subdirectory layout
+            Path groupDir = nested ? docDir.getParent() : docDir;
+            if (groupDir == null) return out;
+
+            // Gather candidate .md files within the grouping directory only (one subdir level for the
+            // nested layout), never descending into a sibling grouping subdirectory.
+            List<Path> mds = new ArrayList<>();
+            List<Path> children;
+            try (var st = Files.list(groupDir)) { children = st.sorted().collect(Collectors.toList()); }
+            for (Path e : children) {
+                if (Files.isRegularFile(e) && e.getFileName().toString().endsWith(".md")) {
+                    mds.add(e);
+                } else if (nested && Files.isDirectory(e)) {
+                    try (var sub = Files.list(e)) {
+                        sub.filter(Files::isRegularFile)
+                           .filter(f -> f.getFileName().toString().endsWith(".md"))
+                           .sorted().forEach(mds::add);
+                    }
+                }
+            }
+
+            Set<String> seen = new LinkedHashSet<>();
+            for (Path md : mds) {
+                if (md.toAbsolutePath().normalize().equals(mdFile)) continue;
+                String id = frontmatterId(md);
+                Map<String, String> hit = (id != null && !id.isBlank()) ? resolveDocRef(id) : null;
+                if (hit == null) continue;                        // only return docs that actually resolve
+                String key = hit.getOrDefault("srcPath", md.toString());
+                if (seen.add(key)) out.add(hit);
+                if (out.size() >= 20) break;
+            }
+        } catch (Exception e) {
+            System.err.println("siblings error for " + srcPath + ": " + e.getMessage());
+        }
+        return out;
+    }
+
+    /** Counts {@code .md} files directly inside a directory. */
+    private static int countMarkdown(Path dir) {
+        try (var s = Files.list(dir)) {
+            return (int) s.filter(Files::isRegularFile)
+                          .filter(p -> p.getFileName().toString().endsWith(".md")).count();
+        } catch (IOException e) {
+            return 0;
+        }
+    }
+
+    /** Reads the frontmatter {@code id:} from a Markdown file, or null if absent. */
+    private static String frontmatterId(Path md) {
+        try {
+            String s = Files.readString(md, StandardCharsets.UTF_8);
+            if (!s.startsWith("---")) return null;
+            int end = s.indexOf("\n---", 3);
+            if (end < 0) return null;
+            for (String line : s.substring(3, end).split("\n")) {
+                String t = line.strip();
+                if (t.startsWith("id:")) {
+                    return t.substring(3).strip().replaceAll("^['\"]|['\"]$", "");
+                }
+            }
+        } catch (IOException e) {
+            /* ignore unreadable file */
+        }
+        return null;
     }
 
     /**

@@ -78,6 +78,7 @@ public class DocIdResolutionE2E {
         for (String ref : refs) {
             checkSearchAndDisplay(ref);
             checkResolve(ref);
+            checkSiblings(ref);
         }
         // (3) per rule: the curated lookup returns the referenced document.
         for (KeywordMap.Rule r : map.rules()) {
@@ -135,6 +136,34 @@ public class DocIdResolutionE2E {
             fail(e.getMessage());
         } catch (Exception e) {
             fail("resolve '" + ref + "': " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    /** (5) directory proximity: every sibling lives under the same grouping directory (no crossing). */
+    private static void checkSiblings(String ref) {
+        try {
+            Map<String, String> self = pick(getHits("/api/search?q=" + enc(ref) + "&lang=ja"), ref);
+            check(self != null, "siblings '" + ref + "': could not resolve self");
+            String src = self.getOrDefault("srcPath", "");
+            check(!src.isBlank(), "siblings '" + ref + "': self has no srcPath");
+            // Grouping dir for the one-doc-per-subdirectory layout = parent of the doc's own subdir.
+            int i1 = src.lastIndexOf('/');
+            int i2 = src.lastIndexOf('/', i1 - 1);
+            check(i2 > 0, "siblings '" + ref + "': srcPath too shallow: " + src);
+            String groupPrefix = src.substring(0, i2) + "/";
+
+            List<Map<String, String>> sibs = getHits("/api/siblings?id=" + enc(ref));
+            for (Map<String, String> s : sibs) {
+                String sp = s.getOrDefault("srcPath", "");
+                check(sp.startsWith(groupPrefix),
+                        "siblings '" + ref + "': '" + sp + "' is outside the grouping dir " + groupPrefix);
+                check(!sp.equals(src), "siblings '" + ref + "': self appeared in its own siblings");
+            }
+            pass("siblings '" + ref + "' -> " + sibs.size() + " within " + groupPrefix);
+        } catch (AssertionError e) {
+            fail(e.getMessage());
+        } catch (Exception e) {
+            fail("siblings '" + ref + "': " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
