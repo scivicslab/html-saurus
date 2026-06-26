@@ -67,11 +67,32 @@ final class HttpUtils {
                 .replace("\"", "&quot;").replace("'", "&#x27;");
     }
 
-    /** Wraps a string in JSON double quotes, escaping backslashes, quotes, and newlines. */
+    /** Wraps a string in JSON double quotes, escaping backslashes, quotes, and all control
+     *  characters (tab, newline, CR, and any other char below U+0020 as {@code \\u00XX}); null-safe.
+     *  Document titles/summaries can contain literal tabs, so every control char must be escaped or
+     *  the emitted array is not valid JSON. */
     static String jsonStr(String s) {
         if (s == null) s = "";
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
-                       .replace("\n", "\\n").replace("\r", "") + "\"";
+        StringBuilder sb = new StringBuilder(s.length() + 2);
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"'  -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> {
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+                }
+            }
+        }
+        sb.append('"');
+        return sb.toString();
     }
 
     /** Extracts a single query parameter value from the request URL; returns empty string if absent. */
