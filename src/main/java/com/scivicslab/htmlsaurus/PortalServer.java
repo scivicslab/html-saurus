@@ -217,6 +217,12 @@ public class PortalServer {
             return;
         }
 
+        // Resolve a document id (or path fragment) to its canonical served URL (JSON): GET /api/resolve?id=...
+        if (path.equals("/api/resolve")) {
+            handleResolve(ex);
+            return;
+        }
+
         // Deterministic keyword->document lookup (JSON): GET /api/keyword-map?q=... (all modes; search_docs uses it)
         if (path.equals("/api/keyword-map") && !"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             handleKeywordMapLookup(ex);
@@ -451,10 +457,38 @@ public class PortalServer {
     }
 
     /**
+     * Handles {@code GET /api/resolve?id=<docId>} (alias {@code ?ref=<idOrPathFragment>}). Returns the
+     * canonical served URL for a document as JSON {@code {id,title,path,srcPath}}, or HTTP 404 when the
+     * reference resolves to no document. Deterministic id&rarr;URL: prefers an exact document-id match,
+     * so callers do not have to scrape full-text search results.
+     */
+    private void handleResolve(HttpExchange ex) throws IOException {
+        String ref = queryParam(ex, "id");
+        if (ref.isBlank()) ref = queryParam(ex, "ref");
+        if (ref.isBlank()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing id\"}");
+            return;
+        }
+        Map<String, String> m = resolveDocRef(ref);
+        if (m == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"not found\",\"id\":" + jsonStr(ref) + "}");
+            return;
+        }
+        String json = "{"
+            + "\"id\":" + jsonStr(m.getOrDefault("id", "")) + ","
+            + "\"title\":" + jsonStr(m.getOrDefault("title", "")) + ","
+            + "\"path\":" + jsonStr(m.getOrDefault("path", "")) + ","
+            + "\"srcPath\":" + jsonStr(m.getOrDefault("srcPath", ""))
+            + "}";
+        respond(ex, 200, "application/json; charset=UTF-8", json);
+    }
+
+    /**
      * Resolves a document reference (a document id, or a fragment of its source/served path) to an
      * enriched hit map ({@code id,title,path,srcPath,summary}) by querying the full-text index.
-     * Prefers an exact document-id match, then a path-fragment match, then the top hit. Returns
-     * {@code null} when nothing matches.
+     * Deterministic: an exact document-id match wins, otherwise a path-fragment match; if neither
+     * matches it returns {@code null} (it does NOT fall back to an unrelated top search hit, so a
+     * bogus reference does not silently resolve to the wrong document).
      */
     private Map<String, String> resolveDocRef(String ref) {
         if (ref == null || ref.isBlank()) {
@@ -475,13 +509,6 @@ public class PortalServer {
                 if (m.getOrDefault("srcPath", "").contains(ref) || m.getOrDefault("path", "").contains(ref)) {
                     return m;
                 }
-            }
-        }
-        // 3) best-effort: top hit
-        for (String lang : langs) {
-            List<Map<String, String>> hits = globalSearch(ref, lang);
-            if (!hits.isEmpty()) {
-                return hits.get(0);
             }
         }
         return null;

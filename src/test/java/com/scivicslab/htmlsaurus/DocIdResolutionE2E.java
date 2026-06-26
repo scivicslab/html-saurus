@@ -74,13 +74,17 @@ public class DocIdResolutionE2E {
         }
 
         // (1)+(2) per referenced document id: search finds it, and its served page shows the original.
+        // (1b) the dedicated /api/resolve endpoint returns the canonical URL deterministically.
         for (String ref : refs) {
             checkSearchAndDisplay(ref);
+            checkResolve(ref);
         }
         // (3) per rule: the curated lookup returns the referenced document.
         for (KeywordMap.Rule r : map.rules()) {
             checkKeywordMapLookup(r);
         }
+        // (4) negative: a bogus id must NOT resolve (no silent fallback to an unrelated top hit).
+        checkResolveNotFound("__no_such_doc_zzz999__");
 
         System.out.printf("%nResults: %d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
@@ -111,6 +115,41 @@ public class DocIdResolutionE2E {
             fail(e.getMessage());
         } catch (Exception e) {
             fail("'" + ref + "': " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    /** (1b) the dedicated /api/resolve endpoint maps the id to a canonical URL that serves the doc. */
+    private static void checkResolve(String ref) {
+        try {
+            HttpResponse<String> resp = rawGet(BASE_URL + "/api/resolve?id=" + enc(ref));
+            check(resp.statusCode() == 200, "resolve '" + ref + "': HTTP " + resp.statusCode());
+            List<Map<String, String>> objs = parseFlatJsonArray(resp.body());
+            check(!objs.isEmpty(), "resolve '" + ref + "': empty response");
+            String served = objs.get(0).getOrDefault("path", "");
+            check(!served.isBlank(), "resolve '" + ref + "': no path returned");
+            HttpResponse<String> page = rawGet(BASE_URL + served);
+            check(page.statusCode() == 200,
+                    "resolve '" + ref + "': resolved URL " + served + " returned HTTP " + page.statusCode());
+            pass("/api/resolve '" + ref + "' -> " + served + " (served OK)");
+        } catch (AssertionError e) {
+            fail(e.getMessage());
+        } catch (Exception e) {
+            fail("resolve '" + ref + "': " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    /** (4) a reference that matches no document must return HTTP 404 (deterministic, no fallback). */
+    private static void checkResolveNotFound(String bogusRef) {
+        try {
+            HttpResponse<String> resp = rawGet(BASE_URL + "/api/resolve?id=" + enc(bogusRef));
+            check(resp.statusCode() == 404,
+                    "resolve(bogus '" + bogusRef + "') must be 404, got HTTP " + resp.statusCode()
+                    + " body=" + resp.body());
+            pass("/api/resolve bogus id '" + bogusRef + "' -> 404 (no silent fallback)");
+        } catch (AssertionError e) {
+            fail(e.getMessage());
+        } catch (Exception e) {
+            fail("resolve-404 '" + bogusRef + "': " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
