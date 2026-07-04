@@ -16,13 +16,6 @@
     </properties>
 
     <dependencies>
-        <!-- Workspace SPI: declare self-description at compile time; provided at runtime by workspace ClassLoader -->
-        <dependency>
-            <groupId>com.scivicslab</groupId>
-            <artifactId>ai-workspace-spi</artifactId>
-            <version>1.0.0</version>
-            <scope>provided</scope>
-        </dependency>
         <!-- Lucene full-text search with Japanese (Kuromoji) analyzer -->
         <dependency>
             <groupId>org.apache.lucene</groupId>
