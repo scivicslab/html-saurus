@@ -137,7 +137,11 @@ public class Main {
         List<Path> projects = findProjects(worksDir);
         if (projects.isEmpty()) {
             System.err.println("No Docusaurus projects found under " + worksDir);
-            return;
+            // In serve mode, still start the (empty) portal so the port binds and the process
+            // stays up for the supervisor (AI workspace marks the tool Failed if the port never
+            // opens). Docusaurus projects added under worksDir later appear on restart. Only
+            // build-only mode has nothing to do when there are no projects.
+            if (!serve) return;
         }
 
         System.out.println("Portal root : " + worksDir);
