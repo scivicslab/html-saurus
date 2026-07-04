@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * in a NEW tab, not in the same tab (which would hide the portal).
  */
 @Tag("S3")
-class PortalOpenLinkTest {
+class PortalOpenLinkE2E {
 
     @TempDir
     Path tempDir;
