@@ -178,10 +178,27 @@ public class PortalServer {
             return;
         }
 
-        // Build API: POST /api/build/<project> (development mode only)
+        // Build API: POST /api/build/<project> (development mode only) — runs HTML + index together
         if (!production && path.startsWith("/api/build/")) {
             String name = path.substring("/api/build/".length());
             handleBuild(ex, name);
+            return;
+        }
+
+        // Per-stage build APIs (development mode only): each runs ONE stage for the named project.
+        //   POST /api/build-html/<project>      — static HTML only
+        //   POST /api/build-index/<project>     — Lucene full-text index only
+        //   POST /api/build-embedding/<project> — embedding (RAG) vectors only
+        if (!production && path.startsWith("/api/build-html/")) {
+            handleBuildStage(ex, path.substring("/api/build-html/".length()), "html");
+            return;
+        }
+        if (!production && path.startsWith("/api/build-index/")) {
+            handleBuildStage(ex, path.substring("/api/build-index/".length()), "index");
+            return;
+        }
+        if (!production && path.startsWith("/api/build-embedding/")) {
+            handleBuildStage(ex, path.substring("/api/build-embedding/".length()), "embedding");
             return;
         }
 
@@ -648,6 +665,52 @@ public class PortalServer {
         }
     }
 
+    /**
+     * Handles {@code POST /api/build-(html|index|embedding)/<project>}. Runs a single build
+     * stage for the named project and returns the elapsed time as JSON. The three stages mirror
+     * the {@code --html} / {@code --index} / {@code --embedding} command-line options:
+     * <ul>
+     *   <li>{@code html} — static HTML ({@link Main#build})</li>
+     *   <li>{@code index} — Lucene full-text index across all locales ({@link Main#reindexAll})</li>
+     *   <li>{@code embedding} — embedding (RAG) vectors ({@link Main#ensureSemanticVectors}); if the
+     *       embedding server is unreachable it logs a warning and skips (still reports ok)</li>
+     * </ul>
+     *
+     * @param ex    the HTTP exchange
+     * @param name  the project name (path segment after the stage prefix)
+     * @param stage one of {@code "html"}, {@code "index"}, {@code "embedding"}
+     */
+    private void handleBuildStage(HttpExchange ex, String name, String stage) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Project proj = projectMap.get(name);
+        if (proj == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
+            return;
+        }
+        long start = System.currentTimeMillis();
+        System.out.println("Build stage '" + stage + "' requested: " + name);
+        try {
+            switch (stage) {
+                case "html" -> Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
+                case "index" -> Main.reindexAll(proj.projectDir(), false);
+                case "embedding" -> Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
+                default -> {
+                    respond(ex, 400, "application/json", "{\"error\":\"Unknown stage\"}");
+                    return;
+                }
+            }
+            long elapsed = System.currentTimeMillis() - start;
+            respond(ex, 200, "application/json",
+                "{\"status\":\"ok\",\"project\":\"" + name + "\",\"stage\":\"" + stage + "\",\"ms\":" + elapsed + "}");
+        } catch (Exception e) {
+            System.err.println("Build stage '" + stage + "' error for " + name + ": " + e.getMessage());
+            respond(ex, 500, "application/json", "{\"error\":\"Build stage failed\"}");
+        }
+    }
+
     // ---- Upload API endpoint ------------------------------------
 
     // ---- Portal index page --------------------------------------
@@ -852,8 +915,11 @@ public class PortalServer {
             }
             if (!production) {
                 sb.append("      <div class=\"project-actions\">\n");
-                sb.append("        <button class=\"btn btn-build\" onclick=\"doBuild('").append(escHtml(p.name())).append("', this)\">Build</button>\n");
-                sb.append("        <span class=\"build-status\" id=\"status-").append(escHtml(p.name())).append("\"></span>\n");
+                String nm = escHtml(p.name());
+                sb.append("        <button class=\"btn btn-build\" onclick=\"doStage('html','").append(nm).append("', this)\">HTML</button>\n");
+                sb.append("        <button class=\"btn btn-build\" onclick=\"doStage('index','").append(nm).append("', this)\">Index</button>\n");
+                sb.append("        <button class=\"btn btn-build\" onclick=\"doStage('embedding','").append(nm).append("', this)\">Embedding</button>\n");
+                sb.append("        <span class=\"build-status\" id=\"status-").append(nm).append("\"></span>\n");
                 sb.append("      </div>\n");
             }
             sb.append("    </div>\n");
@@ -875,18 +941,18 @@ public class PortalServer {
                 localStorage.setItem('portal-theme', this.value);
               });
             })();
-            async function doBuild(name, btn) {
+            async function doStage(stage, name, btn) {
               const status = document.getElementById('status-' + name);
+              const label = btn.textContent;
               btn.disabled = true;
-              btn.textContent = 'Building...';
+              btn.textContent = '...';
               status.textContent = '';
               try {
-                const r = await fetch('/api/build/' + encodeURIComponent(name), {method: 'POST'});
+                const r = await fetch('/api/build-' + stage + '/' + encodeURIComponent(name), {method: 'POST'});
                 const j = await r.json();
                 if (j.status === 'ok') {
-                  status.textContent = 'Done (' + j.ms + 'ms)';
+                  status.textContent = stage + ' done (' + j.ms + 'ms)';
                   status.style.color = 'var(--accent-green)';
-                  setTimeout(() => location.reload(), 800);
                 } else {
                   status.textContent = 'Error: ' + (j.error || 'unknown');
                   status.style.color = '#e06060';
@@ -896,7 +962,7 @@ public class PortalServer {
                 status.style.color = '#e06060';
               }
               btn.disabled = false;
-              btn.textContent = 'Build';
+              btn.textContent = label;
             }
             document.getElementById('find-related-input').addEventListener('keydown', function(e) {
               if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); doFindRelated(); }

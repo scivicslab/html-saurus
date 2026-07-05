@@ -111,6 +111,37 @@ java -jar html-saurus.jar --portal-mode --serve --watch --port 3100
 | `--serve` | Start an HTTP server after building |
 | `--watch` | Watch for file changes and rebuild automatically |
 | `--port <n>` | HTTP port (default: 8080) |
+| `--html` | Build static HTML only, then exit (no server) |
+| `--index` | Build the Lucene full-text index only, then exit |
+| `--embedding` | Build the embedding (RAG) vectors only, then exit |
+
+### Building the three stages separately
+
+A full build has three independent stages: **(1)** static HTML, **(2)** the Lucene full-text
+index, and **(3)** the embedding (RAG) vectors. Each can be run on its own with `--html`,
+`--index`, and `--embedding`. When any of these is given, html-saurus runs **only** the selected
+stages (in dependency order html → index → embedding) and exits without starting a server. Flags
+combine, and they work in `--portal-mode` too (HTML/index run per project; embedding runs across
+all projects at once).
+
+```bash
+# Stage 1 only — refresh the HTML, e.g. after editing Markdown
+java -jar html-saurus.jar /path/to/project --html
+
+# Stages 1 + 2 — HTML and full-text index, without touching embeddings
+java -jar html-saurus.jar /path/to/project --html --index
+
+# Stage 3 only — rebuild RAG vectors (needs the embedding server; warns and skips if unreachable)
+java -jar html-saurus.jar /path/to/project --embedding
+
+# All three stages across every project under a portal root
+java -jar html-saurus.jar /path/to/works --portal-mode --html --index --embedding
+```
+
+The embedding stage depends on the shared embedding server (`EMBEDDING_SERVER_URL`); if it is
+unreachable, that stage logs a warning and skips, leaving the HTML and full-text index unaffected.
+This is why the stages are separable: an HTML refresh never has to wait on, or fail because of, the
+embedding server.
 
 ## Full-text search
 

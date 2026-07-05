@@ -31,11 +31,24 @@ public class Main {
         boolean production = false;
         int port = 8080;
 
+        // Independent build-step selectors. When any of these is given, html-saurus runs
+        // ONLY the selected steps (in dependency order html -> index -> embedding) and exits,
+        // without starting a server. This lets the three build stages — static HTML, the
+        // Lucene full-text index, and the embedding (RAG) vectors — be produced separately,
+        // e.g. so an HTML refresh does not have to wait on (or fail because of) the embedding
+        // server. When none is given, behaviour is unchanged.
+        boolean stepHtml = false;
+        boolean stepIndex = false;
+        boolean stepEmbedding = false;
+
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("--port") && i + 1 < args.length) port = Integer.parseInt(args[++i]);
             else if (args[i].equals("--serve")) serve = true;
             else if (args[i].equals("--portal-mode")) portalMode = true;
             else if (args[i].equals("--production")) production = true;
+            else if (args[i].equals("--html")) stepHtml = true;
+            else if (args[i].equals("--index")) stepIndex = true;
+            else if (args[i].equals("--embedding") || args[i].equals("--embed")) stepEmbedding = true;
             else if (!args[i].startsWith("--")) rootDir = Path.of(args[i]).toAbsolutePath();
         }
 
@@ -44,16 +57,33 @@ public class Main {
 
         if (rootDir == null) rootDir = Path.of("").toAbsolutePath();
 
+        boolean explicitSteps = stepHtml || stepIndex || stepEmbedding;
+
         // Startup mode summary — always printed so callers (e.g. service-portal) can verify options
         String mode = portalMode ? "PORTAL" : "SINGLE";
-        String action = production ? "build+serve(production)" : serve ? "build+serve" : "build-only";
+        String action;
+        if (explicitSteps) {
+            List<String> steps = new ArrayList<>();
+            if (stepHtml) steps.add("html");
+            if (stepIndex) steps.add("index");
+            if (stepEmbedding) steps.add("embedding");
+            action = "build-steps(" + String.join("+", steps) + ")";
+        } else {
+            action = production ? "build+serve(production)" : serve ? "build+serve" : "build-only";
+        }
         System.out.println("=== html-saurus startup ===");
         System.out.println("  mode    : " + mode);
         System.out.println("  rootDir : " + rootDir);
         System.out.println("  action  : " + action);
-        System.out.println("  port    : " + (serve || production ? String.valueOf(port) : "n/a"));
+        System.out.println("  port    : " + (!explicitSteps && (serve || production) ? String.valueOf(port) : "n/a"));
         System.out.println("  args    : " + String.join(" ", args));
         System.out.println("===========================");
+
+        // Explicit per-step build: run only the selected stages and exit (never serves).
+        if (explicitSteps) {
+            runSteps(rootDir, portalMode, production, stepHtml, stepIndex, stepEmbedding);
+            return;
+        }
 
         if (portalMode) {
             runPortal(rootDir, port, serve, production);
@@ -63,6 +93,52 @@ public class Main {
 
         if (serve || production) {
             registerWithGateway(port);
+        }
+    }
+
+    /**
+     * Runs the explicitly selected build stages independently, then returns (no server is started).
+     *
+     * <p>The three stages are produced by separate subsystems and can be run in any combination:
+     * <ul>
+     *   <li>{@code html} — static HTML generation ({@link SiteBuilder}), written to {@code static-html/}</li>
+     *   <li>{@code index} — Lucene full-text index ({@link SearchIndexer}), written to {@code search-index/}</li>
+     *   <li>{@code embedding} — embedding/RAG vectors ({@link SemanticIndexer}), written to
+     *       {@code search-embedding/}; requires the shared embedding server (warns and skips if unreachable)</li>
+     * </ul>
+     * Selected stages run in dependency order (html, then index, then embedding) because the index
+     * reflects the built docs and the embedding cache is keyed off the index. In portal mode the
+     * html and index stages run per discovered project; the embedding stage processes all projects together.
+     *
+     * @param rootDir      single project directory, or (in portal mode) the root containing many projects
+     * @param portalMode   whether to discover multiple projects under {@code rootDir}
+     * @param production   whether to use production-mode clean URLs
+     * @param doHtml       run the static HTML stage
+     * @param doIndex      run the Lucene index stage
+     * @param doEmbedding  run the embedding (RAG) vector stage
+     * @throws IOException if project discovery fails
+     */
+    static void runSteps(Path rootDir, boolean portalMode, boolean production,
+                         boolean doHtml, boolean doIndex, boolean doEmbedding) throws IOException {
+        List<Path> projects = portalMode ? findProjects(rootDir) : List.of(rootDir);
+        if (projects.isEmpty()) {
+            System.err.println("No Docusaurus projects found under " + rootDir);
+            return;
+        }
+
+        if (doHtml) {
+            for (Path p : projects) {
+                build(p.resolve("docs"), p.resolve("static-html"), production);
+            }
+        }
+        if (doIndex) {
+            for (Path p : projects) {
+                reindexAll(p, production);
+            }
+        }
+        if (doEmbedding) {
+            // Operates across all projects at once; non-fatal if the embedding server is unreachable.
+            ensureSemanticVectors(projects);
         }
     }
 
