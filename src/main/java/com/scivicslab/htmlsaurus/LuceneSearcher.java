@@ -38,8 +38,8 @@ class LuceneSearcher implements Closeable {
 
     private static final Logger logger = Logger.getLogger(LuceneSearcher.class.getName());
 
-    record Hit(String title, String path, String summary, float score) {
-        Hit(String title, String path, String summary) { this(title, path, summary, 0f); }
+    record Hit(String title, String path, String summary, String srcPath, float score) {
+        Hit(String title, String path, String summary, String srcPath) { this(title, path, summary, srcPath, 0f); }
     }
 
     private final Path indexDir;
@@ -119,6 +119,7 @@ class LuceneSearcher implements Closeable {
                 doc.get("title") != null ? doc.get("title") : "",
                 doc.get("path")  != null ? doc.get("path")  : "",
                 snippet,
+                doc.get("src_path") != null ? doc.get("src_path") : "",
                 hit.score
             ));
         }
@@ -201,7 +202,8 @@ class LuceneSearcher implements Closeable {
             results.add(new Hit(
                 doc.get("title") != null ? doc.get("title") : "",
                 path,
-                snippet
+                snippet,
+                doc.get("src_path") != null ? doc.get("src_path") : ""
             ));
             if (results.size() >= maxHits) break;
         }
@@ -241,6 +243,7 @@ class LuceneSearcher implements Closeable {
                 doc.get("title") != null ? doc.get("title") : "",
                 doc.get("path")  != null ? doc.get("path")  : "",
                 snippet,
+                doc.get("src_path") != null ? doc.get("src_path") : "",
                 hit.score
             ));
             if (results.size() >= maxHits) break;

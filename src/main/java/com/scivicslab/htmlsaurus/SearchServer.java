@@ -160,6 +160,7 @@ public class SearchServer {
                 sb.append("{")
                   .append("\"title\":").append(HttpUtils.jsonStr(hit.title())).append(",")
                   .append("\"path\":").append(HttpUtils.jsonStr(hit.path())).append(",")
+                  .append("\"srcPath\":").append(HttpUtils.jsonStr(hit.srcPath())).append(",")
                   .append("\"summary\":").append(HttpUtils.jsonStr(hit.summary()))
                   .append("}");
             }
