@@ -59,8 +59,13 @@ public class Main {
 
         boolean explicitSteps = stepHtml || stepIndex || stepEmbedding;
 
+        // --production always serves a single public site and takes precedence over --portal-mode:
+        // the dev portal dashboard is never shown in production. So --portal-mode --production runs
+        // purely as production, unaffected by the portal flag.
+        boolean servePortal = portalMode && !production;
+
         // Startup mode summary — always printed so callers (e.g. service-portal) can verify options
-        String mode = portalMode ? "PORTAL" : "SINGLE";
+        String mode = servePortal ? "PORTAL" : "SINGLE";
         String action;
         if (explicitSteps) {
             List<String> steps = new ArrayList<>();
@@ -85,7 +90,7 @@ public class Main {
             return;
         }
 
-        if (portalMode) {
+        if (servePortal) {
             runPortal(rootDir, port, serve, production);
         } else {
             runSingle(rootDir, port, serve, production);
