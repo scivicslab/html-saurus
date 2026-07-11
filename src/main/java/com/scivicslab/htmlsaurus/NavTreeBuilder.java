@@ -198,7 +198,13 @@ class NavTreeBuilder {
                     reordered.add(child);
                 }
             }
-            reordered.addAll(childByDirName.values()); // remaining not in config
+            // The navbar item SET comes from the config navbar (like Docusaurus), not from the
+            // docs/ directory listing. Docs sections that have no config navbar item are therefore
+            // NOT added here: they are dropped from the nav tree (their pages still build, but are
+            // not shown in the navbar/sidebar), so the rendered navbar matches the config — and the
+            // portal row (which reads the same config) matches the rendered navbar.
+            // childByDirName still holds the unmatched (config-absent) docs sections; intentionally
+            // not appended. unmatchedChildren are nodes with no directory name (edge cases); keep them.
             reordered.addAll(unmatchedChildren);
 
             return new SiteNode(root.label(), root.href(), root.isDir(), reordered, root.catLink());
