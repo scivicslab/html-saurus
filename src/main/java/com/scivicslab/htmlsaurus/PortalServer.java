@@ -962,9 +962,9 @@ public class PortalServer {
                 sb.append("          <option value=\"html\">HTML</option>\n");
                 sb.append("          <option value=\"index\">Index</option>\n");
                 sb.append("          <option value=\"embedding\">Embedding</option>\n");
-                sb.append("          <option value=\"update-list\">Update project list</option>\n");
+                sb.append("          <option value=\"update-list\">Project list</option>\n");
                 sb.append("        </select>\n");
-                sb.append("        <button class=\"btn btn-build\" onclick=\"doAction('").append(nm).append("', this)\">Run</button>\n");
+                sb.append("        <button class=\"btn btn-build\" onclick=\"doAction('").append(nm).append("', this)\">Update</button>\n");
                 sb.append("        <span class=\"build-status\" id=\"status-").append(nm).append("\"></span>\n");
                 sb.append("      </div>\n");
             }
