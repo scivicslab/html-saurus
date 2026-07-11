@@ -202,6 +202,14 @@ public class PortalServer {
             return;
         }
 
+        // Navbar labels refresh (development mode only): GET /api/navbar-labels/<project>
+        //   Re-reads docusaurus.config.ts live and returns the current position:'left' labels,
+        //   so a portal row can refresh its label list in place without a full page reload.
+        if (!production && path.startsWith("/api/navbar-labels/")) {
+            handleNavbarLabels(ex, path.substring("/api/navbar-labels/".length()));
+            return;
+        }
+
 
 
         // Cross-project search API (JSON): GET /api/search?q=...
@@ -711,6 +719,37 @@ public class PortalServer {
         }
     }
 
+    /**
+     * Serves the current navbar labels for one project as JSON (development mode only).
+     *
+     * <p>Re-reads {@code docusaurus.config.ts} live and returns the {@code position: 'left'}
+     * labels, so the portal's per-project label list can be refreshed in place without a full
+     * page reload (the "Update project list" action).
+     *
+     * @param ex   the HTTP exchange
+     * @param name the project name (path segment after {@code /api/navbar-labels/})
+     * @throws IOException if writing the response fails
+     */
+    private void handleNavbarLabels(HttpExchange ex, String name) throws IOException {
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Project proj = projectMap.get(name);
+        if (proj == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
+            return;
+        }
+        List<String> labels = readNavbarLabels(proj.projectDir());
+        StringBuilder json = new StringBuilder("{\"status\":\"ok\",\"labels\":[");
+        for (int i = 0; i < labels.size(); i++) {
+            if (i > 0) json.append(',');
+            json.append(jsonStr(labels.get(i)));
+        }
+        json.append("]}");
+        respond(ex, 200, "application/json", json.toString());
+    }
+
     // ---- Upload API endpoint ------------------------------------
 
     // ---- Portal index page --------------------------------------
@@ -813,6 +852,9 @@ public class PortalServer {
                               background: var(--bg-tertiary); color: var(--accent-green);
                               border: 1px solid var(--border-color); font-family: monospace; }
                 .project-actions { display: flex; gap: 0.5rem; align-items: center; }
+                .action-select { padding: 0.28rem 0.5rem; border-radius: 5px; font-size: 0.8rem;
+                                 border: 1px solid var(--border-color); background: var(--bg-tertiary);
+                                 color: var(--text-primary); cursor: pointer; }
                 .btn { padding: 0.28rem 0.8rem; border-radius: 5px; font-size: 0.8rem;
                        font-weight: 600; cursor: pointer; border: 1px solid var(--border-color);
                        background: var(--bg-tertiary); color: var(--text-primary);
@@ -901,7 +943,7 @@ public class PortalServer {
             String[] i18n = Main.readI18nConfig(p.projectDir());
             sb.append("    <div class=\"project-row\">\n");
             sb.append("      <div class=\"project-name\"><a href=\"/").append(escHtml(p.name())).append("/\" target=\"_blank\" rel=\"noopener noreferrer\">").append(escHtml(p.name())).append("</a></div>\n");
-            sb.append("      <div class=\"project-labels\">\n");
+            sb.append("      <div class=\"project-labels\" id=\"labels-").append(escHtml(p.name())).append("\">\n");
             for (String label : labels) {
                 sb.append("        <span class=\"project-label\">").append(escHtml(label)).append("</span>\n");
             }
@@ -914,11 +956,15 @@ public class PortalServer {
                 sb.append("      </div>\n");
             }
             if (!production) {
-                sb.append("      <div class=\"project-actions\">\n");
                 String nm = escHtml(p.name());
-                sb.append("        <button class=\"btn btn-build\" onclick=\"doStage('html','").append(nm).append("', this)\">HTML</button>\n");
-                sb.append("        <button class=\"btn btn-build\" onclick=\"doStage('index','").append(nm).append("', this)\">Index</button>\n");
-                sb.append("        <button class=\"btn btn-build\" onclick=\"doStage('embedding','").append(nm).append("', this)\">Embedding</button>\n");
+                sb.append("      <div class=\"project-actions\">\n");
+                sb.append("        <select class=\"action-select\" id=\"action-").append(nm).append("\" title=\"Choose an action, then Run\">\n");
+                sb.append("          <option value=\"html\">HTML</option>\n");
+                sb.append("          <option value=\"index\">Index</option>\n");
+                sb.append("          <option value=\"embedding\">Embedding</option>\n");
+                sb.append("          <option value=\"update-list\">Update project list</option>\n");
+                sb.append("        </select>\n");
+                sb.append("        <button class=\"btn btn-build\" onclick=\"doAction('").append(nm).append("', this)\">Run</button>\n");
                 sb.append("        <span class=\"build-status\" id=\"status-").append(nm).append("\"></span>\n");
                 sb.append("      </div>\n");
             }
@@ -941,21 +987,44 @@ public class PortalServer {
                 localStorage.setItem('portal-theme', this.value);
               });
             })();
-            async function doStage(stage, name, btn) {
+            async function doAction(name, btn) {
+              const action = document.getElementById('action-' + name).value;
               const status = document.getElementById('status-' + name);
               const label = btn.textContent;
               btn.disabled = true;
               btn.textContent = '...';
               status.textContent = '';
+              status.style.color = 'var(--text-secondary)';
               try {
-                const r = await fetch('/api/build-' + stage + '/' + encodeURIComponent(name), {method: 'POST'});
-                const j = await r.json();
-                if (j.status === 'ok') {
-                  status.textContent = stage + ' done (' + j.ms + 'ms)';
-                  status.style.color = 'var(--accent-green)';
+                if (action === 'update-list') {
+                  // Re-read docusaurus.config.ts live and re-render this row's navbar labels in place.
+                  const r = await fetch('/api/navbar-labels/' + encodeURIComponent(name));
+                  const j = await r.json();
+                  if (j.status === 'ok') {
+                    const box = document.getElementById('labels-' + name);
+                    box.replaceChildren();
+                    for (const lb of j.labels) {
+                      const span = document.createElement('span');
+                      span.className = 'project-label';
+                      span.textContent = lb;
+                      box.appendChild(span);
+                    }
+                    status.textContent = 'list updated (' + j.labels.length + ')';
+                    status.style.color = 'var(--accent-green)';
+                  } else {
+                    status.textContent = 'Error: ' + (j.error || 'unknown');
+                    status.style.color = '#e06060';
+                  }
                 } else {
-                  status.textContent = 'Error: ' + (j.error || 'unknown');
-                  status.style.color = '#e06060';
+                  const r = await fetch('/api/build-' + action + '/' + encodeURIComponent(name), {method: 'POST'});
+                  const j = await r.json();
+                  if (j.status === 'ok') {
+                    status.textContent = action + ' done (' + j.ms + 'ms)';
+                    status.style.color = 'var(--accent-green)';
+                  } else {
+                    status.textContent = 'Error: ' + (j.error || 'unknown');
+                    status.style.color = '#e06060';
+                  }
                 }
               } catch (e) {
                 status.textContent = 'Error: ' + e.message;
