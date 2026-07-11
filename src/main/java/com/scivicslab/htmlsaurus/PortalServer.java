@@ -920,10 +920,6 @@ public class PortalServer {
                     <label style="cursor:pointer;"><input type="radio" name="search-type" value="tfidf" style="margin-right:0.15rem;">TF-IDF</label>
                     <label style="cursor:pointer;"><input type="radio" name="search-type" value="embedding" style="margin-right:0.15rem;">Embedding</label>
                   </span>
-                  <span style="font-size:0.8rem;color:var(--text-secondary);display:flex;gap:0.6rem;align-items:center;">
-                    <label style="cursor:pointer;"><input type="radio" name="search-lang" value="ja" checked style="margin-right:0.15rem;">日本語 (ja)</label>
-                    <label style="cursor:pointer;"><input type="radio" name="search-lang" value="en" style="margin-right:0.15rem;">English (en)</label>
-                  </span>
                   <span id="search-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
                 </div>
               </div>
@@ -1033,20 +1029,18 @@ public class PortalServer {
             document.getElementById('search-input').addEventListener('keydown', function(e) {
               if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); doSearch(); }
             });
-            // One form, three search types. Each type already has a server endpoint:
-            //   fulltext  -> GET  /search?q=&lang=          (Lucene full-text)
-            //   tfidf     -> POST /find-related  (text,lang) (Lucene MoreLikeThis)
-            //   embedding -> GET  /search-semantic?q=       (vector similarity)
+            // One form, three search types (each always searches every locale). Server endpoints:
+            //   fulltext  -> GET  /search?q=          (Lucene full-text)
+            //   tfidf     -> POST /find-related (text) (Lucene MoreLikeThis)
+            //   embedding -> GET  /search-semantic?q= (vector similarity)
             function doSearch() {
               const status = document.getElementById('search-status');
               const text = document.getElementById('search-input').value.trim();
               if (!text) { status.textContent = 'Please enter some text.'; return; }
               const typeEl = document.querySelector('input[name="search-type"]:checked');
               const type = typeEl ? typeEl.value : 'fulltext';
-              const langEl = document.querySelector('input[name="search-lang"]:checked');
-              const lang = langEl ? langEl.value : 'ja';
               if (type === 'fulltext') {
-                window.open('/search?q=' + encodeURIComponent(text) + '&lang=' + encodeURIComponent(lang), '_blank');
+                window.open('/search?q=' + encodeURIComponent(text), '_blank');
               } else if (type === 'embedding') {
                 window.open('/search-semantic?q=' + encodeURIComponent(text), '_blank');
               } else {
@@ -1055,9 +1049,7 @@ public class PortalServer {
                 form.style.display = 'none';
                 const tInput = document.createElement('input');
                 tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
-                const lInput = document.createElement('input');
-                lInput.type = 'hidden'; lInput.name = 'lang'; lInput.value = lang;
-                form.appendChild(tInput); form.appendChild(lInput);
+                form.appendChild(tInput);
                 document.body.appendChild(form);
                 form.submit();
                 document.body.removeChild(form);
@@ -1142,7 +1134,7 @@ public class PortalServer {
         catch (NumberFormatException ignored) {}
 
         final String finalLang = lang;
-        List<Map<String, String>> allHits = q.isBlank() ? List.of() : globalSearch(q, finalLang);
+        List<Map<String, String>> allHits = q.isBlank() ? List.of() : globalSearch(q);
         int total = allHits.size();
         int totalPages = Math.max(1, (total + PAGE_SIZE - 1) / PAGE_SIZE);
         page = Math.min(page, totalPages);
@@ -1273,7 +1265,7 @@ public class PortalServer {
         String q = queryParam(ex, "q");
         String lang = queryParam(ex, "lang");
         if (lang.isBlank()) lang = "ja";
-        List<Map<String, String>> hits = globalSearch(q, lang);
+        List<Map<String, String>> hits = globalSearch(q);
         var sb = new StringBuilder("[");
         boolean first = true;
         for (var hit : hits) {
@@ -1374,6 +1366,44 @@ public class PortalServer {
             System.err.println("Global search error: " + e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * Full-text keyword search across ALL locales (Japanese + English + …). Each locale is searched
+     * with its own analyzer via {@link #globalSearch(String, String)}, and the per-locale result
+     * lists are interleaved (round-robin) so both languages surface near the top. There is no
+     * language option in the UI: search always covers every locale present.
+     *
+     * @param q the query string
+     * @return merged hit maps across every locale
+     */
+    private List<Map<String, String>> globalSearch(String q) {
+        if (q.isBlank()) return List.of();
+        java.util.LinkedHashSet<String> locales = new java.util.LinkedHashSet<>();
+        for (String loc : searcherLocales.values()) if (loc != null) locales.add(loc);
+        List<List<Map<String, String>>> perLocale = new ArrayList<>();
+        int max = 0;
+        for (String loc : locales) {
+            List<Map<String, String>> r = globalSearch(q, loc);
+            if (!r.isEmpty()) { perLocale.add(r); max = Math.max(max, r.size()); }
+        }
+        return interleaveDedup(perLocale, max);
+    }
+
+    /** Round-robin interleave of per-locale result lists, deduplicated by the served "path". */
+    private List<Map<String, String>> interleaveDedup(List<List<Map<String, String>>> lists, int max) {
+        List<Map<String, String>> merged = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (int i = 0; i < max; i++) {
+            for (List<Map<String, String>> r : lists) {
+                if (i < r.size()) {
+                    Map<String, String> m = r.get(i);
+                    String key = m.getOrDefault("path", "");
+                    if (key.isEmpty() || seen.add(key)) merged.add(m);
+                }
+            }
+        }
+        return merged;
     }
 
     /** Queries a single project's Lucene index and appends matching results to the output list. */
@@ -1568,7 +1598,7 @@ public class PortalServer {
 
         List<Map<String, String>> hits;
         try {
-            hits = moreLikeThisAcrossProjects(text, lang, "");
+            hits = moreLikeThisAllLocales(text, "");
         } catch (Exception e) {
             System.err.println("find-related error: " + e.getMessage());
             hits = List.of();
@@ -1607,7 +1637,7 @@ public class PortalServer {
 
         List<Map<String, String>> hits;
         try {
-            hits = moreLikeThisAcrossProjects(text, lang, "");
+            hits = moreLikeThisAllLocales(text, "");
         } catch (Exception e) {
             System.err.println("find-related page error: " + e.getMessage());
             hits = List.of();
@@ -1781,6 +1811,29 @@ public class PortalServer {
             ));
         }
         return results;
+    }
+
+    /**
+     * "More like this" (TF-IDF) across ALL locales. Runs {@link #moreLikeThisAcrossProjects} per
+     * locale (each with its own analyzer) and interleaves the results, deduplicated by served path.
+     * Used by the paste-text find-related search, which has no language option.
+     *
+     * @param bodyText    the pasted text
+     * @param excludePath a served path to exclude, or "" for none
+     * @return merged related-document hit maps across every locale
+     * @throws Exception if a per-locale search fails
+     */
+    private List<Map<String, String>> moreLikeThisAllLocales(String bodyText, String excludePath) throws Exception {
+        if (bodyText == null || bodyText.isBlank()) return List.of();
+        java.util.LinkedHashSet<String> locales = new java.util.LinkedHashSet<>();
+        for (String loc : searcherLocales.values()) if (loc != null) locales.add(loc);
+        List<List<Map<String, String>>> perLocale = new ArrayList<>();
+        int max = 0;
+        for (String loc : locales) {
+            List<Map<String, String>> r = moreLikeThisAcrossProjects(bodyText, loc, excludePath);
+            if (!r.isEmpty()) { perLocale.add(r); max = Math.max(max, r.size()); }
+        }
+        return interleaveDedup(perLocale, max);
     }
 
     // ---- Static file endpoint -----------------------------------
