@@ -896,14 +896,6 @@ public class PortalServer {
             """);
         }
         sb.append("""
-                <form class="portal-search" action="/search" method="get">
-                  <input type="search" name="q" placeholder="Search all docs...">
-                  <span class="portal-lang-radios">
-                    <label><input type="radio" name="lang" value="ja" checked>日本語</label>
-                    <label><input type="radio" name="lang" value="en">English</label>
-                  </span>
-                  <button type="submit">Search</button>
-                </form>
               </div>
             </header>
             <main>
@@ -912,22 +904,27 @@ public class PortalServer {
         if (!production) {
             sb.append("""
               <div style="margin-top:2rem;">
-                <h2>Find Related Documents</h2>
+                <h2>Search</h2>
                 <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.6rem 0 0.75rem;">
-                  Paste a paragraph or block of text to find documents covering similar topics.</p>
-                <textarea id="find-related-input" rows="6"
-                  placeholder="Paste text here..."
+                  Enter keywords, or paste a paragraph of text, then pick a search type.</p>
+                <textarea id="search-input" rows="6"
+                  placeholder="Type keywords, or paste a paragraph..."
                   style="width:100%;padding:0.6rem 0.75rem;border-radius:6px;
                          border:1px solid var(--border-color);background:var(--bg-tertiary);
                          color:var(--text-primary);font-size:0.875rem;resize:vertical;
                          font-family:inherit;line-height:1.5;"></textarea>
                 <div style="margin-top:0.5rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
-                  <button class="btn" id="find-related-btn" onclick="doFindRelated()">Find Related</button>
+                  <button class="btn" id="search-btn" onclick="doSearch()">Search</button>
                   <span style="font-size:0.8rem;color:var(--text-secondary);display:flex;gap:0.6rem;align-items:center;">
-                    <label style="cursor:pointer;"><input type="radio" name="find-related-lang" value="ja" id="fr-lang-ja" checked style="margin-right:0.15rem;">日本語 (ja)</label>
-                    <label style="cursor:pointer;"><input type="radio" name="find-related-lang" value="en" id="fr-lang-en" style="margin-right:0.15rem;">English (en)</label>
+                    <label style="cursor:pointer;"><input type="radio" name="search-type" value="fulltext" checked style="margin-right:0.15rem;">Keyword</label>
+                    <label style="cursor:pointer;"><input type="radio" name="search-type" value="tfidf" style="margin-right:0.15rem;">TF-IDF</label>
+                    <label style="cursor:pointer;"><input type="radio" name="search-type" value="embedding" style="margin-right:0.15rem;">Embedding</label>
                   </span>
-                  <span id="find-related-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
+                  <span style="font-size:0.8rem;color:var(--text-secondary);display:flex;gap:0.6rem;align-items:center;">
+                    <label style="cursor:pointer;"><input type="radio" name="search-lang" value="ja" checked style="margin-right:0.15rem;">日本語 (ja)</label>
+                    <label style="cursor:pointer;"><input type="radio" name="search-lang" value="en" style="margin-right:0.15rem;">English (en)</label>
+                  </span>
+                  <span id="search-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
                 </div>
               </div>
             """);
@@ -1033,27 +1030,38 @@ public class PortalServer {
               btn.disabled = false;
               btn.textContent = label;
             }
-            document.getElementById('find-related-input').addEventListener('keydown', function(e) {
-              if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); doFindRelated(); }
+            document.getElementById('search-input').addEventListener('keydown', function(e) {
+              if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); doSearch(); }
             });
-            function doFindRelated() {
-              const status = document.getElementById('find-related-status');
-              const text = document.getElementById('find-related-input').value.trim();
-              const langEl = document.querySelector('input[name="find-related-lang"]:checked');
-              const lang = langEl ? langEl.value : 'ja';
+            // One form, three search types. Each type already has a server endpoint:
+            //   fulltext  -> GET  /search?q=&lang=          (Lucene full-text)
+            //   tfidf     -> POST /find-related  (text,lang) (Lucene MoreLikeThis)
+            //   embedding -> GET  /search-semantic?q=       (vector similarity)
+            function doSearch() {
+              const status = document.getElementById('search-status');
+              const text = document.getElementById('search-input').value.trim();
               if (!text) { status.textContent = 'Please enter some text.'; return; }
-              const form = document.createElement('form');
-              form.method = 'POST';
-              form.action = '/find-related';
-              form.style.display = 'none';
-              const tInput = document.createElement('input');
-              tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
-              const lInput = document.createElement('input');
-              lInput.type = 'hidden'; lInput.name = 'lang'; lInput.value = lang;
-              form.appendChild(tInput); form.appendChild(lInput);
-              document.body.appendChild(form);
-              form.submit();
-              document.body.removeChild(form);
+              const typeEl = document.querySelector('input[name="search-type"]:checked');
+              const type = typeEl ? typeEl.value : 'fulltext';
+              const langEl = document.querySelector('input[name="search-lang"]:checked');
+              const lang = langEl ? langEl.value : 'ja';
+              if (type === 'fulltext') {
+                window.open('/search?q=' + encodeURIComponent(text) + '&lang=' + encodeURIComponent(lang), '_blank');
+              } else if (type === 'embedding') {
+                window.open('/search-semantic?q=' + encodeURIComponent(text), '_blank');
+              } else {
+                const form = document.createElement('form');
+                form.method = 'POST'; form.action = '/find-related'; form.target = '_blank';
+                form.style.display = 'none';
+                const tInput = document.createElement('input');
+                tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
+                const lInput = document.createElement('input');
+                lInput.type = 'hidden'; lInput.name = 'lang'; lInput.value = lang;
+                form.appendChild(tInput); form.appendChild(lInput);
+                document.body.appendChild(form);
+                form.submit();
+                document.body.removeChild(form);
+              }
               status.textContent = 'Opened in new tab.';
               status.style.color = 'var(--accent-green)';
             }
