@@ -1160,19 +1160,6 @@ public class PortalServer {
                 header a.home { color: #fff; text-decoration: none; font-weight: 700; font-size: 1.1rem;
                                 white-space: nowrap; }
                 header a.home:hover { color: #aaa; }
-                form { display: flex; gap: 0.5rem; flex: 1; max-width: 700px; align-items: flex-start; flex-wrap: wrap; }
-                form textarea { flex: 1; padding: 0.4rem 0.8rem; border-radius: 4px;
-                  border: 1px solid #666; background: rgba(255,255,255,0.12); color: #fff;
-                  font-size: 0.9rem; outline: none; min-width: 160px; resize: vertical;
-                  font-family: inherit; line-height: 1.5; }
-                form textarea::placeholder { color: #aaa; }
-                form textarea:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
-                form button { padding: 0.4rem 1rem; border-radius: 4px; border: none;
-                  background: #2e8555; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
-                form button:hover { background: #267a4e; }
-                .lang-radios { display: flex; gap: 0.75rem; align-items: center; font-size: 0.82rem; color: #ccc; }
-                .lang-radios label { cursor: pointer; }
-                .lang-radios input[type=radio] { margin-right: 0.2rem; }
                 main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
                 .result-count { color: #666; font-size: 0.875rem; margin-bottom: 1.5rem; }
                 .result-count strong { color: #1c1e21; }
@@ -1198,26 +1185,10 @@ public class PortalServer {
             <body>
             <header>
               <a class="home" href="/">Documentation Portal</a>
-              <form onsubmit="doSearch(); return false;">
-                <textarea id="search-input" name="q" rows="6"
-                          placeholder="Search all docs, or paste a paragraph..." autofocus>%s</textarea>
-                <div class="lang-radios">
-                  <label><input type="radio" name="lang" id="lang-ja" value="ja" %s>日本語 (ja)</label>
-                  <label><input type="radio" name="lang" id="lang-en" value="en" %s>English (en)</label>
-                </div>
-                <div class="lang-radios">
-            """.formatted(escHtml(q),
-                          escHtml(q),
-                          "ja".equals(finalLang) ? "checked" : "",
-                          "en".equals(finalLang) ? "checked" : ""));
-        sb.append(RelatedDocsView.searchTypeRadios("fulltext", true));
-        sb.append("""
-                </div>
-                <button type="submit">Search</button>
-              </form>
             </header>
             <main>
-            """);
+            """.formatted(escHtml(q)));
+        sb.append(RelatedDocsView.searchWidgetBlock(q, "fulltext", true));
 
         if (q.isBlank()) {
             sb.append("<p class=\"no-results\">Please enter a search query.</p>\n");
@@ -1641,8 +1612,6 @@ public class PortalServer {
         String rawBody = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Map<String, String> params = parseFormBody(rawBody);
         String text = params.getOrDefault("text", "").strip();
-        String lang = params.getOrDefault("lang", "ja");
-        if (lang.isBlank()) lang = "ja";
 
         List<Map<String, String>> hits;
         try {
@@ -1669,19 +1638,6 @@ public class PortalServer {
                          display: flex; align-items: center; gap: 1.5rem; }
                 header a.home { color: #fff; text-decoration: none; font-weight: 700; font-size: 1.1rem; }
                 header a.home:hover { color: #aaa; }
-                form { display: flex; gap: 0.5rem; flex: 1; max-width: 700px; align-items: flex-start; flex-wrap: wrap; }
-                form textarea { flex: 1; padding: 0.4rem 0.8rem; border-radius: 4px;
-                  border: 1px solid #666; background: rgba(255,255,255,0.12); color: #fff;
-                  font-size: 0.9rem; outline: none; min-width: 160px; resize: vertical;
-                  font-family: inherit; line-height: 1.5; }
-                form textarea::placeholder { color: #aaa; }
-                form textarea:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
-                form button { padding: 0.4rem 1rem; border-radius: 4px; border: none;
-                  background: #2e8555; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
-                form button:hover { background: #267a4e; }
-                .lang-radios { display: flex; gap: 0.75rem; align-items: center; font-size: 0.82rem; color: #ccc; }
-                .lang-radios label { cursor: pointer; }
-                .lang-radios input[type=radio] { margin-right: 0.2rem; }
                 main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
                 .query-box { background: #fff; border: 1px solid #e3e4e5; border-radius: 8px;
                              padding: 1rem 1.25rem; margin-bottom: 1.5rem;
@@ -1706,19 +1662,10 @@ public class PortalServer {
             <body>
             <header>
               <a class="home" href="/">Documentation Portal</a>
-              <form onsubmit="doSearch(); return false;">
-                <textarea id="search-input" name="q" rows="6"
-                          placeholder="Search all docs, or paste a paragraph...">%s</textarea>
-                <div class="lang-radios">
-            """.formatted(escHtml(text)));
-        sb.append(RelatedDocsView.searchTypeRadios("tfidf", true));
-        sb.append("""
-                </div>
-                <button type="submit">Search</button>
-              </form>
             </header>
             <main>
             """);
+        sb.append(RelatedDocsView.searchWidgetBlock(text, "tfidf", true));
 
         sb.append("<div class=\"query-box\"><div class=\"query-label\">Query text:</div>")
           .append("<div class=\"query-text\">").append(escHtml(snippet)).append("</div></div>\n");

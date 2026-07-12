@@ -72,22 +72,7 @@ final class RelatedDocsView {
     static String searchResultsPage(String query, List<Map<String, String>> hits, boolean supportsTfidf) {
         var sb = new StringBuilder();
         sb.append(pageOpen("Semantic search"));
-        sb.append("""
-            <form onsubmit="doSearch(); return false;"
-                  style="display:flex;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap;align-items:flex-start;">
-              <textarea id="search-input" name="q" rows="6"
-                        placeholder="Search by meaning, or paste a paragraph…"
-                        style="flex:1;min-width:200px;padding:.5rem .75rem;border:1px solid #ccc;
-                               border-radius:6px;font-size:.9rem;resize:vertical;font-family:inherit;
-                               line-height:1.5;">%s</textarea>
-              <button type="submit"
-                      style="padding:.5rem 1rem;border:none;border-radius:6px;background:#2e8555;color:#fff;
-                             font-size:.9rem;cursor:pointer;">Search</button>
-            </form>
-            <div style="margin-bottom:1.5rem;font-size:.85rem;color:#666;display:flex;gap:.9rem;align-items:center;">
-            """.formatted(HttpUtils.escapeHtml(query == null ? "" : query)));
-        sb.append(searchTypeRadios("embedding", supportsTfidf));
-        sb.append("</div>\n");
+        sb.append(searchWidgetBlock(query, "embedding", supportsTfidf));
         if (query != null && !query.isBlank()) {
             appendResults(sb, hits, "result");
         }
@@ -114,6 +99,51 @@ final class RelatedDocsView {
     }
 
     /**
+     * Renders the "one form, three search types" search widget in the same design as the
+     * portal homepage's Search section (heading, description, resizable textarea, Search
+     * button, search-type radios, status span). Callers place this block at the top of
+     * {@code <main>}; the surrounding {@code <header>} holds only the home link, so the
+     * widget lives with the content it searches rather than in the page chrome.
+     *
+     * @param query        current query text, pre-filled into the textarea (may be null/blank)
+     * @param selectedType which {@code search-type} radio starts checked ({@code fulltext} /
+     *                     {@code tfidf} / {@code embedding})
+     * @param supportsTfidf whether to offer the TF-IDF radio (omitted in single-project mode,
+     *                      which has no {@code /find-related} endpoint)
+     */
+    static String searchWidgetBlock(String query, String selectedType, boolean supportsTfidf) {
+        var sb = new StringBuilder();
+        sb.append("""
+            <div style="margin-top:2rem;margin-bottom:1.5rem;">
+              <h2 style="font-size:0.8rem;color:#666;font-weight:600;text-transform:uppercase;
+                         letter-spacing:0.06em;margin-bottom:0.75rem;border-bottom:1px solid #e3e4e5;
+                         padding-bottom:0.4rem;">Search</h2>
+              <p style="font-size:0.82rem;color:#666;margin:0 0 0.75rem;">
+                Enter keywords, or paste a paragraph of text, then pick a search type.</p>
+              <textarea id="search-input" name="q" rows="6"
+                placeholder="Type keywords, or paste a paragraph..."
+                style="width:100%%;padding:0.6rem 0.75rem;border-radius:6px;
+                       border:1px solid #ccc;background:#fff;color:#1c1e21;
+                       font-size:0.875rem;resize:vertical;font-family:inherit;
+                       line-height:1.5;">%s</textarea>
+              <div style="margin-top:0.5rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+                <button type="button" onclick="doSearch()"
+                        style="padding:0.4rem 1rem;border-radius:4px;border:none;
+                               background:#2e8555;color:#fff;font-weight:600;
+                               cursor:pointer;font-size:0.9rem;">Search</button>
+                <span style="font-size:0.8rem;color:#666;display:flex;gap:0.6rem;align-items:center;">
+            """.formatted(HttpUtils.escapeHtml(query == null ? "" : query)));
+        sb.append(searchTypeRadios(selectedType, supportsTfidf));
+        sb.append("""
+                </span>
+                <span id="search-status" style="font-size:0.8rem;color:#666;"></span>
+              </div>
+            </div>
+            """);
+        return sb.toString();
+    }
+
+    /**
      * Shared dispatcher script for the "one form, three search types" widget (each search page
      * provides a {@code #search-input} text field and a {@code search-type} radio group; a
      * {@code lang} radio group is optional and only consulted for the {@code fulltext} type).
@@ -128,8 +158,9 @@ final class RelatedDocsView {
         return """
             <script>
             function doSearch() {
+              const status = document.getElementById('search-status');
               const text = document.getElementById('search-input').value.trim();
-              if (!text) { return; }
+              if (!text) { if (status) { status.textContent = 'Please enter some text.'; } return; }
               const typeEl = document.querySelector('input[name="search-type"]:checked');
               const type = typeEl ? typeEl.value : 'fulltext';
               if (type === 'embedding') {
@@ -149,6 +180,7 @@ final class RelatedDocsView {
                 const lang = langEl ? langEl.value : 'ja';
                 window.open('/search?q=' + encodeURIComponent(text) + '&lang=' + encodeURIComponent(lang), '_blank');
               }
+              if (status) { status.textContent = 'Opened in new tab.'; status.style.color = '#2e8555'; }
             }
             // #search-input is now a <textarea> (so it can hold a pasted paragraph); plain Enter
             // must keep inserting a newline, so Shift+Enter is the submit shortcut instead

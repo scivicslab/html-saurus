@@ -126,16 +126,20 @@ public class PortalSearchE2E {
                     "Empty query page must show 'Please enter a search query'");
         });
 
-        // P-8: results page header input[name=q] retains keyword
-        withPage("P-8: results page header input retains submitted keyword", browser, page -> {
+        // P-8: results page main search widget (#search-input) retains keyword.
+        // The search widget lives in <main>, not <header>: the header holds only the
+        // home link, so it stays a fixed-height nav bar regardless of query length.
+        withPage("P-8: results page main search widget retains submitted keyword", browser, page -> {
             page.navigate(BASE_URL + "/search?q=" + KNOWN_KEYWORD);
             page.waitForLoadState();
-            check(page.querySelector("header form input[name=q]") != null,
-                    "header form input[name=q] not found on results page");
+            check(page.querySelector("header form") == null,
+                    "header must not contain a form (search widget belongs in <main>)");
+            check(page.querySelector("main #search-input") != null,
+                    "main #search-input not found on results page");
             String value = (String) page.evaluate(
-                    "() => document.querySelector('header form input[name=q]').value");
+                    "() => document.querySelector('main #search-input').value");
             check(KNOWN_KEYWORD.equals(value),
-                    "header input[name=q] must retain '" + KNOWN_KEYWORD + "', got: " + value);
+                    "main #search-input must retain '" + KNOWN_KEYWORD + "', got: " + value);
         });
 
         // P-9: result links have target=_blank
