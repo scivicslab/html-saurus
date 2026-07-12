@@ -1160,12 +1160,13 @@ public class PortalServer {
                 header a.home { color: #fff; text-decoration: none; font-weight: 700; font-size: 1.1rem;
                                 white-space: nowrap; }
                 header a.home:hover { color: #aaa; }
-                form { display: flex; gap: 0.5rem; flex: 1; max-width: 700px; align-items: center; flex-wrap: wrap; }
-                form input[type=search] { flex: 1; padding: 0.4rem 0.8rem; border-radius: 4px;
+                form { display: flex; gap: 0.5rem; flex: 1; max-width: 700px; align-items: flex-start; flex-wrap: wrap; }
+                form textarea { flex: 1; padding: 0.4rem 0.8rem; border-radius: 4px;
                   border: 1px solid #666; background: rgba(255,255,255,0.12); color: #fff;
-                  font-size: 0.9rem; outline: none; min-width: 160px; }
-                form input[type=search]::placeholder { color: #aaa; }
-                form input[type=search]:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
+                  font-size: 0.9rem; outline: none; min-width: 160px; resize: vertical;
+                  font-family: inherit; line-height: 1.5; }
+                form textarea::placeholder { color: #aaa; }
+                form textarea:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
                 form button { padding: 0.4rem 1rem; border-radius: 4px; border: none;
                   background: #2e8555; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
                 form button:hover { background: #267a4e; }
@@ -1198,8 +1199,8 @@ public class PortalServer {
             <header>
               <a class="home" href="/">Documentation Portal</a>
               <form onsubmit="doSearch(); return false;">
-                <input type="search" id="search-input" name="q" value="%s"
-                       placeholder="Search all docs, or paste a paragraph..." autofocus>
+                <textarea id="search-input" name="q" rows="6"
+                          placeholder="Search all docs, or paste a paragraph..." autofocus>%s</textarea>
                 <div class="lang-radios">
                   <label><input type="radio" name="lang" id="lang-ja" value="ja" %s>日本語 (ja)</label>
                   <label><input type="radio" name="lang" id="lang-en" value="en" %s>English (en)</label>
@@ -1668,12 +1669,13 @@ public class PortalServer {
                          display: flex; align-items: center; gap: 1.5rem; }
                 header a.home { color: #fff; text-decoration: none; font-weight: 700; font-size: 1.1rem; }
                 header a.home:hover { color: #aaa; }
-                form { display: flex; gap: 0.5rem; flex: 1; max-width: 700px; align-items: center; flex-wrap: wrap; }
-                form input[type=search] { flex: 1; padding: 0.4rem 0.8rem; border-radius: 4px;
+                form { display: flex; gap: 0.5rem; flex: 1; max-width: 700px; align-items: flex-start; flex-wrap: wrap; }
+                form textarea { flex: 1; padding: 0.4rem 0.8rem; border-radius: 4px;
                   border: 1px solid #666; background: rgba(255,255,255,0.12); color: #fff;
-                  font-size: 0.9rem; outline: none; min-width: 160px; }
-                form input[type=search]::placeholder { color: #aaa; }
-                form input[type=search]:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
+                  font-size: 0.9rem; outline: none; min-width: 160px; resize: vertical;
+                  font-family: inherit; line-height: 1.5; }
+                form textarea::placeholder { color: #aaa; }
+                form textarea:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
                 form button { padding: 0.4rem 1rem; border-radius: 4px; border: none;
                   background: #2e8555; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
                 form button:hover { background: #267a4e; }
@@ -1705,8 +1707,8 @@ public class PortalServer {
             <header>
               <a class="home" href="/">Documentation Portal</a>
               <form onsubmit="doSearch(); return false;">
-                <input type="search" id="search-input" name="q" value="%s"
-                       placeholder="Search all docs, or paste a paragraph...">
+                <textarea id="search-input" name="q" rows="6"
+                          placeholder="Search all docs, or paste a paragraph...">%s</textarea>
                 <div class="lang-radios">
             """.formatted(escHtml(text)));
         sb.append(RelatedDocsView.searchTypeRadios("tfidf", true));

@@ -74,10 +74,12 @@ final class RelatedDocsView {
         sb.append(pageOpen("Semantic search"));
         sb.append("""
             <form onsubmit="doSearch(); return false;"
-                  style="display:flex;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap;align-items:center;">
-              <input type="text" id="search-input" name="q" value="%s"
-                     placeholder="Search by meaning, or type keywords…"
-                     style="flex:1;min-width:200px;padding:.5rem .75rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;">
+                  style="display:flex;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap;align-items:flex-start;">
+              <textarea id="search-input" name="q" rows="6"
+                        placeholder="Search by meaning, or paste a paragraph…"
+                        style="flex:1;min-width:200px;padding:.5rem .75rem;border:1px solid #ccc;
+                               border-radius:6px;font-size:.9rem;resize:vertical;font-family:inherit;
+                               line-height:1.5;">%s</textarea>
               <button type="submit"
                       style="padding:.5rem 1rem;border:none;border-radius:6px;background:#2e8555;color:#fff;
                              font-size:.9rem;cursor:pointer;">Search</button>
@@ -148,6 +150,12 @@ final class RelatedDocsView {
                 window.open('/search?q=' + encodeURIComponent(text) + '&lang=' + encodeURIComponent(lang), '_blank');
               }
             }
+            // #search-input is now a <textarea> (so it can hold a pasted paragraph); plain Enter
+            // must keep inserting a newline, so Shift+Enter is the submit shortcut instead
+            // (mirrors the homepage widget).
+            document.getElementById('search-input').addEventListener('keydown', function(e) {
+              if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); doSearch(); }
+            });
             </script>
             """;
     }
