@@ -63,26 +63,93 @@ final class RelatedDocsView {
 
     /**
      * Renders the semantic-search results page (used by {@code /search-semantic}),
-     * including a query box that re-submits to the same endpoint.
+     * including the shared "one form, three search types" query box.
+     *
+     * @param supportsTfidf whether the TF-IDF search type is offered (the caller's server
+     *                      registers {@code /find-related}); {@link SearchServer} (single-project
+     *                      mode) does not, so it passes {@code false} to omit that radio
      */
-    static String searchResultsPage(String query, List<Map<String, String>> hits) {
+    static String searchResultsPage(String query, List<Map<String, String>> hits, boolean supportsTfidf) {
         var sb = new StringBuilder();
         sb.append(pageOpen("Semantic search"));
         sb.append("""
-            <form method="get" action="/search-semantic"
-                  style="display:flex;gap:.5rem;margin-bottom:1.5rem;">
-              <input type="text" name="q" value="%s" placeholder="Search by meaning…"
-                     style="flex:1;padding:.5rem .75rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;">
+            <form onsubmit="doSearch(); return false;"
+                  style="display:flex;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap;align-items:center;">
+              <input type="text" id="search-input" name="q" value="%s"
+                     placeholder="Search by meaning, or type keywords…"
+                     style="flex:1;min-width:200px;padding:.5rem .75rem;border:1px solid #ccc;border-radius:6px;font-size:.9rem;">
               <button type="submit"
                       style="padding:.5rem 1rem;border:none;border-radius:6px;background:#2e8555;color:#fff;
                              font-size:.9rem;cursor:pointer;">Search</button>
             </form>
+            <div style="margin-bottom:1.5rem;font-size:.85rem;color:#666;display:flex;gap:.9rem;align-items:center;">
             """.formatted(HttpUtils.escapeHtml(query == null ? "" : query)));
+        sb.append(searchTypeRadios("embedding", supportsTfidf));
+        sb.append("</div>\n");
         if (query != null && !query.isBlank()) {
             appendResults(sb, hits, "result");
         }
+        sb.append(searchWidgetScript());
         sb.append("</main>\n</body>\n</html>\n");
         return sb.toString();
+    }
+
+    /**
+     * Renders the {@code search-type} radio group (Keyword / TF-IDF / Embedding), pre-selecting
+     * {@code selected} and omitting the TF-IDF radio when {@code supportsTfidf} is {@code false}.
+     */
+    static String searchTypeRadios(String selected, boolean supportsTfidf) {
+        var sb = new StringBuilder();
+        sb.append("<label><input type=\"radio\" name=\"search-type\" value=\"fulltext\"")
+          .append("fulltext".equals(selected) ? " checked" : "").append(">Keyword</label>\n");
+        if (supportsTfidf) {
+            sb.append("<label><input type=\"radio\" name=\"search-type\" value=\"tfidf\"")
+              .append("tfidf".equals(selected) ? " checked" : "").append(">TF-IDF</label>\n");
+        }
+        sb.append("<label><input type=\"radio\" name=\"search-type\" value=\"embedding\"")
+          .append("embedding".equals(selected) ? " checked" : "").append(">Embedding</label>\n");
+        return sb.toString();
+    }
+
+    /**
+     * Shared dispatcher script for the "one form, three search types" widget (each search page
+     * provides a {@code #search-input} text field and a {@code search-type} radio group; a
+     * {@code lang} radio group is optional and only consulted for the {@code fulltext} type).
+     * Server endpoints:
+     * <pre>
+     *   fulltext  -&gt; GET  /search?q=&amp;lang=      (Lucene full-text)
+     *   tfidf     -&gt; POST /find-related (text)     (Lucene MoreLikeThis)
+     *   embedding -&gt; GET  /search-semantic?q=      (vector similarity)
+     * </pre>
+     */
+    static String searchWidgetScript() {
+        return """
+            <script>
+            function doSearch() {
+              const text = document.getElementById('search-input').value.trim();
+              if (!text) { return; }
+              const typeEl = document.querySelector('input[name="search-type"]:checked');
+              const type = typeEl ? typeEl.value : 'fulltext';
+              if (type === 'embedding') {
+                window.open('/search-semantic?q=' + encodeURIComponent(text), '_blank');
+              } else if (type === 'tfidf') {
+                const form = document.createElement('form');
+                form.method = 'POST'; form.action = '/find-related'; form.target = '_blank';
+                form.style.display = 'none';
+                const tInput = document.createElement('input');
+                tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
+                form.appendChild(tInput);
+                document.body.appendChild(form);
+                form.submit();
+                document.body.removeChild(form);
+              } else {
+                const langEl = document.querySelector('input[name="lang"]:checked');
+                const lang = langEl ? langEl.value : 'ja';
+                window.open('/search?q=' + encodeURIComponent(text) + '&lang=' + encodeURIComponent(lang), '_blank');
+              }
+            }
+            </script>
+            """;
     }
 
     /** Returns the page chrome (doctype, head, CSS, header, open main) with the given title. */

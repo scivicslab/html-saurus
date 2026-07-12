@@ -10,6 +10,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -91,6 +92,8 @@ public class SearchServer {
             server.createContext("/upload", this::handleUploadPage);
         }
         server.createContext("/search", this::handleSearch);
+        server.createContext("/api/related", this::handleRelated);
+        server.createContext("/api/find-related", this::handleFindRelated);
         server.createContext("/api/related-semantic", this::handleRelatedSemantic);
         server.createContext("/related-semantic", this::handleRelatedSemanticPage);
         server.createContext("/api/search-semantic", this::handleSearchSemantic);
@@ -171,6 +174,61 @@ public class SearchServer {
         }
     }
 
+    // ---- TF-IDF related-docs endpoints (API only; no standalone page) --------
+
+    /** GET /api/related?path=... — TF-IDF (MoreLikeThis) doc-to-doc neighbours as JSON. */
+    private void handleRelated(HttpExchange ex) throws IOException {
+        RelatedDocsView.writeJson(ex, tfidfRelated(HttpUtils.queryParam(ex, "path")));
+    }
+
+    /** POST /api/find-related — body is plain pasted text; TF-IDF (MoreLikeThis) matches as JSON. */
+    private void handleFindRelated(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            HttpUtils.respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        String text = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8).strip();
+        RelatedDocsView.writeJson(ex, tfidfRelatedText(text));
+    }
+
+    /** Documents similar to the one at {@code docPath}, via {@link LuceneSearcher#moreLikeThis}. */
+    private List<Map<String, String>> tfidfRelated(String docPath) {
+        if (docPath == null || docPath.isBlank()) return List.of();
+        try {
+            return toMaps(searcher.ask(s -> {
+                try { return s.moreLikeThis(docPath, 20); }
+                catch (Exception e) { throw new RuntimeException(e); }
+            }).join());
+        } catch (Exception e) {
+            System.err.println("related error: " + e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** Documents similar to pasted {@code text}, via {@link LuceneSearcher#moreLikeThisText}. */
+    private List<Map<String, String>> tfidfRelatedText(String text) {
+        if (text == null || text.isBlank()) return List.of();
+        try {
+            return toMaps(searcher.ask(s -> {
+                try { return s.moreLikeThisText(text, 20); }
+                catch (Exception e) { throw new RuntimeException(e); }
+            }).join());
+        } catch (Exception e) {
+            System.err.println("find-related error: " + e.getMessage());
+            return List.of();
+        }
+    }
+
+    /** Converts {@link LuceneSearcher.Hit} records to the {title,path,srcPath,summary} map shape. */
+    private static List<Map<String, String>> toMaps(List<LuceneSearcher.Hit> hits) {
+        List<Map<String, String>> out = new ArrayList<>(hits.size());
+        for (var hit : hits) {
+            out.add(Map.of("title", hit.title(), "path", hit.path(),
+                    "srcPath", hit.srcPath(), "summary", hit.summary()));
+        }
+        return out;
+    }
+
     // ---- Semantic related-docs endpoints ------------------------
 
     /** GET /api/related-semantic?path=... — precomputed embedding-based neighbours as JSON. */
@@ -186,16 +244,23 @@ public class SearchServer {
                         semanticRelated.getOrDefault(docPath, List.of())));
     }
 
-    /** GET /api/search-semantic?q=... — query-to-doc semantic search as JSON. */
+    /**
+     * GET /api/search-semantic?q=... or POST /api/search-semantic (body = pasted text) —
+     * query-to-doc semantic search as JSON. POST avoids the URL-length limit GET has when
+     * the query is a pasted paragraph rather than a few keywords.
+     */
     private void handleSearchSemantic(HttpExchange ex) throws IOException {
-        RelatedDocsView.writeJson(ex, semanticSearch(HttpUtils.queryParam(ex, "q")));
+        String q = "POST".equalsIgnoreCase(ex.getRequestMethod())
+                ? new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8).strip()
+                : HttpUtils.queryParam(ex, "q");
+        RelatedDocsView.writeJson(ex, semanticSearch(q));
     }
 
     /** GET /search-semantic?q=... — semantic search results page (with a query box). */
     private void handleSearchSemanticPage(HttpExchange ex) throws IOException {
         String q = HttpUtils.queryParam(ex, "q");
         HttpUtils.respond(ex, 200, "text/html; charset=UTF-8",
-                RelatedDocsView.searchResultsPage(q, semanticSearch(q)));
+                RelatedDocsView.searchResultsPage(q, semanticSearch(q), false));
     }
 
     /** Embeds the query and ranks all documents by cosine; empty if no index/query or the embed server is down. */

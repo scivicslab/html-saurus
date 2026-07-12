@@ -1197,20 +1197,26 @@ public class PortalServer {
             <body>
             <header>
               <a class="home" href="/">Documentation Portal</a>
-              <form action="/search" method="get">
-                <input type="search" name="q" value="%s" placeholder="Search all docs..." autofocus>
+              <form onsubmit="doSearch(); return false;">
+                <input type="search" id="search-input" name="q" value="%s"
+                       placeholder="Search all docs, or paste a paragraph..." autofocus>
                 <div class="lang-radios">
-                  <label><input type="radio" name="lang" value="ja" %s>日本語 (ja)</label>
-                  <label><input type="radio" name="lang" value="en" %s>English (en)</label>
+                  <label><input type="radio" name="lang" id="lang-ja" value="ja" %s>日本語 (ja)</label>
+                  <label><input type="radio" name="lang" id="lang-en" value="en" %s>English (en)</label>
+                </div>
+                <div class="lang-radios">
+            """.formatted(escHtml(q),
+                          escHtml(q),
+                          "ja".equals(finalLang) ? "checked" : "",
+                          "en".equals(finalLang) ? "checked" : ""));
+        sb.append(RelatedDocsView.searchTypeRadios("fulltext", true));
+        sb.append("""
                 </div>
                 <button type="submit">Search</button>
               </form>
             </header>
             <main>
-            """.formatted(escHtml(q),
-                          escHtml(q),
-                          "ja".equals(finalLang) ? "checked" : "",
-                          "en".equals(finalLang) ? "checked" : ""));
+            """);
 
         if (q.isBlank()) {
             sb.append("<p class=\"no-results\">Please enter a search query.</p>\n");
@@ -1251,7 +1257,9 @@ public class PortalServer {
                 }
             }
         }
-        sb.append("</main>\n</body>\n</html>\n");
+        sb.append("</main>\n");
+        sb.append(RelatedDocsView.searchWidgetScript());
+        sb.append("</body>\n</html>\n");
         respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
     }
 
@@ -1491,7 +1499,7 @@ public class PortalServer {
     /** GET /search-semantic?q=... — semantic search results page (with a query box). */
     private void handleSearchSemanticPage(HttpExchange ex) throws IOException {
         String q = queryParam(ex, "q");
-        respond(ex, 200, "text/html; charset=UTF-8", RelatedDocsView.searchResultsPage(q, semanticSearch(q)));
+        respond(ex, 200, "text/html; charset=UTF-8", RelatedDocsView.searchResultsPage(q, semanticSearch(q), true));
     }
 
     /** Embeds the query and ranks all documents by cosine; empty if no index/query or the embed server is down. */
@@ -1660,6 +1668,18 @@ public class PortalServer {
                          display: flex; align-items: center; gap: 1.5rem; }
                 header a.home { color: #fff; text-decoration: none; font-weight: 700; font-size: 1.1rem; }
                 header a.home:hover { color: #aaa; }
+                form { display: flex; gap: 0.5rem; flex: 1; max-width: 700px; align-items: center; flex-wrap: wrap; }
+                form input[type=search] { flex: 1; padding: 0.4rem 0.8rem; border-radius: 4px;
+                  border: 1px solid #666; background: rgba(255,255,255,0.12); color: #fff;
+                  font-size: 0.9rem; outline: none; min-width: 160px; }
+                form input[type=search]::placeholder { color: #aaa; }
+                form input[type=search]:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
+                form button { padding: 0.4rem 1rem; border-radius: 4px; border: none;
+                  background: #2e8555; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+                form button:hover { background: #267a4e; }
+                .lang-radios { display: flex; gap: 0.75rem; align-items: center; font-size: 0.82rem; color: #ccc; }
+                .lang-radios label { cursor: pointer; }
+                .lang-radios input[type=radio] { margin-right: 0.2rem; }
                 main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
                 .query-box { background: #fff; border: 1px solid #e3e4e5; border-radius: 8px;
                              padding: 1rem 1.25rem; margin-bottom: 1.5rem;
@@ -1684,6 +1704,16 @@ public class PortalServer {
             <body>
             <header>
               <a class="home" href="/">Documentation Portal</a>
+              <form onsubmit="doSearch(); return false;">
+                <input type="search" id="search-input" name="q" value="%s"
+                       placeholder="Search all docs, or paste a paragraph...">
+                <div class="lang-radios">
+            """.formatted(escHtml(text)));
+        sb.append(RelatedDocsView.searchTypeRadios("tfidf", true));
+        sb.append("""
+                </div>
+                <button type="submit">Search</button>
+              </form>
             </header>
             <main>
             """);
@@ -1713,7 +1743,9 @@ public class PortalServer {
             }
         }
 
-        sb.append("</main>\n</body>\n</html>\n");
+        sb.append("</main>\n");
+        sb.append(RelatedDocsView.searchWidgetScript());
+        sb.append("</body>\n</html>\n");
         respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
     }
 
