@@ -92,15 +92,20 @@ public class SearchServer {
             server.createContext("/upload", this::handleUploadPage);
         }
         server.createContext("/search", this::handleSearch);
-        server.createContext("/api/related", this::handleRelated);
-        server.createContext("/api/find-related", this::handleFindRelated);
-        server.createContext("/api/related-semantic", this::handleRelatedSemantic);
-        server.createContext("/related-semantic", this::handleRelatedSemanticPage);
-        server.createContext("/api/search-semantic", this::handleSearchSemantic);
-        server.createContext("/search-semantic", this::handleSearchSemanticPage);
-        // MCP endpoint for LLM tool access
-        var mcpHandler = new McpHandler(docsDir, searcher, rebuild, localeSearchers);
-        server.createContext("/mcp", mcpHandler::handle);
+        if (!production) {
+            server.createContext("/api/related", this::handleRelated);
+            server.createContext("/api/find-related", this::handleFindRelated);
+            server.createContext("/api/related-semantic", this::handleRelatedSemantic);
+            server.createContext("/related-semantic", this::handleRelatedSemanticPage);
+            server.createContext("/api/search-semantic", this::handleSearchSemantic);
+            server.createContext("/search-semantic", this::handleSearchSemanticPage);
+        }
+        if (!production) {
+            // MCP endpoint for LLM tool access (development mode only — exposes unauthenticated
+            // file read/write/rebuild tools that must not be reachable from a production deployment)
+            var mcpHandler = new McpHandler(docsDir, searcher, rebuild, localeSearchers);
+            server.createContext("/mcp", mcpHandler::handle);
+        }
         server.createContext("/", this::handleStatic);
         server.setExecutor(null);
         server.start();
