@@ -198,7 +198,13 @@ public class Main {
             reindexAll(projectDir, production);
             ensureSemanticVectors(List.of(projectDir));
             SemanticIndex semanticIndex = SemanticIndex.load(List.of(projectDir), SEMANTIC_TOP_K);
-            Runnable rebuild = () -> { build(docsDir, outDir, false); reindexAll(projectDir, false); };
+            // "Rebuild" regenerates everything: static HTML, the full-text index (all locales),
+            // and the embedding vectors — matching the portal's "All" action.
+            Runnable rebuild = () -> {
+                build(docsDir, outDir, false);
+                reindexAll(projectDir, false);
+                ensureSemanticVectors(List.of(projectDir));
+            };
             new SearchServer(outDir, indexDir, port, rebuild, production, docsDir, semanticIndex).start();
         }
     }

@@ -651,31 +651,14 @@ public class PortalServer {
     // ---- Build API endpoint -------------------------------------
 
     /**
-     * Handles {@code POST /api/build/<project>} requests. Triggers a rebuild and reindex
-     * for the named project and returns the elapsed time as JSON.
+     * Handles {@code POST /api/build/<project>} requests, used by the per-page "Rebuild" button.
+     * Runs the full rebuild for the named project — static HTML, the Lucene full-text index across
+     * all locales, and the embedding vectors — so a single "Rebuild" click regenerates everything
+     * (the same work as the portal's "All" action). Delegates to {@link #handleBuildStage} with the
+     * {@code "all"} stage.
      */
     private void handleBuild(HttpExchange ex, String name) throws IOException {
-        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
-            respond(ex, 405, "text/plain", "Method Not Allowed");
-            return;
-        }
-        Project proj = projectMap.get(name);
-        if (proj == null) {
-            respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
-            return;
-        }
-        long start = System.currentTimeMillis();
-        System.out.println("Build requested: " + name);
-        try {
-            Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
-            Main.reindex(proj.projectDir().resolve("docs"), proj.indexDir());
-            long elapsed = System.currentTimeMillis() - start;
-            respond(ex, 200, "application/json",
-                "{\"status\":\"ok\",\"project\":\"" + name + "\",\"ms\":" + elapsed + "}");
-        } catch (Exception e) {
-            System.err.println("Build error for " + name + ": " + e.getMessage());
-            respond(ex, 500, "application/json", "{\"error\":\"Build failed\"}");
-        }
+        handleBuildStage(ex, name, "all");
     }
 
     /**

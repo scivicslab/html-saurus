@@ -165,7 +165,7 @@ class PageRenderer {
         }
         sb.append("  </nav>\n");
         if (!production) {
-            sb.append("  <button id=\"rebuild-btn\" title=\"Rebuild this project\">&#x21BB; Rebuild</button>\n");
+            sb.append("  <button id=\"rebuild-btn\" title=\"Rebuild this project: HTML, search index, and embedding\">&#x21BB; Rebuild</button>\n");
             sb.append("  <select id=\"theme-sel\">\n");
             sb.append("    <option value=\"default\">Default</option>\n");
             sb.append("    <option value=\"warm\">Warm</option>\n");
