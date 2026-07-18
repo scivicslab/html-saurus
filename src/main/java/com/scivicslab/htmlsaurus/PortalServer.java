@@ -189,6 +189,7 @@ public class PortalServer {
         //   POST /api/build-html/<project>      — static HTML only
         //   POST /api/build-index/<project>     — Lucene full-text index only
         //   POST /api/build-embedding/<project> — embedding (RAG) vectors only
+        //   POST /api/build-all/<project>       — HTML, index, and embedding in sequence
         if (!production && path.startsWith("/api/build-html/")) {
             handleBuildStage(ex, path.substring("/api/build-html/".length()), "html");
             return;
@@ -199,6 +200,10 @@ public class PortalServer {
         }
         if (!production && path.startsWith("/api/build-embedding/")) {
             handleBuildStage(ex, path.substring("/api/build-embedding/".length()), "embedding");
+            return;
+        }
+        if (!production && path.startsWith("/api/build-all/")) {
+            handleBuildStage(ex, path.substring("/api/build-all/".length()), "all");
             return;
         }
 
@@ -682,11 +687,13 @@ public class PortalServer {
      *   <li>{@code index} — Lucene full-text index across all locales ({@link Main#reindexAll})</li>
      *   <li>{@code embedding} — embedding (RAG) vectors ({@link Main#ensureSemanticVectors}); if the
      *       embedding server is unreachable it logs a warning and skips (still reports ok)</li>
+     *   <li>{@code all} — the {@code html}, {@code index}, and {@code embedding} stages in that order,
+     *       so a single request rebuilds everything for the project</li>
      * </ul>
      *
      * @param ex    the HTTP exchange
      * @param name  the project name (path segment after the stage prefix)
-     * @param stage one of {@code "html"}, {@code "index"}, {@code "embedding"}
+     * @param stage one of {@code "html"}, {@code "index"}, {@code "embedding"}, {@code "all"}
      */
     private void handleBuildStage(HttpExchange ex, String name, String stage) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -705,6 +712,11 @@ public class PortalServer {
                 case "html" -> Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
                 case "index" -> Main.reindexAll(proj.projectDir(), false);
                 case "embedding" -> Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
+                case "all" -> {
+                    Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
+                    Main.reindexAll(proj.projectDir(), false);
+                    Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
+                }
                 default -> {
                     respond(ex, 400, "application/json", "{\"error\":\"Unknown stage\"}");
                     return;
@@ -952,6 +964,7 @@ public class PortalServer {
                 String nm = escHtml(p.name());
                 sb.append("      <div class=\"project-actions\">\n");
                 sb.append("        <select class=\"action-select\" id=\"action-").append(nm).append("\" title=\"Choose an action, then Run\">\n");
+                sb.append("          <option value=\"all\">All (HTML + Index + Embedding)</option>\n");
                 sb.append("          <option value=\"html\">HTML</option>\n");
                 sb.append("          <option value=\"index\">Index</option>\n");
                 sb.append("          <option value=\"embedding\">Embedding</option>\n");
@@ -980,6 +993,22 @@ public class PortalServer {
                 localStorage.setItem('portal-theme', this.value);
               });
             })();
+            // Re-read docusaurus.config.ts live and re-render one project row's navbar labels in place.
+            // Returns the number of labels rendered, or -1 when the server reports an error.
+            async function renderLabels(name) {
+              const r = await fetch('/api/navbar-labels/' + encodeURIComponent(name));
+              const j = await r.json();
+              if (j.status !== 'ok') return -1;
+              const box = document.getElementById('labels-' + name);
+              box.replaceChildren();
+              for (const lb of j.labels) {
+                const span = document.createElement('span');
+                span.className = 'project-label';
+                span.textContent = lb;
+                box.appendChild(span);
+              }
+              return j.labels.length;
+            }
             async function doAction(name, btn) {
               const action = document.getElementById('action-' + name).value;
               const status = document.getElementById('status-' + name);
@@ -990,28 +1019,21 @@ public class PortalServer {
               status.style.color = 'var(--text-secondary)';
               try {
                 if (action === 'update-list') {
-                  // Re-read docusaurus.config.ts live and re-render this row's navbar labels in place.
-                  const r = await fetch('/api/navbar-labels/' + encodeURIComponent(name));
-                  const j = await r.json();
-                  if (j.status === 'ok') {
-                    const box = document.getElementById('labels-' + name);
-                    box.replaceChildren();
-                    for (const lb of j.labels) {
-                      const span = document.createElement('span');
-                      span.className = 'project-label';
-                      span.textContent = lb;
-                      box.appendChild(span);
-                    }
-                    status.textContent = 'list updated (' + j.labels.length + ')';
+                  const n = await renderLabels(name);
+                  if (n >= 0) {
+                    status.textContent = 'list updated (' + n + ')';
                     status.style.color = 'var(--accent-green)';
                   } else {
-                    status.textContent = 'Error: ' + (j.error || 'unknown');
+                    status.textContent = 'Error: unknown';
                     status.style.color = '#e06060';
                   }
                 } else {
                   const r = await fetch('/api/build-' + action + '/' + encodeURIComponent(name), {method: 'POST'});
                   const j = await r.json();
                   if (j.status === 'ok') {
+                    // 'all' rebuilds HTML/index/embedding; also refresh the navbar labels so the row
+                    // reflects every action in the dropdown at once.
+                    if (action === 'all') { await renderLabels(name); }
                     status.textContent = action + ' done (' + j.ms + 'ms)';
                     status.style.color = 'var(--accent-green)';
                   } else {
