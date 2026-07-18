@@ -964,7 +964,7 @@ public class PortalServer {
                 String nm = escHtml(p.name());
                 sb.append("      <div class=\"project-actions\">\n");
                 sb.append("        <select class=\"action-select\" id=\"action-").append(nm).append("\" title=\"Choose an action, then Run\">\n");
-                sb.append("          <option value=\"all\">All (HTML + Index + Embedding)</option>\n");
+                sb.append("          <option value=\"all\">All</option>\n");
                 sb.append("          <option value=\"html\">HTML</option>\n");
                 sb.append("          <option value=\"index\">Index</option>\n");
                 sb.append("          <option value=\"embedding\">Embedding</option>\n");
