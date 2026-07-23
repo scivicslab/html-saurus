@@ -857,6 +857,20 @@ public class PortalServer {
                   #pane-splitter { display: none; }
                   .doc-pane { min-height: 55vh; }
                 }
+                /* Recently-viewed dropdown in the header. */
+                .recent-dd { position: relative; }
+                .recent-menu { display: none; position: absolute; top: calc(100%% + 4px); left: 0;
+                               z-index: 500; background: var(--bg-secondary);
+                               border: 1px solid var(--border-color); border-radius: 6px;
+                               min-width: 220px; max-width: 360px; max-height: 60vh; overflow-y: auto;
+                               box-shadow: 0 6px 18px rgba(0,0,0,0.3); padding: 4px; }
+                .recent-dd.open .recent-menu { display: block; }
+                .recent-menu a { display: block; padding: 5px 10px; border-radius: 4px;
+                                 font-size: 0.82rem; color: var(--text-primary); text-decoration: none;
+                                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                .recent-menu a:hover { background: var(--bg-tertiary); color: var(--accent-green); }
+                .recent-menu .recent-empty { padding: 6px 10px; color: var(--text-secondary);
+                                             font-size: 0.8rem; }
               </style>
             </head>
             <body>
@@ -865,6 +879,10 @@ public class PortalServer {
               <div>
                 <h1>Documentation Portal</h1>
                 <p>%d project(s)</p>
+              </div>
+              <div class="recent-dd" id="recent-dd">
+                <button class="btn" id="recent-btn" type="button" title="Recently viewed pages">Recent &#9662;</button>
+                <div class="recent-menu" id="recent-menu"></div>
               </div>
               <div class="header-right">
             """.formatted(projects.size()));
@@ -1174,14 +1192,33 @@ public class PortalServer {
                 showInFrame(location.hash ? location.hash.slice(1) : '');
               }
               window.addEventListener('hashchange', applyHash);
+              // Recently-viewed doc pages, newest first, capped at 20 (URL + page title).
+              var RECENT_KEY = 'portal-recent';
+              function readRecent() {
+                try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch (e) { return []; }
+              }
+              function recordRecent(url, title) {
+                if (!url) return;
+                var seg = url.split('?')[0].split('/')[1] || '';
+                // Track project doc pages only, not the search / related / keyword-map / api routes.
+                if (seg === 'search' || seg === 'find-related' || seg === 'related' ||
+                    seg === 'related-semantic' || seg === 'search-semantic' ||
+                    seg === 'keyword-map' || seg === 'api') return;
+                var list = readRecent().filter(function(it) { return it.url !== url; });
+                list.unshift({ url: url, title: (title || url) });
+                if (list.length > 20) list = list.slice(0, 20);
+                try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch (e) {}
+              }
               // Mirror navigation that happens inside the iframe into the hash (without adding a
-              // history entry), so the hash always points at the page currently shown.
+              // history entry) and record it in the recent list.
               if (frame) {
                 frame.addEventListener('load', function() {
                   var loc = frameLoc();
-                  if (loc && ('#' + loc) !== location.hash) {
-                    history.replaceState(null, '', '#' + loc);
-                  }
+                  if (!loc) return;
+                  if (('#' + loc) !== location.hash) history.replaceState(null, '', '#' + loc);
+                  var title = '';
+                  try { title = frame.contentWindow.document.title || ''; } catch (e) {}
+                  recordRecent(loc, title);
                 });
               }
               // loadInFrame records the selection in the hash; applyHash() does the actual load.
@@ -1227,6 +1264,44 @@ public class PortalServer {
                       e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                   e.preventDefault();
                   loadInFrame(a.getAttribute('href'));
+                });
+              }
+              // Recently-viewed dropdown in the header.
+              var recentBtn = document.getElementById('recent-btn');
+              var recentDd = document.getElementById('recent-dd');
+              var recentMenu = document.getElementById('recent-menu');
+              if (recentBtn && recentDd && recentMenu) {
+                function renderRecentMenu() {
+                  var list = readRecent();
+                  recentMenu.replaceChildren();
+                  if (!list.length) {
+                    var d = document.createElement('div');
+                    d.className = 'recent-empty';
+                    d.textContent = 'No recent pages';
+                    recentMenu.appendChild(d);
+                    return;
+                  }
+                  list.forEach(function(it) {
+                    var a = document.createElement('a');
+                    a.href = it.url;
+                    a.textContent = it.title;
+                    a.title = it.title;
+                    a.addEventListener('click', function(e) {
+                      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                      e.preventDefault();
+                      loadInFrame(it.url);
+                      recentDd.classList.remove('open');
+                    });
+                    recentMenu.appendChild(a);
+                  });
+                }
+                recentBtn.addEventListener('click', function(e) {
+                  e.stopPropagation();
+                  if (!recentDd.classList.contains('open')) renderRecentMenu();
+                  recentDd.classList.toggle('open');
+                });
+                document.addEventListener('click', function() {
+                  recentDd.classList.remove('open');
                 });
               }
               // On load (including a hard reload), restore the selection from the URL hash.
