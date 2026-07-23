@@ -1152,9 +1152,20 @@ public class PortalServer {
               }
               var frame = document.getElementById('doc-frame');
               var placeholder = document.getElementById('doc-placeholder');
+              // The right-pane selection lives in the URL hash (e.g. #/doc_x/), so it survives a
+              // hard reload, is bookmarkable, and works with the browser's back/forward buttons.
+              function showInFrame(url) {
+                if (placeholder) placeholder.style.display = url ? 'none' : '';
+                if (frame) frame.setAttribute('src', url || 'about:blank');
+              }
+              function applyHash() {
+                showInFrame(location.hash ? location.hash.slice(1) : '');
+              }
+              window.addEventListener('hashchange', applyHash);
+              // loadInFrame now just records the selection in the hash; applyHash() loads it.
               window.loadInFrame = function(url) {
-                if (placeholder) placeholder.style.display = 'none';
-                if (frame) frame.setAttribute('src', url);
+                if (location.hash.slice(1) === url) applyHash();
+                else location.hash = url;
               };
               var sidebar = document.getElementById('portal-sidebar');
               // Restore a previously dragged sidebar width.
@@ -1196,6 +1207,8 @@ public class PortalServer {
                   loadInFrame(a.getAttribute('href'));
                 });
               }
+              // On load (including a hard reload), restore the selection from the URL hash.
+              applyHash();
             })();
             </script>
             """);
