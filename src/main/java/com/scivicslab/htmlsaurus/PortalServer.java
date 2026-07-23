@@ -2057,6 +2057,9 @@ public class PortalServer {
             {
                 String html = new String(body, StandardCharsets.UTF_8);
                 String docPath = "/" + proj.name() + rest;
+                // Make the doc follow the portal theme even if its static HTML was built before the
+                // theme mechanism existed (no rebuild needed). Skipped for pages already carrying it.
+                html = HttpUtils.injectDocTheme(html);
                 html = injectRelatedDocs(html, docPath);
                 body = html.getBytes(StandardCharsets.UTF_8);
             }

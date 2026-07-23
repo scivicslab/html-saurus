@@ -96,11 +96,12 @@ class PageRenderer {
             """.formatted(title));
         sb.append(PAGE_CSS);
         sb.append("              </style>\n");
-        // Dev only: emit the shared 10-theme palette so the portal's theme selection drives this
-        // page inside the right-pane iframe. Omitted in production, where page.css falls back to
-        // its original light defaults and no theme control exists.
+        // Dev only: bake in the shared palette and the --c-* remap so the portal's theme drives
+        // this page. The data-hs-theme marker makes the portal's serve-time injection skip pages
+        // that already carry it. Omitted in production, where page.css keeps its original colours.
         if (!production) {
-            sb.append("<style>\n").append(HttpUtils.themeVariables()).append("</style>\n");
+            sb.append("<style data-hs-theme>\n").append(HttpUtils.themeVariables())
+              .append(HttpUtils.docThemeMapping()).append("</style>\n");
         }
         if (customCss != null) {
             sb.append("<style id=\"html-saurus-custom\">\n")

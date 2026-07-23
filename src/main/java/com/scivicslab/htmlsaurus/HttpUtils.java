@@ -130,6 +130,56 @@ final class HttpUtils {
             """;
     }
 
+    /**
+     * Remaps the doc stylesheet's own {@code --c-*} colour variables onto the shared portal
+     * palette ({@link #themeVariables()}), each with the original light default as a fallback.
+     * Placed after page.css in the document so it overrides the baked-in defaults; the top
+     * navbar variables are intentionally left alone (page.css keeps them a fixed dark bar).
+     * Single source of truth for the mapping, used both when building dev pages and when
+     * injecting the theme into already-built pages at serve time.
+     */
+    static String docThemeMapping() {
+        return """
+            :root {
+              --c-text: var(--text-primary, #3d4451);
+              --c-bg: var(--bg-primary, #fff);
+              --c-sidebar-bg: var(--bg-secondary, #f6f7f8);
+              --c-border: var(--border-color, #e3e4e5);
+              --c-heading: var(--text-primary, #1a202c);
+              --c-hover: var(--bg-tertiary, #e3e4e5);
+              --c-act-bg: var(--bg-tertiary, #e8f4fd);
+              --c-act-text: var(--accent-green, #1877f2);
+              --c-cat-label: var(--text-secondary, #444);
+              --c-arrow: var(--text-secondary, #888);
+              --c-pre-bg: var(--bg-secondary, #f6f7f8);
+              --c-code-bg: var(--bg-tertiary, #f0f0f0);
+              --c-th-bg: var(--bg-secondary, #f6f7f8);
+              --c-bq-border: var(--border-color, #ddd);
+              --c-bq-text: var(--text-secondary, #555);
+              --c-h2-border: var(--border-color, #e3e4e5);
+            }
+            """;
+    }
+
+    /** The full theme block injected into portal-served doc pages: the shared palette, the
+     *  {@code --c-*} remap onto it, and a script that applies the saved {@code portal-theme}.
+     *  Carries the {@code data-hs-theme} marker so {@link #injectDocTheme(String)} is idempotent. */
+    static String docThemeInjection() {
+        return "<style data-hs-theme>\n" + themeVariables() + docThemeMapping() + "</style>\n"
+            + "<script>(function(){var t=localStorage.getItem('portal-theme');"
+            + "if(t)document.documentElement.setAttribute('data-theme',t);})();</script>\n";
+    }
+
+    /** Inserts {@link #docThemeInjection()} before {@code </head>} so a portal-served doc page
+     *  follows the portal theme without rebuilding its static HTML. Idempotent: pages that already
+     *  carry the marker (freshly built dev pages) are returned unchanged. */
+    static String injectDocTheme(String html) {
+        if (html == null || html.contains("data-hs-theme")) return html;
+        int i = html.indexOf("</head>");
+        return i >= 0 ? html.substring(0, i) + docThemeInjection() + html.substring(i)
+                      : docThemeInjection() + html;
+    }
+
     /** Maps a file path's extension to the corresponding MIME type. */
     static String contentType(String path) {
         if (path.endsWith(".html")) return "text/html; charset=UTF-8";

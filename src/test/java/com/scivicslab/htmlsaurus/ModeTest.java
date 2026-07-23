@@ -75,6 +75,17 @@ class ModeTest {
         return client.send(request, HttpResponse.BodyHandlers.ofString()).body();
     }
 
+    @Test
+    @DisplayName("injectDocTheme adds the theme before </head> and is idempotent")
+    void injectDocTheme_insertsBeforeHead_idempotent() {
+        String page = "<html><head><title>x</title></head><body>y</body></html>";
+        String out = HttpUtils.injectDocTheme(page);
+        assertTrue(out.contains("data-hs-theme"), "must inject the theme block");
+        assertTrue(out.indexOf("data-hs-theme") < out.indexOf("</head>"),
+                "theme must be injected before </head> so it overrides the doc's page.css");
+        assertEquals(out, HttpUtils.injectDocTheme(out), "must be idempotent");
+    }
+
     // ---- Mode 1: Build-only ----------------------------------------
 
     @Nested

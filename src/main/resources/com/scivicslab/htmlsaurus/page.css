@@ -1,27 +1,41 @@
-/* ---- Themes ----
-   Content colours derive from the shared portal palette (HttpUtils.themeVariables, injected
-   into the doc <head> in dev mode only). Each fallback is the original light default, so when
-   the palette is absent (production, where no theme control exists) the doc renders exactly as
-   before. The top navbar stays a fixed dark bar (its text is hard-coded light), so only the
-   content region follows the theme. */
+/* ---- Themes (CSS variables) ----
+   These are the base (production / standalone) doc colours. In the portal (dev), the shared
+   palette and a :root remap onto it are injected at serve time (HttpUtils.injectDocTheme), so
+   the doc follows the portal theme without rebuilding this file into each page. */
 :root {
-  --c-text: var(--text-primary, #3d4451);
-  --c-bg: var(--bg-primary, #fff);
-  --c-sidebar-bg: var(--bg-secondary, #f6f7f8);
-  --c-border: var(--border-color, #e3e4e5);
-  --c-heading: var(--text-primary, #1a202c);
-  --c-hover: var(--bg-tertiary, #e3e4e5);
-  --c-nav-bg: #1c1e21; --c-nav-border: #333; --c-nav-accent: #2e8555;
-  --c-act-bg: var(--bg-tertiary, #e8f4fd);
-  --c-act-text: var(--accent-green, #1877f2);
-  --c-cat-label: var(--text-secondary, #444);
-  --c-arrow: var(--text-secondary, #888);
-  --c-pre-bg: var(--bg-secondary, #f6f7f8);
-  --c-code-bg: var(--bg-tertiary, #f0f0f0);
-  --c-th-bg: var(--bg-secondary, #f6f7f8);
-  --c-bq-border: var(--border-color, #ddd);
-  --c-bq-text: var(--text-secondary, #555);
-  --c-h2-border: var(--border-color, #e3e4e5);
+  --c-text:#3d4451; --c-bg:#fff; --c-sidebar-bg:#f6f7f8; --c-border:#e3e4e5;
+  --c-heading:#1a202c; --c-hover:#e3e4e5; --c-nav-bg:#1c1e21; --c-nav-border:#333;
+  --c-nav-accent:#2e8555; --c-act-bg:#e8f4fd; --c-act-text:#1877f2;
+  --c-cat-label:#444; --c-arrow:#888; --c-pre-bg:#f6f7f8; --c-code-bg:#f0f0f0;
+  --c-th-bg:#f6f7f8; --c-bq-border:#ddd; --c-bq-text:#555; --c-h2-border:#e3e4e5;
+}
+[data-theme="warm"] {
+  --c-text:#2d1f00; --c-bg:#fdf6e3; --c-sidebar-bg:#f5ead0; --c-border:#d9c89a;
+  --c-hover:#ecddb8; --c-nav-bg:#4a3820; --c-nav-border:#6b5030; --c-nav-accent:#c8860a;
+  --c-act-bg:#fef3d0; --c-act-text:#b07a0a; --c-cat-label:#5c4010; --c-arrow:#a08050;
+  --c-pre-bg:#f5ead0; --c-code-bg:#ede4c8; --c-th-bg:#f0e5c8;
+  --c-bq-border:#c8a870; --c-bq-text:#6b5030; --c-h2-border:#ddd0a8;
+}
+[data-theme="blue"] {
+  --c-text:#1a2540; --c-bg:#f0f4ff; --c-sidebar-bg:#e8edf8; --c-border:#c5d0e8;
+  --c-hover:#d8e2f5; --c-nav-bg:#1a3a6b; --c-nav-border:#2a4a7b; --c-nav-accent:#4a9fe8;
+  --c-act-bg:#ddeeff; --c-act-text:#1a6fd4; --c-cat-label:#2a3a60; --c-arrow:#6080b0;
+  --c-pre-bg:#e8edf8; --c-code-bg:#dde4f5; --c-th-bg:#e2e8f5;
+  --c-bq-border:#90aad8; --c-bq-text:#3a5080; --c-h2-border:#c8d5ee;
+}
+[data-theme="green"] {
+  --c-text:#1a3020; --c-bg:#f0f8f0; --c-sidebar-bg:#e4f0e4; --c-border:#b8d8b8;
+  --c-hover:#d0e8d0; --c-nav-bg:#1a4a2a; --c-nav-border:#2a5a3a; --c-nav-accent:#40c060;
+  --c-act-bg:#d5f0d5; --c-act-text:#1a8040; --c-cat-label:#2a4a30; --c-arrow:#508050;
+  --c-pre-bg:#e4f0e4; --c-code-bg:#d8ecd8; --c-th-bg:#deeede;
+  --c-bq-border:#80c080; --c-bq-text:#3a5a3a; --c-h2-border:#c0dcc0;
+}
+[data-theme="red"] {
+  --c-text:#3a1010; --c-bg:#fff5f5; --c-sidebar-bg:#fce8e8; --c-border:#e8c0c0;
+  --c-hover:#f5d8d8; --c-nav-bg:#5a1a1a; --c-nav-border:#7a2a2a; --c-nav-accent:#e04040;
+  --c-act-bg:#fde0e0; --c-act-text:#c02020; --c-cat-label:#5a2020; --c-arrow:#a06060;
+  --c-pre-bg:#fce8e8; --c-code-bg:#f8dede; --c-th-bg:#faeaea;
+  --c-bq-border:#d09090; --c-bq-text:#703030; --c-h2-border:#e8c8c8;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI',
