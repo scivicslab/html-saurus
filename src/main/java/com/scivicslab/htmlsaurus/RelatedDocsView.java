@@ -163,11 +163,13 @@ final class RelatedDocsView {
               if (!text) { if (status) { status.textContent = 'Please enter some text.'; } return; }
               const typeEl = document.querySelector('input[name="search-type"]:checked');
               const type = typeEl ? typeEl.value : 'fulltext';
+              // Navigate the current frame in place. On the portal this frame is the right-pane
+              // iframe, so results stay in the same tab; in single-project mode it replaces the page.
               if (type === 'embedding') {
-                window.open('/search-semantic?q=' + encodeURIComponent(text), '_blank');
+                window.location.assign('/search-semantic?q=' + encodeURIComponent(text));
               } else if (type === 'tfidf') {
                 const form = document.createElement('form');
-                form.method = 'POST'; form.action = '/find-related'; form.target = '_blank';
+                form.method = 'POST'; form.action = '/find-related';
                 form.style.display = 'none';
                 const tInput = document.createElement('input');
                 tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
@@ -178,9 +180,9 @@ final class RelatedDocsView {
               } else {
                 const langEl = document.querySelector('input[name="lang"]:checked');
                 const lang = langEl ? langEl.value : 'ja';
-                window.open('/search?q=' + encodeURIComponent(text) + '&lang=' + encodeURIComponent(lang), '_blank');
+                window.location.assign('/search?q=' + encodeURIComponent(text) + '&lang=' + encodeURIComponent(lang));
               }
-              if (status) { status.textContent = 'Opened in new tab.'; status.style.color = '#2e8555'; }
+              if (status) { status.textContent = 'Loading results...'; status.style.color = '#2e8555'; }
             }
             // #search-input is now a <textarea> (so it can hold a pasted paragraph); plain Enter
             // must keep inserting a newline, so Shift+Enter is the submit shortcut instead
@@ -230,7 +232,7 @@ final class RelatedDocsView {
             </head>
             <body>
             <header>
-              <a class="home" href="/">Documentation Portal</a>
+              <a class="home" href="/" target="_top">Documentation Portal</a>
             </header>
             <main>
             """.formatted(HttpUtils.escapeHtml(title));

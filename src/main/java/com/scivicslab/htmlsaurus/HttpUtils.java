@@ -18,7 +18,7 @@ final class HttpUtils {
         "img-src 'self' data:; " +
         "font-src 'self' https://cdn.jsdelivr.net; " +
         "connect-src 'self'; " +
-        "frame-ancestors 'none';";
+        "frame-ancestors 'self';";
 
     private HttpUtils() {}
 
@@ -27,7 +27,7 @@ final class HttpUtils {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", ct);
         ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
+        ex.getResponseHeaders().set("X-Frame-Options", "SAMEORIGIN");
         if (ct.startsWith("text/html")) {
             ex.getResponseHeaders().set("Content-Security-Policy", CSP);
         }
@@ -39,7 +39,7 @@ final class HttpUtils {
     static void respond(HttpExchange ex, int code, String ct, byte[] bytes) throws IOException {
         ex.getResponseHeaders().set("Content-Type", ct);
         ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
+        ex.getResponseHeaders().set("X-Frame-Options", "SAMEORIGIN");
         if (ct.startsWith("text/html")) {
             ex.getResponseHeaders().set("Content-Security-Policy", CSP);
         }

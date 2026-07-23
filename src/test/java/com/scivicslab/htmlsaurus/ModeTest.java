@@ -320,19 +320,51 @@ class ModeTest {
         }
 
         @Test
-        @DisplayName("project name link opens in new tab (target=_blank)")
-        void portalPage_projectLink_opensInNewTab() throws Exception {
+        @DisplayName("project name link loads into the right-pane iframe (no new tab)")
+        void portalPage_projectLink_loadsInRightPane() throws Exception {
             Path proj = createProject("myproj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
             PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null);
             HttpServer http = ps.start();
             try {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
-                // Link must have target="_blank" rel="noopener noreferrer"
-                assertTrue(html.contains("target=\"_blank\""),
-                        "Project name link must open in a new tab");
-                assertTrue(html.contains("rel=\"noopener noreferrer\""),
-                        "Project name link must include rel=noopener noreferrer");
+                // The link is a real anchor (so right-click / Ctrl-click can still open a new tab),
+                // tagged project-link so the portal script intercepts a plain left-click and loads
+                // the project into the right-pane iframe instead of opening a new browser tab.
+                assertTrue(html.contains("class=\"project-link\" href=\"/myproj/\""),
+                        "Project name link must be a project-link anchor to /myproj/");
+                assertFalse(html.contains("target=\"_blank\""),
+                        "Portal page must not open projects in a new tab");
+                assertTrue(html.contains("id=\"doc-frame\""),
+                        "Portal must contain the right-pane iframe");
+            } finally {
+                http.stop(0);
+            }
+        }
+
+        @Test
+        @DisplayName("served pages allow same-origin framing (enables the right-pane iframe)")
+        void portalPage_servedPages_allowSameOriginFraming() throws Exception {
+            Path proj = createProject("myproj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null);
+            HttpServer http = ps.start();
+            try {
+                int port = http.getAddress().getPort();
+                var client = HttpClient.newHttpClient();
+                var request = HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + port + "/myproj/")).GET().build();
+                HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
+                String xfo = resp.headers().firstValue("X-Frame-Options").orElse("");
+                String csp = resp.headers().firstValue("Content-Security-Policy").orElse("");
+                // The portal embeds each project in its own same-origin iframe, so framing
+                // must be allowed for same origin but still blocked cross-origin.
+                assertEquals("SAMEORIGIN", xfo,
+                        "Served pages must allow same-origin framing, not DENY");
+                assertTrue(csp.contains("frame-ancestors 'self'"),
+                        "CSP must allow same-origin framing via frame-ancestors 'self'");
+                assertFalse(csp.contains("frame-ancestors 'none'"),
+                        "CSP must not block framing with frame-ancestors 'none'");
             } finally {
                 http.stop(0);
             }

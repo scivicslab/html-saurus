@@ -857,10 +857,28 @@ public class PortalServer {
                 .btn:hover { border-color: var(--accent-green); color: var(--accent-green); }
                 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
                 .build-status { font-size: 0.75rem; color: var(--text-secondary); }
+                /* Two-pane portal layout: left sidebar (project list) + right pane (iframe). */
+                html, body { height: 100%%; }
+                body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+                header { flex: 0 0 auto; }
+                #sidebar-toggle { font-size: 1rem; line-height: 1; padding: 0.3rem 0.6rem; }
+                .portal-body { flex: 1 1 auto; display: flex; min-height: 0; }
+                #portal-sidebar { flex: 0 0 440px; max-width: 440px; overflow-y: auto;
+                                  padding: 1.25rem 1.5rem 2rem; border-right: 1px solid var(--border-color);
+                                  background: var(--bg-primary); }
+                #portal-sidebar h2 { margin-top: 1.5rem; }
+                #portal-sidebar h2:first-of-type { margin-top: 0; }
+                body.sidebar-collapsed #portal-sidebar { display: none; }
+                .doc-pane { flex: 1 1 auto; position: relative; min-width: 0; }
+                #doc-frame { width: 100%%; height: 100%%; border: 0; display: block; background: #fff; }
+                #doc-placeholder { position: absolute; inset: 0; display: flex; align-items: center;
+                                   justify-content: center; padding: 2rem; text-align: center;
+                                   color: var(--text-secondary); font-size: 0.95rem; pointer-events: none; }
               </style>
             </head>
             <body>
             <header>
+              <button id="sidebar-toggle" class="btn" title="Toggle project list" aria-label="Toggle project list">&#9776;</button>
               <div>
                 <h1>Documentation Portal</h1>
                 <p>%d project(s)</p>
@@ -893,7 +911,8 @@ public class PortalServer {
         sb.append("""
               </div>
             </header>
-            <main>
+            <div class="portal-body">
+            <aside id="portal-sidebar">
             """);
 
         if (!production) {
@@ -930,7 +949,7 @@ public class PortalServer {
             List<String> labels = readNavbarLabels(p.projectDir());
             String[] i18n = Main.readI18nConfig(p.projectDir());
             sb.append("    <div class=\"project-row\">\n");
-            sb.append("      <div class=\"project-name\"><a href=\"/").append(escHtml(p.name())).append("/\" target=\"_blank\" rel=\"noopener noreferrer\">").append(escHtml(p.name())).append("</a></div>\n");
+            sb.append("      <div class=\"project-name\"><a class=\"project-link\" href=\"/").append(escHtml(p.name())).append("/\">").append(escHtml(p.name())).append("</a></div>\n");
             sb.append("      <div class=\"project-labels\" id=\"labels-").append(escHtml(p.name())).append("\">\n");
             for (String label : labels) {
                 sb.append("        <span class=\"project-label\">").append(escHtml(label)).append("</span>\n");
@@ -962,7 +981,12 @@ public class PortalServer {
 
         sb.append("  </div>\n");
 
-        sb.append("</main>\n");
+        sb.append("</aside>\n");
+        sb.append("<div class=\"doc-pane\">\n");
+        sb.append("  <iframe id=\"doc-frame\" name=\"doc-frame\" title=\"Documentation\"></iframe>\n");
+        sb.append("  <div id=\"doc-placeholder\">Select a project on the left to view it here.</div>\n");
+        sb.append("</div>\n");
+        sb.append("</div>\n");
         if (!production) {
             sb.append("""
             <script>
@@ -1042,15 +1066,17 @@ public class PortalServer {
               const status = document.getElementById('search-status');
               const text = document.getElementById('search-input').value.trim();
               if (!text) { status.textContent = 'Please enter some text.'; return; }
+              const ph = document.getElementById('doc-placeholder');
+              if (ph) ph.style.display = 'none';
               const typeEl = document.querySelector('input[name="search-type"]:checked');
               const type = typeEl ? typeEl.value : 'fulltext';
               if (type === 'fulltext') {
-                window.open('/search?q=' + encodeURIComponent(text), '_blank');
+                loadInFrame('/search?q=' + encodeURIComponent(text));
               } else if (type === 'embedding') {
-                window.open('/search-semantic?q=' + encodeURIComponent(text), '_blank');
+                loadInFrame('/search-semantic?q=' + encodeURIComponent(text));
               } else {
                 const form = document.createElement('form');
-                form.method = 'POST'; form.action = '/find-related'; form.target = '_blank';
+                form.method = 'POST'; form.action = '/find-related'; form.target = 'doc-frame';
                 form.style.display = 'none';
                 const tInput = document.createElement('input');
                 tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
@@ -1059,7 +1085,7 @@ public class PortalServer {
                 form.submit();
                 document.body.removeChild(form);
               }
-              status.textContent = 'Opened in new tab.';
+              status.textContent = 'Showing results in the right pane.';
               status.style.color = 'var(--accent-green)';
             }
             async function doReindexAll(btn) {
@@ -1115,6 +1141,46 @@ public class PortalServer {
             </script>
             """);
         }
+        // Always-on portal script (runs in every mode): sidebar collapse/expand and
+        // loading a selected project (or search result) into the right-pane iframe
+        // instead of a new browser tab, so the whole portal lives in a single tab.
+        sb.append("""
+            <script>
+            (function() {
+              var body = document.body;
+              if (localStorage.getItem('portal-sidebar-collapsed') === '1') {
+                body.classList.add('sidebar-collapsed');
+              }
+              var toggle = document.getElementById('sidebar-toggle');
+              if (toggle) {
+                toggle.addEventListener('click', function() {
+                  body.classList.toggle('sidebar-collapsed');
+                  localStorage.setItem('portal-sidebar-collapsed',
+                    body.classList.contains('sidebar-collapsed') ? '1' : '0');
+                });
+              }
+              var frame = document.getElementById('doc-frame');
+              var placeholder = document.getElementById('doc-placeholder');
+              window.loadInFrame = function(url) {
+                if (placeholder) placeholder.style.display = 'none';
+                if (frame) frame.setAttribute('src', url);
+              };
+              var sidebar = document.getElementById('portal-sidebar');
+              if (sidebar) {
+                sidebar.addEventListener('click', function(e) {
+                  var a = e.target.closest ? e.target.closest('a.project-link') : null;
+                  if (!a) return;
+                  // Let modifier / non-left / middle clicks fall through to the browser
+                  // so right-click and Ctrl/Cmd-click can still open a real new tab.
+                  if (e.defaultPrevented || e.button !== 0 ||
+                      e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  e.preventDefault();
+                  loadInFrame(a.getAttribute('href'));
+                });
+              }
+            })();
+            </script>
+            """);
         sb.append("</body>\n</html>\n");
 
         respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
@@ -1189,7 +1255,7 @@ public class PortalServer {
             </head>
             <body>
             <header>
-              <a class="home" href="/">Documentation Portal</a>
+              <a class="home" href="/" target="_top">Documentation Portal</a>
             </header>
             <main>
             """.formatted(escHtml(q)));
@@ -1848,7 +1914,9 @@ public class PortalServer {
         String ct = contentType(file.toString());
         ex.getResponseHeaders().set("Content-Type", ct);
         ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
+        // SAMEORIGIN / frame-ancestors 'self': the portal embeds each project's pages in its
+        // own right-pane iframe (same origin), while still blocking cross-origin framing.
+        ex.getResponseHeaders().set("X-Frame-Options", "SAMEORIGIN");
         if (ct.startsWith("text/html")) {
             ex.getResponseHeaders().set("Content-Security-Policy",
                 "default-src 'self'; " +
@@ -1857,7 +1925,7 @@ public class PortalServer {
                 "img-src 'self' data: https://dtn1.ddbj.nig.ac.jp:10443; " +
                 "font-src 'self' https://cdn.jsdelivr.net; " +
                 "connect-src 'self'; " +
-                "frame-ancestors 'none';");
+                "frame-ancestors 'self';");
             {
                 String html = new String(body, StandardCharsets.UTF_8);
                 String docPath = "/" + proj.name() + rest;

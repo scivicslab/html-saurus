@@ -13,8 +13,10 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Verifies that clicking the project name link on a portal row opens the project
- * in a NEW tab, not in the same tab (which would hide the portal).
+ * Verifies that clicking the project name link on a portal row loads the project
+ * into the portal's right-pane iframe (staying in a single tab), rather than opening
+ * a new browser tab. Right-click / Ctrl-click still open a real new tab because the
+ * link stays a genuine anchor; that path is not exercised here.
  */
 @Tag("S3")
 class PortalOpenLinkE2E {
@@ -23,7 +25,7 @@ class PortalOpenLinkE2E {
     Path tempDir;
 
     @Test
-    void openButtonShouldOpenInNewTab() throws Exception {
+    void projectLinkShouldLoadInRightPane() throws Exception {
         // --- Arrange: fake Docusaurus project structure ---
         Path projectDir = tempDir.resolve("myproject");
         Files.createDirectories(projectDir.resolve("docs"));
@@ -48,24 +50,28 @@ class PortalOpenLinkE2E {
             portalPage.navigate(portalUrl);
 
             // Verify the portal loaded and shows the project row with a clickable name
-            portalPage.waitForSelector(".project-name a");
-            assertEquals(1, portalPage.locator(".project-name a").count(),
+            portalPage.waitForSelector(".project-name a.project-link");
+            assertEquals(1, portalPage.locator(".project-name a.project-link").count(),
                     "Expected exactly one project name link on the portal");
 
-            // Click the project name and expect a NEW tab to appear
-            // If target="_blank" is missing, the current page navigates away
-            // and waitForPage() will throw (timeout) — causing the test to fail.
-            Page newTab = context.waitForPage(
-                    new BrowserContext.WaitForPageOptions().setTimeout(3000),
-                    () -> portalPage.locator(".project-name a").first().click());
+            // A plain left-click must load the project into the right-pane iframe,
+            // NOT open a new browser tab.
+            int pagesBefore = context.pages().size();
+            portalPage.locator(".project-name a.project-link").first().click();
+            portalPage.waitForTimeout(500);
 
-            // Portal page must still show the portal (not navigated away)
+            // No new browser tab must have opened.
+            assertEquals(pagesBefore, context.pages().size(),
+                    "Clicking a project link must not open a new browser tab");
+
+            // The portal (top window) must stay put.
             assertEquals(portalUrl, portalPage.url(),
-                    "Portal page should remain open after clicking Open");
+                    "Portal page should remain open after clicking a project link");
 
-            // New tab should point to the project
-            assertTrue(newTab.url().contains("/myproject/"),
-                    "New tab URL should contain /myproject/, was: " + newTab.url());
+            // The right-pane iframe must now point at the project.
+            String frameSrc = portalPage.locator("#doc-frame").getAttribute("src");
+            assertTrue(frameSrc != null && frameSrc.contains("/myproject/"),
+                    "Right-pane iframe src should contain /myproject/, was: " + frameSrc);
         } finally {
             server.stop(0);
         }

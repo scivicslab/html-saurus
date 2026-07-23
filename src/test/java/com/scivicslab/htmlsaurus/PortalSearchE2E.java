@@ -142,14 +142,15 @@ public class PortalSearchE2E {
                     "main #search-input must retain '" + KNOWN_KEYWORD + "', got: " + value);
         });
 
-        // P-9: result links have target=_blank
-        withPage("P-9: result links have target=_blank", browser, page -> {
+        // P-9: result links stay in the same frame (no new tab) so they open in the right pane
+        withPage("P-9: result links do not open a new tab", browser, page -> {
             page.navigate(BASE_URL + "/search?q=" + KNOWN_KEYWORD);
             page.waitForLoadState();
             ElementHandle link = page.querySelector("a.result");
             check(link != null, "No a.result link found");
-            check("_blank".equals(link.getAttribute("target")),
-                    "a.result must have target=\"_blank\", got: " + link.getAttribute("target"));
+            check(!"_blank".equals(link.getAttribute("target")),
+                    "a.result must not open a new tab (target must not be _blank), got: "
+                    + link.getAttribute("target"));
         });
 
         // P-10: result href starts with /<projectName>/
@@ -255,8 +256,8 @@ public class PortalSearchE2E {
                     "First find-related result must contain non-blank text");
         });
 
-        // FR-5: result links have target=_blank
-        withPage("FR-5: find-related result links have target=_blank", browser, page -> {
+        // FR-5: result links stay in the same frame (no new tab) so they open in the right pane
+        withPage("FR-5: find-related result links do not open a new tab", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
             page.fill("#find-related-input", KNOWN_KEYWORD);
@@ -265,8 +266,8 @@ public class PortalSearchE2E {
                     new Page.WaitForSelectorOptions().setTimeout(10_000));
             ElementHandle link = page.querySelector("#find-related-list a");
             check(link != null, "No <a> link found in #find-related-list");
-            check("_blank".equals(link.getAttribute("target")),
-                    "#find-related-list a must have target=\"_blank\", got: "
+            check(!"_blank".equals(link.getAttribute("target")),
+                    "#find-related-list a must not open a new tab (target must not be _blank), got: "
                     + link.getAttribute("target"));
         });
     }
