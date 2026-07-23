@@ -337,6 +337,8 @@ class ModeTest {
                         "Portal page must not open projects in a new tab");
                 assertTrue(html.contains("id=\"doc-frame\""),
                         "Portal must contain the right-pane iframe");
+                assertTrue(html.contains("data-hs-responsive"),
+                        "SSR pages must carry the shared responsive style");
             } finally {
                 http.stop(0);
             }
@@ -365,6 +367,10 @@ class ModeTest {
                         "CSP must allow same-origin framing via frame-ancestors 'self'");
                 assertFalse(csp.contains("frame-ancestors 'none'"),
                         "CSP must not block framing with frame-ancestors 'none'");
+                // Docusaurus static pages ship their own responsive stylesheet and must not
+                // receive the injected html-saurus shared style.
+                assertFalse(resp.body().contains("data-hs-responsive"),
+                        "Static project pages must not carry the injected shared style");
             } finally {
                 http.stop(0);
             }

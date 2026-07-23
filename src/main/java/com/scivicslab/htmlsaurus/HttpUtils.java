@@ -47,6 +47,37 @@ final class HttpUtils {
         try (var out = ex.getResponseBody()) { out.write(bytes); }
     }
 
+    /**
+     * Shared responsive rules for every html-saurus-generated SSR page (portal, search,
+     * related, semantic, keyword-map editor, upload). Kept in one place so responsiveness
+     * is systematic rather than per-page: it protects unexpectedly wide content (tables,
+     * pre, images) from causing horizontal scroll and trims chrome padding on narrow
+     * screens. Injected via {@link #injectResponsive(String)}. Not applied to docusaurus
+     * static pages, which ship their own responsive stylesheet.
+     */
+    static String responsiveStyle() {
+        return """
+            <style data-hs-responsive>
+            img, video { max-width: 100%; height: auto; }
+            table { display: block; overflow-x: auto; }
+            pre { overflow-x: auto; }
+            @media (max-width: 700px) {
+              header { padding-left: 1rem; padding-right: 1rem; }
+              main { padding-left: 1rem; padding-right: 1rem; }
+            }
+            </style>
+            """;
+    }
+
+    /** Inserts {@link #responsiveStyle()} just before {@code </head>} (or prepends it when no
+     *  head is present). Idempotent: a page that already carries the marker is returned as is. */
+    static String injectResponsive(String html) {
+        if (html == null || html.contains("data-hs-responsive")) return html;
+        String style = responsiveStyle();
+        int i = html.indexOf("</head>");
+        return i >= 0 ? html.substring(0, i) + style + html.substring(i) : style + html;
+    }
+
     /** Maps a file path's extension to the corresponding MIME type. */
     static String contentType(String path) {
         if (path.endsWith(".html")) return "text/html; charset=UTF-8";

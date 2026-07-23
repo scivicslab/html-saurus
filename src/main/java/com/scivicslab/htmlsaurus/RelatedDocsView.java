@@ -196,7 +196,7 @@ final class RelatedDocsView {
 
     /** Returns the page chrome (doctype, head, CSS, header, open main) with the given title. */
     private static String pageOpen(String title) {
-        return """
+        return HttpUtils.injectResponsive("""
             <!DOCTYPE html>
             <html lang="ja">
             <head>
@@ -235,7 +235,7 @@ final class RelatedDocsView {
               <a class="home" href="/" target="_top">Documentation Portal</a>
             </header>
             <main>
-            """.formatted(HttpUtils.escapeHtml(title));
+            """.formatted(HttpUtils.escapeHtml(title)));
     }
 
     /** Appends the result-count line and the result cards (or a no-results message). */

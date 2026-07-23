@@ -380,7 +380,7 @@ public class SearchServer {
 
     static String uploadPageHtml(String projectPrefix) {
         String uploadUrl = projectPrefix + "/api/upload";
-        return """
+        return HttpUtils.injectResponsive("""
             <!DOCTYPE html>
             <html lang="en">
             <head>
@@ -431,7 +431,7 @@ public class SearchServer {
               }
               </script>
             </body></html>
-            """.formatted(uploadUrl);
+            """.formatted(uploadUrl));
     }
 
     private void respond(HttpExchange ex, int code, String ct, String body) throws IOException {

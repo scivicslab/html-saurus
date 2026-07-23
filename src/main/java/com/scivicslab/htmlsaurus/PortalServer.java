@@ -489,7 +489,7 @@ public class PortalServer {
             </script>
             </body></html>
             """.formatted(escHtml(keywordMapPath.toString()), escHtml(content));
-        respond(ex, 200, "text/html; charset=UTF-8", html);
+        respond(ex, 200, "text/html; charset=UTF-8", HttpUtils.injectResponsive(html));
     }
 
     /**
@@ -1231,7 +1231,7 @@ public class PortalServer {
             """);
         sb.append("</body>\n</html>\n");
 
-        respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
+        respond(ex, 200, "text/html; charset=UTF-8", HttpUtils.injectResponsive(sb.toString()));
     }
 
     // ---- Search results page (SSR) ------------------------------
@@ -1351,7 +1351,7 @@ public class PortalServer {
         sb.append("</main>\n");
         sb.append(RelatedDocsView.searchWidgetScript());
         sb.append("</body>\n</html>\n");
-        respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
+        respond(ex, 200, "text/html; charset=UTF-8", HttpUtils.injectResponsive(sb.toString()));
     }
 
     // ---- Cross-project search -----------------------------------
@@ -1814,7 +1814,7 @@ public class PortalServer {
         sb.append("</main>\n");
         sb.append(RelatedDocsView.searchWidgetScript());
         sb.append("</body>\n</html>\n");
-        respond(ex, 200, "text/html; charset=UTF-8", sb.toString());
+        respond(ex, 200, "text/html; charset=UTF-8", HttpUtils.injectResponsive(sb.toString()));
     }
 
     private Map<String, String> parseFormBody(String body) {
