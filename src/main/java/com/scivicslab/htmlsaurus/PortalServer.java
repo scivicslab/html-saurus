@@ -834,19 +834,21 @@ public class PortalServer {
                      margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; }
                 .project-list { background: var(--bg-secondary); border: 1px solid var(--border-color);
                                 border-radius: 8px; overflow: hidden; }
-                .project-row { display: flex; align-items: center; gap: 14px; padding: 9px 16px;
-                               border-bottom: 1px solid var(--border-color); }
+                .project-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+                               padding: 9px 16px; border-bottom: 1px solid var(--border-color); }
                 .project-row:last-child { border-bottom: none; }
-                .project-name { font-size: 0.92rem; font-weight: 700; min-width: 180px; }
+                .project-name { font-size: 0.92rem; font-weight: 700; min-width: 0;
+                                overflow-wrap: anywhere; }
                 .project-name a { color: var(--text-primary); text-decoration: none; }
                 .project-name a:hover { color: var(--accent-green); text-decoration: underline; }
-                .project-labels { flex: 1; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+                .project-labels { flex: 1 1 100%%; display: flex; flex-wrap: wrap; gap: 0.5rem; }
                 .project-label { font-size: 0.78rem; color: var(--text-secondary); }
-                .project-locales { display: flex; gap: 0.3rem; margin-right: 0.5rem; }
+                .project-locales { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-right: 0.5rem; }
                 .locale-tag { font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 3px;
                               background: var(--bg-tertiary); color: var(--accent-green);
                               border: 1px solid var(--border-color); font-family: monospace; }
-                .project-actions { display: flex; gap: 0.5rem; align-items: center; }
+                .project-actions { display: flex; flex: 1 1 100%%; flex-wrap: wrap;
+                                   gap: 0.5rem; align-items: center; }
                 .action-select { padding: 0.28rem 0.5rem; border-radius: 5px; font-size: 0.8rem;
                                  border: 1px solid var(--border-color); background: var(--bg-tertiary);
                                  color: var(--text-primary); cursor: pointer; }
@@ -863,7 +865,8 @@ public class PortalServer {
                 header { flex: 0 0 auto; }
                 #sidebar-toggle { font-size: 1rem; line-height: 1; padding: 0.3rem 0.6rem; }
                 .portal-body { flex: 1 1 auto; display: flex; min-height: 0; }
-                #portal-sidebar { flex: 0 0 440px; max-width: 440px; overflow-y: auto;
+                #portal-sidebar { flex: 0 0 auto; width: 480px; min-width: 300px; max-width: 90vw;
+                                  overflow-y: auto; resize: horizontal;
                                   padding: 1.25rem 1.5rem 2rem; border-right: 1px solid var(--border-color);
                                   background: var(--bg-primary); }
                 #portal-sidebar h2 { margin-top: 1.5rem; }
