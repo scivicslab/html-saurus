@@ -297,12 +297,12 @@ public class SearchServer {
             file = file.resolve("index.html").normalize();
             if (!file.startsWith(staticDir) || !Files.exists(file)) {
                 respond(ex, 404, "text/html",
-                    "<html><body><h1>404 Not Found</h1><p>" + HttpUtils.escapeHtml(path) + "</p></body></html>");
+                    "<html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body><h1>404 Not Found</h1><p>" + HttpUtils.escapeHtml(path) + "</p></body></html>");
                 return;
             }
         } else if (!Files.exists(file)) {
             respond(ex, 404, "text/html",
-                "<html><body><h1>404 Not Found</h1><p>" + HttpUtils.escapeHtml(path) + "</p></body></html>");
+                "<html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body><h1>404 Not Found</h1><p>" + HttpUtils.escapeHtml(path) + "</p></body></html>");
             return;
         }
 
@@ -385,14 +385,16 @@ public class SearchServer {
             <html lang="en">
             <head>
               <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Upload PDF</title>
               <style>
+                *{box-sizing:border-box;}
                 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
                      background:#1e1e2e;color:#cdd6f4;margin:0;padding:2rem;}
                 h2{margin-bottom:1rem;}
                 .controls{display:flex;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap;}
                 input[type=text]{padding:0.4rem 0.7rem;border-radius:4px;border:1px solid #585b70;
-                  background:#313244;color:#cdd6f4;font-size:0.875rem;width:280px;}
+                  background:#313244;color:#cdd6f4;font-size:0.875rem;width:100%;max-width:280px;}
                 .drop-zone{border:2px dashed #585b70;border-radius:8px;padding:3rem 2rem;
                   text-align:center;cursor:pointer;color:#a6adc8;transition:border-color 0.2s;}
                 .drop-zone.over{border-color:#a6e3a1;color:#a6e3a1;}

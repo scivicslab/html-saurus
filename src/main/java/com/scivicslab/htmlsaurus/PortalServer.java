@@ -865,9 +865,9 @@ public class PortalServer {
                 header { flex: 0 0 auto; }
                 #sidebar-toggle { font-size: 1rem; line-height: 1; padding: 0.3rem 0.6rem; }
                 .portal-body { flex: 1 1 auto; display: flex; min-height: 0; }
-                #portal-sidebar { flex: 0 0 auto; width: 480px; min-width: 300px; max-width: 90vw;
-                                  overflow-y: auto; resize: horizontal;
-                                  padding: 1.25rem 1.5rem 2rem; border-right: 1px solid var(--border-color);
+                #portal-sidebar { flex: 0 0 auto; width: 480px; min-width: 220px; max-width: 90vw;
+                                  overflow-y: auto;
+                                  padding: 1.25rem 1.5rem 2rem;
                                   background: var(--bg-primary); }
                 #portal-sidebar h2 { margin-top: 1.5rem; }
                 #portal-sidebar h2:first-of-type { margin-top: 0; }
@@ -877,6 +877,23 @@ public class PortalServer {
                 #doc-placeholder { position: absolute; inset: 0; display: flex; align-items: center;
                                    justify-content: center; padding: 2rem; text-align: center;
                                    color: var(--text-secondary); font-size: 0.95rem; pointer-events: none; }
+                /* Draggable divider between the sidebar and the doc pane. */
+                #pane-splitter { flex: 0 0 6px; cursor: col-resize; background: var(--border-color);
+                                 border-left: 1px solid var(--border-color);
+                                 border-right: 1px solid var(--border-color); }
+                #pane-splitter:hover { background: var(--accent-green); }
+                body.sidebar-collapsed #pane-splitter { display: none; }
+                /* While dragging, freeze the iframe so it does not swallow the mouse. */
+                body.pane-dragging { cursor: col-resize; user-select: none; }
+                body.pane-dragging #doc-frame { pointer-events: none; }
+                /* Narrow screens: stack the panes vertically instead of side by side. */
+                @media (max-width: 700px) {
+                  .portal-body { flex-direction: column; }
+                  #portal-sidebar { width: auto !important; max-width: none; max-height: 45vh;
+                                    border-bottom: 1px solid var(--border-color); }
+                  #pane-splitter { display: none; }
+                  .doc-pane { min-height: 55vh; }
+                }
               </style>
             </head>
             <body>
@@ -985,6 +1002,7 @@ public class PortalServer {
         sb.append("  </div>\n");
 
         sb.append("</aside>\n");
+        sb.append("<div id=\"pane-splitter\" title=\"Drag to resize\"></div>\n");
         sb.append("<div class=\"doc-pane\">\n");
         sb.append("  <iframe id=\"doc-frame\" name=\"doc-frame\" title=\"Documentation\"></iframe>\n");
         sb.append("  <div id=\"doc-placeholder\">Select a project on the left to view it here.</div>\n");
@@ -1169,6 +1187,33 @@ public class PortalServer {
                 if (frame) frame.setAttribute('src', url);
               };
               var sidebar = document.getElementById('portal-sidebar');
+              // Restore a previously dragged sidebar width.
+              var savedWidth = localStorage.getItem('portal-sidebar-width');
+              if (sidebar && savedWidth) sidebar.style.width = savedWidth + 'px';
+              // Drag the splitter to move the boundary between the two panes.
+              var splitter = document.getElementById('pane-splitter');
+              if (splitter && sidebar) {
+                splitter.addEventListener('mousedown', function(e) {
+                  e.preventDefault();
+                  body.classList.add('pane-dragging');
+                  var startX = e.clientX;
+                  var startW = sidebar.getBoundingClientRect().width;
+                  function onMove(ev) {
+                    var w = startW + (ev.clientX - startX);
+                    w = Math.max(220, Math.min(w, window.innerWidth - 200));
+                    sidebar.style.width = w + 'px';
+                  }
+                  function onUp() {
+                    body.classList.remove('pane-dragging');
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    localStorage.setItem('portal-sidebar-width',
+                      Math.round(sidebar.getBoundingClientRect().width));
+                  }
+                  document.addEventListener('mousemove', onMove);
+                  document.addEventListener('mouseup', onUp);
+                });
+              }
               if (sidebar) {
                 sidebar.addEventListener('click', function(e) {
                   var a = e.target.closest ? e.target.closest('a.project-link') : null;
@@ -1905,12 +1950,12 @@ public class PortalServer {
             file = file.resolve("index.html").normalize();
             if (!file.startsWith(proj.staticDir()) || !Files.exists(file)) {
                 respond(ex, 404, "text/html",
-                    "<html><body><h1>404 Not Found</h1><p>" + escHtml(rest) + "</p></body></html>");
+                    "<html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body><h1>404 Not Found</h1><p>" + escHtml(rest) + "</p></body></html>");
                 return;
             }
         } else if (!Files.exists(file)) {
             respond(ex, 404, "text/html",
-                "<html><body><h1>404 Not Found</h1><p>" + escHtml(rest) + "</p></body></html>");
+                "<html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body><h1>404 Not Found</h1><p>" + escHtml(rest) + "</p></body></html>");
             return;
         }
         byte[] body = Files.readAllBytes(file);
