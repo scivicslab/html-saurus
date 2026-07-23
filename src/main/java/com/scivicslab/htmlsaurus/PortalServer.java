@@ -766,46 +766,9 @@ public class PortalServer {
               <title>Documentation Portal</title>
               <link rel="icon" type="image/png" href="data:image/png;base64,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">
               <style>
-                :root, [data-theme="dark-catppuccin"] {
-                  --bg-primary:#1e1e2e; --bg-secondary:#313244; --bg-tertiary:#45475a;
-                  --text-primary:#cdd6f4; --text-secondary:#a6adc8;
-                  --accent-green:#a6e3a1; --border-color:#585b70; }
-                [data-theme="dark-nord"] {
-                  --bg-primary:#2e3440; --bg-secondary:#3b4252; --bg-tertiary:#434c5e;
-                  --text-primary:#eceff4; --text-secondary:#d8dee9;
-                  --accent-green:#a3be8c; --border-color:#4c566a; }
-                [data-theme="dark-blue"] {
-                  --bg-primary:#0d1b2a; --bg-secondary:#1b2838; --bg-tertiary:#2a3a4e;
-                  --text-primary:#d4dce8; --text-secondary:#8a9bb5;
-                  --accent-green:#6ec87a; --border-color:#3a4e68; }
-                [data-theme="dark-green"] {
-                  --bg-primary:#0f1e14; --bg-secondary:#1a2e20; --bg-tertiary:#2a4030;
-                  --text-primary:#d0e4d4; --text-secondary:#88a890;
-                  --accent-green:#5ec87a; --border-color:#3a5842; }
-                [data-theme="dark-red"] {
-                  --bg-primary:#1e0f0f; --bg-secondary:#2e1a1a; --bg-tertiary:#402a2a;
-                  --text-primary:#e4d0d0; --text-secondary:#a88888;
-                  --accent-green:#68b870; --border-color:#583a3a; }
-                [data-theme="light-clean"] {
-                  --bg-primary:#ffffff; --bg-secondary:#f0f2f5; --bg-tertiary:#e4e6eb;
-                  --text-primary:#1c1e21; --text-secondary:#606770;
-                  --accent-green:#31a24c; --border-color:#ced0d4; }
-                [data-theme="light-warm"] {
-                  --bg-primary:#faf6f0; --bg-secondary:#f0ebe3; --bg-tertiary:#e6dfd5;
-                  --text-primary:#3d3529; --text-secondary:#7a6f60;
-                  --accent-green:#6a8f5e; --border-color:#d5cec4; }
-                [data-theme="light-blue"] {
-                  --bg-primary:#eef4fb; --bg-secondary:#dce8f5; --bg-tertiary:#c8d9ed;
-                  --text-primary:#1a2a40; --text-secondary:#4a6080;
-                  --accent-green:#3a9e50; --border-color:#b0c8e4; }
-                [data-theme="light-green"] {
-                  --bg-primary:#f0f8f0; --bg-secondary:#e0f0e0; --bg-tertiary:#cce4cc;
-                  --text-primary:#1a301a; --text-secondary:#4a704a;
-                  --accent-green:#2e8b48; --border-color:#a8cca8; }
-                [data-theme="light-red"] {
-                  --bg-primary:#fbf0f0; --bg-secondary:#f5dce0; --bg-tertiary:#ecc8cc;
-                  --text-primary:#401a1e; --text-secondary:#804a50;
-                  --accent-green:#3a9850; --border-color:#e0b0b8; }
+            """);
+        sb.append(HttpUtils.themeVariables());
+        sb.append("""
                 * { box-sizing: border-box; margin: 0; padding: 0; }
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                        background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
@@ -1019,6 +982,13 @@ public class PortalServer {
               sel.addEventListener('change', function() {
                 document.documentElement.setAttribute('data-theme', this.value);
                 localStorage.setItem('portal-theme', this.value);
+                // Push the theme into the right-pane doc live (same origin). Newly loaded docs
+                // apply portal-theme themselves on load, so this only covers the already-open doc.
+                var f = document.getElementById('doc-frame');
+                try {
+                  if (f && f.contentDocument && f.contentDocument.documentElement)
+                    f.contentDocument.documentElement.setAttribute('data-theme', this.value);
+                } catch (e) {}
               });
             })();
             // Re-read docusaurus.config.ts live and re-render one project row's navbar labels in place.

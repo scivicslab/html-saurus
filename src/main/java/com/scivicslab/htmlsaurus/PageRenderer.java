@@ -96,6 +96,12 @@ class PageRenderer {
             """.formatted(title));
         sb.append(PAGE_CSS);
         sb.append("              </style>\n");
+        // Dev only: emit the shared 10-theme palette so the portal's theme selection drives this
+        // page inside the right-pane iframe. Omitted in production, where page.css falls back to
+        // its original light defaults and no theme control exists.
+        if (!production) {
+            sb.append("<style>\n").append(HttpUtils.themeVariables()).append("</style>\n");
+        }
         if (customCss != null) {
             sb.append("<style id=\"html-saurus-custom\">\n")
               .append(customCss)
@@ -103,8 +109,8 @@ class PageRenderer {
         }
         sb.append("""
               <script>(function(){
-                var t=localStorage.getItem('md2html-theme');
-                if(t&&t!=='default') document.documentElement.setAttribute('data-theme',t);
+                var t=localStorage.getItem('portal-theme');
+                if(t) document.documentElement.setAttribute('data-theme',t);
               })();</script>
             </head>
             <body>
@@ -167,11 +173,16 @@ class PageRenderer {
         if (!production) {
             sb.append("  <button id=\"rebuild-btn\" title=\"Rebuild this project: HTML, search index, and embedding\">&#x21BB; Rebuild</button>\n");
             sb.append("  <select id=\"theme-sel\">\n");
-            sb.append("    <option value=\"default\">Default</option>\n");
-            sb.append("    <option value=\"warm\">Warm</option>\n");
-            sb.append("    <option value=\"blue\">Blue</option>\n");
-            sb.append("    <option value=\"green\">Green</option>\n");
-            sb.append("    <option value=\"red\">Red</option>\n");
+            sb.append("    <option value=\"dark-catppuccin\">Dark Catppuccin</option>\n");
+            sb.append("    <option value=\"dark-nord\">Dark Nord</option>\n");
+            sb.append("    <option value=\"dark-blue\">Dark Blue</option>\n");
+            sb.append("    <option value=\"dark-green\">Dark Green</option>\n");
+            sb.append("    <option value=\"dark-red\">Dark Red</option>\n");
+            sb.append("    <option value=\"light-clean\">Light Clean</option>\n");
+            sb.append("    <option value=\"light-warm\">Light Warm</option>\n");
+            sb.append("    <option value=\"light-blue\">Light Blue</option>\n");
+            sb.append("    <option value=\"light-green\">Light Green</option>\n");
+            sb.append("    <option value=\"light-red\">Light Red</option>\n");
             sb.append("  </select>\n");
         }
         boolean isNonDefaultLocale = currentLocale != null && !currentLocale.equals(defaultLocale);

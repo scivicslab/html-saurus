@@ -71,13 +71,15 @@ class PageScripts {
             (function() {
               var sel = document.getElementById('theme-sel');
               if (!sel) return;
-              var t = localStorage.getItem('md2html-theme') || 'default';
+              // Inside the portal's right-pane iframe the left pane owns the theme control,
+              // so hide this duplicate selector when the page is framed.
+              if (window.self !== window.top) { sel.style.display = 'none'; return; }
+              var t = localStorage.getItem('portal-theme') || 'dark-catppuccin';
               sel.value = t;
               sel.addEventListener('change', function() {
                 var val = this.value;
-                localStorage.setItem('md2html-theme', val);
-                if (val === 'default') document.documentElement.removeAttribute('data-theme');
-                else document.documentElement.setAttribute('data-theme', val);
+                localStorage.setItem('portal-theme', val);
+                document.documentElement.setAttribute('data-theme', val);
               });
             })();
             (function() {

@@ -339,6 +339,8 @@ class ModeTest {
                         "Portal must contain the right-pane iframe");
                 assertTrue(html.contains("data-hs-responsive"),
                         "SSR pages must carry the shared responsive style");
+                assertTrue(html.contains("[data-theme=\"dark-catppuccin\"]"),
+                        "Portal must emit the shared theme palette (HttpUtils.themeVariables)");
             } finally {
                 http.stop(0);
             }

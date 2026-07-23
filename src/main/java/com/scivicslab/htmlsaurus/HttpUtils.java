@@ -78,6 +78,58 @@ final class HttpUtils {
         return i >= 0 ? html.substring(0, i) + style + html.substring(i) : style + html;
     }
 
+    /**
+     * The 10 portal colour themes as CSS custom-property blocks (no {@code <style>} wrapper, so it
+     * can be appended inside an existing style element). Single source of truth for the theme
+     * palette: both the portal page and the doc-body pages emit these same definitions so the
+     * portal's theme selection renders identically in the right-pane iframe. Contains no
+     * {@code %}, so it is safe to append into a {@code String.formatted(...)} text block.
+     */
+    static String themeVariables() {
+        return """
+            :root, [data-theme="dark-catppuccin"] {
+              --bg-primary:#1e1e2e; --bg-secondary:#313244; --bg-tertiary:#45475a;
+              --text-primary:#cdd6f4; --text-secondary:#a6adc8;
+              --accent-green:#a6e3a1; --border-color:#585b70; }
+            [data-theme="dark-nord"] {
+              --bg-primary:#2e3440; --bg-secondary:#3b4252; --bg-tertiary:#434c5e;
+              --text-primary:#eceff4; --text-secondary:#d8dee9;
+              --accent-green:#a3be8c; --border-color:#4c566a; }
+            [data-theme="dark-blue"] {
+              --bg-primary:#0d1b2a; --bg-secondary:#1b2838; --bg-tertiary:#2a3a4e;
+              --text-primary:#d4dce8; --text-secondary:#8a9bb5;
+              --accent-green:#6ec87a; --border-color:#3a4e68; }
+            [data-theme="dark-green"] {
+              --bg-primary:#0f1e14; --bg-secondary:#1a2e20; --bg-tertiary:#2a4030;
+              --text-primary:#d0e4d4; --text-secondary:#88a890;
+              --accent-green:#5ec87a; --border-color:#3a5842; }
+            [data-theme="dark-red"] {
+              --bg-primary:#1e0f0f; --bg-secondary:#2e1a1a; --bg-tertiary:#402a2a;
+              --text-primary:#e4d0d0; --text-secondary:#a88888;
+              --accent-green:#68b870; --border-color:#583a3a; }
+            [data-theme="light-clean"] {
+              --bg-primary:#ffffff; --bg-secondary:#f0f2f5; --bg-tertiary:#e4e6eb;
+              --text-primary:#1c1e21; --text-secondary:#606770;
+              --accent-green:#31a24c; --border-color:#ced0d4; }
+            [data-theme="light-warm"] {
+              --bg-primary:#faf6f0; --bg-secondary:#f0ebe3; --bg-tertiary:#e6dfd5;
+              --text-primary:#3d3529; --text-secondary:#7a6f60;
+              --accent-green:#6a8f5e; --border-color:#d5cec4; }
+            [data-theme="light-blue"] {
+              --bg-primary:#eef4fb; --bg-secondary:#dce8f5; --bg-tertiary:#c8d9ed;
+              --text-primary:#1a2a40; --text-secondary:#4a6080;
+              --accent-green:#3a9e50; --border-color:#b0c8e4; }
+            [data-theme="light-green"] {
+              --bg-primary:#f0f8f0; --bg-secondary:#e0f0e0; --bg-tertiary:#cce4cc;
+              --text-primary:#1a301a; --text-secondary:#4a704a;
+              --accent-green:#2e8b48; --border-color:#a8cca8; }
+            [data-theme="light-red"] {
+              --bg-primary:#fbf0f0; --bg-secondary:#f5dce0; --bg-tertiary:#ecc8cc;
+              --text-primary:#401a1e; --text-secondary:#804a50;
+              --accent-green:#3a9850; --border-color:#e0b0b8; }
+            """;
+    }
+
     /** Maps a file path's extension to the corresponding MIME type. */
     static String contentType(String path) {
         if (path.endsWith(".html")) return "text/html; charset=UTF-8";
