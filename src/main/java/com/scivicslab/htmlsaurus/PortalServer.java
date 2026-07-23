@@ -1152,17 +1152,39 @@ public class PortalServer {
               }
               var frame = document.getElementById('doc-frame');
               var placeholder = document.getElementById('doc-placeholder');
-              // The right-pane selection lives in the URL hash (e.g. #/doc_x/), so it survives a
-              // hard reload, is bookmarkable, and works with the browser's back/forward buttons.
+              // The right-pane state lives in the URL hash (e.g. #/doc_x/010/page.html), so a hard
+              // reload restores the exact page - including pages reached by navigating INSIDE the
+              // iframe (mirrored by the load handler below). Bookmarking and back/forward also work.
+              function frameLoc() {
+                try {
+                  var w = frame.contentWindow;
+                  if (!w || w.location.protocol.indexOf('http') !== 0) return null;
+                  return w.location.pathname + w.location.search;
+                } catch (e) { return null; }
+              }
               function showInFrame(url) {
                 if (placeholder) placeholder.style.display = url ? 'none' : '';
-                if (frame) frame.setAttribute('src', url || 'about:blank');
+                if (!frame) return;
+                if (!url) { frame.setAttribute('src', 'about:blank'); return; }
+                // Only (re)load when the iframe is not already on this URL, so mirroring in-iframe
+                // navigation into the hash never triggers a reload loop.
+                if (frameLoc() !== url) frame.setAttribute('src', url);
               }
               function applyHash() {
                 showInFrame(location.hash ? location.hash.slice(1) : '');
               }
               window.addEventListener('hashchange', applyHash);
-              // loadInFrame now just records the selection in the hash; applyHash() loads it.
+              // Mirror navigation that happens inside the iframe into the hash (without adding a
+              // history entry), so the hash always points at the page currently shown.
+              if (frame) {
+                frame.addEventListener('load', function() {
+                  var loc = frameLoc();
+                  if (loc && ('#' + loc) !== location.hash) {
+                    history.replaceState(null, '', '#' + loc);
+                  }
+                });
+              }
+              // loadInFrame records the selection in the hash; applyHash() does the actual load.
               window.loadInFrame = function(url) {
                 if (location.hash.slice(1) === url) applyHash();
                 else location.hash = url;
