@@ -773,10 +773,11 @@ public class PortalServer {
                 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                        background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
                 header { background: var(--bg-secondary); color: var(--text-primary);
-                         padding: 0.75rem 2rem; display: flex; align-items: center;
+                         padding: 0.35rem 2rem; display: flex; align-items: center;
                          gap: 1.5rem; flex-wrap: wrap; border-bottom: 1px solid var(--border-color); }
-                header h1 { font-size: 1.15rem; font-weight: 700; }
+                header h1 { font-size: 1.05rem; font-weight: 700; }
                 header p { font-size: 0.82rem; color: var(--text-secondary); }
+                #recent-btn { min-width: 10rem; justify-content: flex-start; }
                 .header-right { display: flex; gap: 1rem; align-items: center; margin-left: auto; }
                 select#theme-select { padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.8rem;
                   border: 1px solid var(--border-color); background: var(--bg-tertiary);
@@ -878,7 +879,6 @@ public class PortalServer {
               <button id="sidebar-toggle" class="btn" title="Toggle project list" aria-label="Toggle project list">&#9776;</button>
               <div>
                 <h1>Documentation Portal</h1>
-                <p>%d project(s)</p>
               </div>
               <div class="recent-dd" id="recent-dd">
                 <button class="btn" id="recent-btn" type="button" title="Recently viewed pages">Recent &#9662;</button>

@@ -291,8 +291,8 @@ class ModeTest {
         }
 
         @Test
-        @DisplayName("portal page (dev) shows project count in header")
-        void devPortalPage_showsProjectCount() throws Exception {
+        @DisplayName("portal page (dev) shows the title without a project count")
+        void devPortalPage_hidesProjectCount() throws Exception {
             Path proj1 = createProject("proj1");
             Path proj2 = createProject("proj2");
             for (Path p : List.of(proj1, proj2)) {
@@ -302,8 +302,10 @@ class ModeTest {
             HttpServer http = ps.start();
             try {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
-                assertTrue(html.contains("2 project(s)"),
-                        "Portal header must show detected project count");
+                assertTrue(html.contains("Documentation Portal"),
+                        "Portal header must show the title");
+                assertFalse(html.contains("project(s)</p>"),
+                        "Portal header must not show the project count");
             } finally {
                 http.stop(0);
             }
