@@ -1284,8 +1284,13 @@ public class PortalServer {
                   list.forEach(function(it) {
                     var a = document.createElement('a');
                     a.href = it.url;
-                    a.textContent = it.title;
-                    a.title = it.title;
+                    // Prefix the entry with its Docusaurus project name (first URL path
+                    // segment, e.g. "doc_SCIVICS002"): "<project> : <title>". Derived from the
+                    // URL at render time so pre-existing entries without a stored project work too.
+                    var proj = it.url.split('?')[0].split('/')[1] || '';
+                    var label = proj ? (proj + ' : ' + it.title) : it.title;
+                    a.textContent = label;
+                    a.title = label;
                     a.addEventListener('click', function(e) {
                       if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                       e.preventDefault();
