@@ -10,6 +10,8 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
@@ -25,6 +27,14 @@ import java.util.stream.Stream;
  *   <li>{@code list-documents} — list all documents in the navigation tree</li>
  *   <li>{@code read-document} — read raw Markdown source of a document</li>
  *   <li>{@code edit-document} — write or update a Markdown document</li>
+ *   <li>{@code related-documents} — find similar documents using TF-IDF (MoreLikeThis)</li>
+ *   <li>{@code find-related-documents} — TF-IDF (MoreLikeThis) similar documents, from pasted text
+ *       rather than an existing document's path</li>
+ *   <li>{@code search-docs-semantic} — embedding-based semantic search by query</li>
+ *   <li>{@code related-documents-semantic} — precomputed embedding-based neighbours of a document</li>
+ *   <li>{@code prerequisite-documents} — find the documents this one requires, from its
+ *       {@code ### 前提文書} section (a directed, author-declared relation, not similarity)</li>
+ *   <li>{@code upload-pdf} — import a PDF into the docs directory</li>
  *   <li>{@code rebuild-site} — regenerate HTML and search index</li>
  * </ul>
  */
@@ -38,22 +48,44 @@ class McpHandler {
     private final ActorRef<LuceneSearcher> searcher;
     private final Runnable rebuild;
     private final Map<String, ActorRef<LuceneSearcher>> localeSearchers;
+    private final KeywordMap.Resolver docRefResolver;
+    private final BiFunction<String, String, List<Map<String, String>>> textRelatedResolver;
+    private final Function<String, List<Map<String, String>>> semanticQueryResolver;
+    private final Function<String, List<Map<String, String>>> semanticRelatedResolver;
 
     private final Map<String, String> sessions = new ConcurrentHashMap<>();
     private final AtomicLong sessionCounter = new AtomicLong();
 
     /**
-     * @param docsDir         the docs/ directory containing raw Markdown source files
-     * @param searcher        the default Lucene searcher actor for full-text search
-     * @param rebuild         callback to trigger a full rebuild (build + reindex)
-     * @param localeSearchers locale-specific searcher actors (may be empty)
+     * @param docsDir                 the docs/ directory containing raw Markdown source files
+     * @param searcher                the default Lucene searcher actor for full-text search
+     * @param rebuild                 callback to trigger a full rebuild (build + reindex)
+     * @param localeSearchers         locale-specific searcher actors (may be empty)
+     * @param docRefResolver          resolves a document id or path fragment to a hit map
+     *                                ({@code id,title,path,srcPath,summary}); same resolver the
+     *                                portal's {@code /api/resolve}/{@code /api/siblings}/
+     *                                {@code /api/prerequisites} use
+     * @param textRelatedResolver     TF-IDF (MoreLikeThis) hits for pasted text, given
+     *                                {@code (text, locale)}; same aggregation {@code /api/find-related}
+     *                                uses. {@code locale} may be blank/unknown, meaning "all locales".
+     * @param semanticQueryResolver   embedding-based hits for a query string; same as
+     *                                {@code /api/search-semantic}
+     * @param semanticRelatedResolver precomputed embedding-based neighbours for a served document
+     *                                path; same as {@code /api/related-semantic}
      */
     McpHandler(Path docsDir, ActorRef<LuceneSearcher> searcher, Runnable rebuild,
-               Map<String, ActorRef<LuceneSearcher>> localeSearchers) {
+               Map<String, ActorRef<LuceneSearcher>> localeSearchers, KeywordMap.Resolver docRefResolver,
+               BiFunction<String, String, List<Map<String, String>>> textRelatedResolver,
+               Function<String, List<Map<String, String>>> semanticQueryResolver,
+               Function<String, List<Map<String, String>>> semanticRelatedResolver) {
         this.docsDir = docsDir;
         this.searcher = searcher;
         this.rebuild = rebuild;
         this.localeSearchers = localeSearchers != null ? localeSearchers : Map.of();
+        this.docRefResolver = docRefResolver;
+        this.textRelatedResolver = textRelatedResolver;
+        this.semanticQueryResolver = semanticQueryResolver;
+        this.semanticRelatedResolver = semanticRelatedResolver;
     }
 
     /**
@@ -156,7 +188,23 @@ class McpHandler {
             toolDef("upload-pdf",
                 "Import a PDF file into the docs directory. Copies the PDF, extracts text, writes a companion .md file with YAML frontmatter (title, authors, year, journal), and triggers a rebuild.",
                 """
-                {"type":"object","properties":{"source_path":{"type":"string","description":"Absolute path to the PDF file on the filesystem"},"dest_path":{"type":"string","description":"Relative path within docs/ where the PDF should be saved (e.g. 'papers/attention.pdf')"}},"required":["source_path","dest_path"]}""")
+                {"type":"object","properties":{"source_path":{"type":"string","description":"Absolute path to the PDF file on the filesystem"},"dest_path":{"type":"string","description":"Relative path within docs/ where the PDF should be saved (e.g. 'papers/attention.pdf')"}},"required":["source_path","dest_path"]}"""),
+            toolDef("prerequisite-documents",
+                "Find the documents that must be understood before this one, from its \"### 前提文書\" section. This is a directed, author-declared \"read this first\" relation, not a similarity score: it can point to a document that shares no vocabulary with this one, and it does not imply the reverse relation.",
+                """
+                {"type":"object","properties":{"id":{"type":"string","description":"Document id, or a fragment of its path, identifying the document whose prerequisites to look up"}},"required":["id"]}"""),
+            toolDef("find-related-documents",
+                "Find documents similar to a given piece of text using TF-IDF (MoreLikeThis). Useful for discovering related topics before a document has been saved anywhere (e.g. a draft or fragment).",
+                """
+                {"type":"object","properties":{"text":{"type":"string","description":"The text to find related documents for"},"locale":{"type":"string","description":"Locale code (e.g. ja, en). Optional."},"max_results":{"type":"integer","description":"Maximum results to return (default 5)"}},"required":["text"]}"""),
+            toolDef("search-docs-semantic",
+                "Search documents using embedding-based semantic similarity. Finds conceptually related documents even when the query does not share the same keywords as the document text.",
+                """
+                {"type":"object","properties":{"query":{"type":"string","description":"Search query"},"max_results":{"type":"integer","description":"Maximum results to return (default 20)"}},"required":["query"]}"""),
+            toolDef("related-documents-semantic",
+                "Find documents that are semantically similar to a given document, using precomputed embedding vectors. Complements related-documents (TF-IDF) with a different, meaning-based notion of similarity.",
+                """
+                {"type":"object","properties":{"path":{"type":"string","description":"Relative path to the .md file to find related documents for"},"max_results":{"type":"integer","description":"Maximum results to return (default 5)"}},"required":["path"]}""")
         ) + "]}";
     }
 
@@ -174,6 +222,10 @@ class McpHandler {
             case "rebuild-site"       -> toolRebuildSite();
             case "related-documents"  -> toolRelatedDocuments(args);
             case "upload-pdf"     -> toolUploadPdf(args);
+            case "prerequisite-documents" -> toolPrerequisiteDocuments(args);
+            case "find-related-documents" -> toolFindRelatedDocuments(args);
+            case "search-docs-semantic" -> toolSearchDocsSemantic(args);
+            case "related-documents-semantic" -> toolRelatedDocumentsSemantic(args);
             case null -> errorJson(-32602, "Missing tool name");
             default -> errorJson(-32602, "Unknown tool: " + toolName);
         };
@@ -347,6 +399,138 @@ class McpHandler {
                 sb.append("  Path: ").append(hit.path()).append("\n");
                 if (!hit.summary().isEmpty()) {
                     sb.append("  Summary: ").append(hit.summary()).append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+        return toolResult(sb.toString());
+    }
+
+    private String toolPrerequisiteDocuments(Map<String, Object> args) throws IOException {
+        String ref = McpJsonParser.getString(args, "id");
+        if (ref == null || ref.isBlank()) {
+            return toolError("Id is required");
+        }
+        if (docRefResolver == null) {
+            return toolError("prerequisite-documents is not available in single-project mode");
+        }
+        Map<String, String> self = docRefResolver.resolve(ref);
+        if (self == null) {
+            return toolError("Document not found: " + ref);
+        }
+
+        List<Map<String, String>> prereqs = new java.util.ArrayList<>();
+        String srcPath = self.getOrDefault("srcPath", "");
+        if (!srcPath.isBlank()) {
+            String content = Files.readString(Path.of(srcPath), StandardCharsets.UTF_8);
+            for (String docRef : PrerequisiteSection.extractRefs(content)) {
+                Map<String, String> hit = docRefResolver.resolve(docRef);
+                if (hit != null) prereqs.add(hit);
+            }
+        }
+
+        var sb = new StringBuilder();
+        if (prereqs.isEmpty()) {
+            sb.append("No prerequisite documents found for: ").append(ref);
+        } else {
+            sb.append("Prerequisite documents (").append(prereqs.size()).append("):\n\n");
+            for (var hit : prereqs) {
+                sb.append("- **").append(hit.getOrDefault("title", "")).append("**\n");
+                sb.append("  Path: ").append(hit.getOrDefault("path", "")).append("\n");
+                String summary = hit.getOrDefault("summary", "");
+                if (!summary.isEmpty()) {
+                    sb.append("  Summary: ").append(summary).append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+        return toolResult(sb.toString());
+    }
+
+    private String toolFindRelatedDocuments(Map<String, Object> args) {
+        String text = McpJsonParser.getString(args, "text");
+        if (text == null || text.isBlank()) {
+            return toolError("Text is required");
+        }
+        String locale = McpJsonParser.getString(args, "locale");
+        Number maxNum = McpJsonParser.getNumber(args, "max_results");
+        int maxResults = maxNum != null ? maxNum.intValue() : 5;
+
+        List<Map<String, String>> hits = textRelatedResolver != null
+            ? textRelatedResolver.apply(text, locale) : List.of();
+        if (hits.size() > maxResults) hits = hits.subList(0, maxResults);
+
+        var sb = new StringBuilder();
+        if (hits.isEmpty()) {
+            sb.append("No related documents found for: ").append(text);
+        } else {
+            sb.append("Related documents (").append(hits.size()).append("):\n\n");
+            for (var hit : hits) {
+                sb.append("- **").append(hit.getOrDefault("title", "")).append("**\n");
+                sb.append("  Path: ").append(hit.getOrDefault("path", "")).append("\n");
+                String summary = hit.getOrDefault("summary", "");
+                if (!summary.isEmpty()) {
+                    sb.append("  Summary: ").append(summary).append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+        return toolResult(sb.toString());
+    }
+
+    private String toolSearchDocsSemantic(Map<String, Object> args) {
+        String query = McpJsonParser.getString(args, "query");
+        if (query == null || query.isBlank()) {
+            return toolError("Query is required");
+        }
+        Number maxNum = McpJsonParser.getNumber(args, "max_results");
+        int maxResults = maxNum != null ? maxNum.intValue() : 20;
+
+        List<Map<String, String>> hits = semanticQueryResolver != null
+            ? semanticQueryResolver.apply(query) : List.of();
+        if (hits.size() > maxResults) hits = hits.subList(0, maxResults);
+
+        var sb = new StringBuilder();
+        if (hits.isEmpty()) {
+            sb.append("No results found for: ").append(query);
+        } else {
+            sb.append("Found ").append(hits.size()).append(" result(s):\n\n");
+            for (var hit : hits) {
+                sb.append("- **").append(hit.getOrDefault("title", "")).append("**\n");
+                sb.append("  Path: ").append(hit.getOrDefault("path", "")).append("\n");
+                String summary = hit.getOrDefault("summary", "");
+                if (!summary.isEmpty()) {
+                    sb.append("  Summary: ").append(summary).append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+        return toolResult(sb.toString());
+    }
+
+    private String toolRelatedDocumentsSemantic(Map<String, Object> args) {
+        String pathStr = McpJsonParser.getString(args, "path");
+        if (pathStr == null || pathStr.isBlank()) {
+            return toolError("Path is required");
+        }
+        Number maxNum = McpJsonParser.getNumber(args, "max_results");
+        int maxResults = maxNum != null ? maxNum.intValue() : 5;
+
+        List<Map<String, String>> hits = semanticRelatedResolver != null
+            ? semanticRelatedResolver.apply(pathStr) : List.of();
+        if (hits.size() > maxResults) hits = hits.subList(0, maxResults);
+
+        var sb = new StringBuilder();
+        if (hits.isEmpty()) {
+            sb.append("No related documents found for: ").append(pathStr);
+        } else {
+            sb.append("Related documents (").append(hits.size()).append("):\n\n");
+            for (var hit : hits) {
+                sb.append("- **").append(hit.getOrDefault("title", "")).append("**\n");
+                sb.append("  Path: ").append(hit.getOrDefault("path", "")).append("\n");
+                String summary = hit.getOrDefault("summary", "");
+                if (!summary.isEmpty()) {
+                    sb.append("  Summary: ").append(summary).append("\n");
                 }
                 sb.append("\n");
             }

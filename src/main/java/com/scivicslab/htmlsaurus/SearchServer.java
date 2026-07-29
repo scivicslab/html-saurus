@@ -103,7 +103,17 @@ public class SearchServer {
         if (!production) {
             // MCP endpoint for LLM tool access (development mode only — exposes unauthenticated
             // file read/write/rebuild tools that must not be reachable from a production deployment)
-            var mcpHandler = new McpHandler(docsDir, searcher, rebuild, localeSearchers);
+            // Single-project mode has no id/path-fragment resolver (no /api/resolve equivalent),
+            // so prerequisite-documents reports itself unavailable here rather than resolving.
+            // find-related-documents also ignores locale here, matching handleFindRelated's own
+            // behavior (a single project has one default searcher, not per-locale aggregation).
+            java.util.function.BiFunction<String, String, List<Map<String, String>>> textRelatedResolver =
+                (text, locale) -> tfidfRelatedText(text);
+            java.util.function.Function<String, List<Map<String, String>>> semanticQueryResolver = this::semanticSearch;
+            java.util.function.Function<String, List<Map<String, String>>> semanticRelatedResolver =
+                p -> semanticRelated.getOrDefault(p, List.of());
+            var mcpHandler = new McpHandler(docsDir, searcher, rebuild, localeSearchers, null,
+                textRelatedResolver, semanticQueryResolver, semanticRelatedResolver);
             server.createContext("/mcp", mcpHandler::handle);
         }
         server.createContext("/", this::handleStatic);

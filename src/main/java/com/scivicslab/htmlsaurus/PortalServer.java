@@ -103,8 +103,6 @@ public class PortalServer {
                 Main.reindexAll(p.projectDir(), production);
             }
         };
-        this.mcpHandler = new McpHandler(worksDir, defaultSearcher, rebuildAll, searchers);
-
         // Semantic related-docs: render the in-memory neighbour index into portal URLs
         // (project-prefixed: /<project>/<page>). Empty index -> empty map -> widget shows nothing.
         this.semanticRelated = semanticIndex == null ? Map.of()
@@ -112,6 +110,23 @@ public class PortalServer {
         this.semanticIndex = semanticIndex;
         this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
         System.out.println("Semantic related-docs: " + semanticRelated.size() + " entries (in-memory)");
+
+        java.util.function.BiFunction<String, String, List<Map<String, String>>> textRelatedResolver = (text, locale) -> {
+            try {
+                if (locale != null && !locale.isBlank() && searchers.containsKey(locale)) {
+                    return moreLikeThisAcrossProjects(text, locale, "");
+                }
+                return moreLikeThisAllLocales(text, "");
+            } catch (Exception e) {
+                System.err.println("find-related-documents error: " + e.getMessage());
+                return List.of();
+            }
+        };
+        java.util.function.Function<String, List<Map<String, String>>> semanticQueryResolver = this::semanticSearch;
+        java.util.function.Function<String, List<Map<String, String>>> semanticRelatedResolver =
+            p -> semanticRelated.getOrDefault(p, List.of());
+        this.mcpHandler = new McpHandler(worksDir, defaultSearcher, rebuildAll, searchers, this::resolveDocRef,
+            textRelatedResolver, semanticQueryResolver, semanticRelatedResolver);
 
         // Deterministic keyword->document table. Default location is <worksDir>/html-saurus/keyword-map.tsv
         // (a git-tracked, writable file); override with -Dhtmlsaurus.keywordmap.path or KEYWORD_MAP_PATH.
@@ -256,6 +271,12 @@ public class PortalServer {
         // Table-of-contents proximity: docs in the same grouping directory (JSON): GET /api/siblings?id=...
         if (path.equals("/api/siblings")) {
             handleSiblings(ex);
+            return;
+        }
+
+        // Prerequisite documents (JSON): GET /api/prerequisites?id=... — the "### 前提文書" section
+        if (path.equals("/api/prerequisites")) {
+            handlePrerequisites(ex);
             return;
         }
 
@@ -584,6 +605,46 @@ public class PortalServer {
             }
         } catch (Exception e) {
             System.err.println("siblings error for " + srcPath + ": " + e.getMessage());
+        }
+        return out;
+    }
+
+    /**
+     * Handles {@code GET /api/prerequisites?id=<docId>} (alias {@code ?ref=...}). Returns the
+     * documents listed under the referenced document's {@code ### 前提文書} section — a non-symmetric
+     * "read this first" relation distinct from similarity-based search, per
+     * {@code PrerequisiteDocument_260728_oo01} (doc_SCIVICS002/html-saurus/040_design) — as a JSON array
+     * of {@code {id,title,path,srcPath,summary}}. Returns HTTP 404 when {@code id}/{@code ref} itself
+     * does not resolve; returns an empty array when the document resolves but has no
+     * {@code ### 前提文書} section (absence of the section does not mean no prerequisite exists).
+     */
+    private void handlePrerequisites(HttpExchange ex) throws IOException {
+        String ref = queryParam(ex, "id");
+        if (ref.isBlank()) ref = queryParam(ex, "ref");
+        if (ref.isBlank()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing id\"}");
+            return;
+        }
+        Map<String, String> self = resolveDocRef(ref);
+        if (self == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"not found\",\"id\":" + jsonStr(ref) + "}");
+            return;
+        }
+        RelatedDocsView.writeJson(ex, prerequisitesFor(self.getOrDefault("srcPath", "")));
+    }
+
+    /** Resolves the {@code ### 前提文書} references of a source {@code .md} file to hit maps. */
+    private List<Map<String, String>> prerequisitesFor(String srcPath) {
+        List<Map<String, String>> out = new ArrayList<>();
+        if (srcPath == null || srcPath.isBlank()) return out;
+        try {
+            String content = Files.readString(Path.of(srcPath), StandardCharsets.UTF_8);
+            for (String docRef : PrerequisiteSection.extractRefs(content)) {
+                Map<String, String> hit = resolveDocRef(docRef);
+                if (hit != null) out.add(hit);
+            }
+        } catch (IOException e) {
+            System.err.println("Prerequisites lookup failed for " + srcPath + ": " + e.getMessage());
         }
         return out;
     }
