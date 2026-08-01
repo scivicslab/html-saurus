@@ -360,6 +360,7 @@ class PageScripts {
                   var colCount = 0;
                   Array.prototype.forEach.call(el.children, function(c) { colCount += (c.colSpan || 1); });
                   var tr = document.createElement('tr');
+                  tr.className = 'translation-row';
                   tr.dataset.translated = '1';
                   var td = document.createElement('td');
                   td.colSpan = colCount || 1;
@@ -370,7 +371,10 @@ class PageScripts {
                   el.parentNode.insertBefore(details, el.nextSibling);
                 }
               }
-              btn.addEventListener('click', function() {
+              var defaultLabel = btn.innerHTML;
+              var shownLabel = '&#x1F310; Hide translation';
+              var translated = false;
+              function runTranslation() {
                 var main = document.querySelector('main');
                 if (!main) return;
                 var blocks = [];
@@ -379,14 +383,14 @@ class PageScripts {
                   el.dataset.translated = '1';
                   blocks.push(el);
                 });
-                if (!blocks.length) return;
+                translated = true;
+                if (!blocks.length) { btn.innerHTML = shownLabel; return; }
                 btn.disabled = true;
-                var orig = btn.innerHTML;
                 btn.innerHTML = '&#x1F310; Translating\\u2026';
                 var pending = blocks.length;
                 function oneDone() {
                   pending--;
-                  if (pending <= 0) { btn.innerHTML = orig; btn.disabled = false; }
+                  if (pending <= 0) { btn.innerHTML = shownLabel; btn.disabled = false; }
                 }
                 blocks.forEach(function(el) {
                   var text = ownText(el).trim();
@@ -400,6 +404,16 @@ class PageScripts {
                     .catch(function() {})
                     .finally(oneDone);
                 });
+              }
+              function clearTranslation() {
+                document.querySelectorAll('main tr.translation-row').forEach(function(tr) { tr.remove(); });
+                document.querySelectorAll('main details.inline-translation').forEach(function(d) { d.remove(); });
+                document.querySelectorAll('main [data-translated]').forEach(function(el) { delete el.dataset.translated; });
+                translated = false;
+                btn.innerHTML = defaultLabel;
+              }
+              btn.addEventListener('click', function() {
+                if (translated) { clearTranslation(); } else { runTranslation(); }
               });
             })();
             // Right-side TOC: scroll-spy highlight
