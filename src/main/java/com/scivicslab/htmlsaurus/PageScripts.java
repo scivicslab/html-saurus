@@ -348,7 +348,14 @@ class PageScripts {
               function insertTranslation(el, translation) {
                 var details = makeAccordion(translation);
                 if (el.tagName === 'LI') {
-                  el.appendChild(details);
+                  // Insert before any nested <ul>/<ol> so the translation stays next to this
+                  // item's own text instead of trailing the whole nested sub-list.
+                  var nestedList = null;
+                  for (var i = 0; i < el.children.length; i++) {
+                    var c = el.children[i];
+                    if (c.tagName === 'UL' || c.tagName === 'OL') { nestedList = c; break; }
+                  }
+                  el.insertBefore(details, nestedList);
                 } else if (el.tagName === 'TR') {
                   var colCount = 0;
                   Array.prototype.forEach.call(el.children, function(c) { colCount += (c.colSpan || 1); });
