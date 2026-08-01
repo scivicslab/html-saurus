@@ -309,6 +309,14 @@ class PageScripts {
               var btn = document.getElementById('translate-btn');
               if (!btn) return;
               var targetLang = btn.dataset.targetLang;
+              var expandAllBtn = document.getElementById('expand-all-btn');
+              var collapseAllBtn = document.getElementById('collapse-all-btn');
+              if (expandAllBtn) expandAllBtn.addEventListener('click', function() {
+                document.querySelectorAll('main details.inline-translation').forEach(function(d) { d.open = true; });
+              });
+              if (collapseAllBtn) collapseAllBtn.addEventListener('click', function() {
+                document.querySelectorAll('main details.inline-translation').forEach(function(d) { d.open = false; });
+              });
               // A list item's own text, excluding nested <ul>/<ol> (translated separately).
               function ownText(el) {
                 if (el.tagName === 'TR') {

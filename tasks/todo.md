@@ -193,3 +193,28 @@
 
 ### 未了
 - commit・push はこの直後に実施（デプロイはユーザー側で対応）。
+
+## 追加: UI微調整（クリックヒント削除・全部開閉ボタン・フォント縮小）
+
+ユーザーが実機で動作確認した上でのフィードバック3点。
+
+### 実装したもの
+- `page.css`: `main details.inline-translation > summary::after { display: none; }` で
+  既存の「クリックで展開/折りたたみ」ヒント（サイト全体の`<details>`向け、6月以前からの
+  既存機能）を翻訳アコーディオンだけ無効化。他の`<details>`（admonition等）は無改変。
+  ヒント用に確保されていた右余白（10rem）も、翻訳アコーディオンだけ2.2remに縮小。
+- `page.css`: `main details.inline-translation` とその `summary` のフォントサイズを
+  それぞれ0.85rem・0.82remに縮小（既定は本文相当・0.92rem）。
+- `PageRenderer.java`: `.copy-bar`にTranslateの隣へ「Expand all」「Collapse all」
+  ボタンを追加（`production`では非表示、既存ボタン群と同条件）。
+- `PageScripts.java`: 2ボタンの押下で `main details.inline-translation` を
+  全て`open = true/false`に一括変更。
+
+### 検証
+- 153テスト GREEN、`mvn install` 成功。
+- 使い捨てインスタンスで新規4ボタン（Text/Markdown/Path/Translate/Expand all/Collapse all）
+  がcopy-barに正しい順で出力されることを確認、CSSも出力HTMLに含まれることを確認。
+  検証後に停止・削除済み。
+
+### 未了
+- commit・push はこの直後に実施。

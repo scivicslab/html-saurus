@@ -282,6 +282,10 @@ class PageRenderer {
               .append(escapeHtml(translateTargetLang))
               .append("\" title=\"Translate paragraphs, headings, lists, and tables on demand\">")
               .append("&#x1F310; Translate</button>");
+            sb.append("<button class=\"copy-btn\" id=\"expand-all-btn\" title=\"Expand all translations\">")
+              .append("&#x2795; Expand all</button>");
+            sb.append("<button class=\"copy-btn\" id=\"collapse-all-btn\" title=\"Collapse all translations\">")
+              .append("&#x2796; Collapse all</button>");
             sb.append("</div>\n");
             sb.append(content);
             sb.append("<footer class=\"source-footer\">").append(escapeHtml(mdSourcePath)).append("</footer>\n");
