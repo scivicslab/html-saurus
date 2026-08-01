@@ -37,6 +37,10 @@ public class SearchServer {
     private final SemanticIndex semanticIndex;
     /** Embedding client used to embed search queries at request time. */
     private final EmbeddingClient embed;
+    /** Generation client used for on-demand paragraph translation. */
+    private final TranslationClient translate;
+    /** On-disk cache of past translations for this project. */
+    private final TranslationCache translationCache;
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
 
@@ -61,6 +65,8 @@ public class SearchServer {
                 : semanticIndex.servedMap((projectName, path) -> path);
         this.semanticIndex = semanticIndex;
         this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
+        this.translate = new TranslationClient(System.getenv("TRANSLATION_SERVER_URL"));
+        this.translationCache = TranslationCache.load(docsDir.getParent());
         this.searcher = searcherSystem.actorOf("default", new LuceneSearcher(indexDir));
         // Load locale-specific indexes from search-index/<locale>/
         try {
@@ -99,6 +105,7 @@ public class SearchServer {
             server.createContext("/related-semantic", this::handleRelatedSemanticPage);
             server.createContext("/api/search-semantic", this::handleSearchSemantic);
             server.createContext("/search-semantic", this::handleSearchSemanticPage);
+            server.createContext("/api/translate", this::handleTranslate);
         }
         if (!production) {
             // MCP endpoint for LLM tool access (development mode only — exposes unauthenticated
@@ -140,6 +147,38 @@ public class SearchServer {
         rebuild.run();
         long ms = System.currentTimeMillis() - start;
         respond(ex, 200, "application/json", "{\"status\":\"ok\",\"ms\":" + ms + "}");
+    }
+
+    // ---- Translation endpoint -------------------------------------
+
+    /**
+     * Handles {@code POST /api/translate?lang=English}. The request body is the raw source
+     * text of one block (paragraph, heading, list item, or table row). Checks
+     * {@link #translationCache} first and only calls {@link #translate} on a cache miss.
+     */
+    private void handleTranslate(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            HttpUtils.respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        String targetLang = HttpUtils.queryParam(ex, "lang");
+        String text = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8).strip();
+        if (text.isEmpty() || targetLang.isEmpty()) {
+            HttpUtils.respond(ex, 400, "text/plain", "Missing text or lang");
+            return;
+        }
+        String key = TranslationCache.key(text, targetLang);
+        String cached = translationCache.get(key);
+        String result = cached != null ? cached : translate.translate(text, targetLang);
+        if (result == null) {
+            HttpUtils.respond(ex, 502, "application/json", "{\"error\":\"translation failed\"}");
+            return;
+        }
+        if (cached == null) {
+            translationCache.put(key, result);
+        }
+        HttpUtils.respond(ex, 200, "application/json; charset=UTF-8",
+            "{\"translation\":" + HttpUtils.jsonStr(result) + "}");
     }
 
     // ---- Search endpoint ----------------------------------------

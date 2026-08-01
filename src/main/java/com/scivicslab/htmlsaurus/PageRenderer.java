@@ -275,6 +275,13 @@ class PageRenderer {
             sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
             sb.append("<button class=\"copy-btn\" id=\"copy-path-btn\" data-path=\"").append(escapeHtml(mdSourcePath))
               .append("\" title=\"").append(escapeHtml(mdSourcePath)).append("\">&#x1F4C2; Path</button>");
+            String pageLocale = (currentLocale != null) ? currentLocale
+                : (defaultLocale != null) ? defaultLocale : "ja";
+            String translateTargetLang = "ja".equals(pageLocale) ? "English" : "Japanese";
+            sb.append("<button class=\"copy-btn\" id=\"translate-btn\" data-target-lang=\"")
+              .append(escapeHtml(translateTargetLang))
+              .append("\" title=\"Translate paragraphs, headings, lists, and tables on demand\">")
+              .append("&#x1F310; Translate</button>");
             sb.append("</div>\n");
             sb.append(content);
             sb.append("<footer class=\"source-footer\">").append(escapeHtml(mdSourcePath)).append("</footer>\n");

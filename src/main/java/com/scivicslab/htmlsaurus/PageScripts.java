@@ -304,6 +304,89 @@ class PageScripts {
                 return r;
               }
             })();
+            // On-demand translation: paragraphs, headings, list items, and table rows
+            (function() {
+              var btn = document.getElementById('translate-btn');
+              if (!btn) return;
+              var targetLang = btn.dataset.targetLang;
+              // A list item's own text, excluding nested <ul>/<ol> (translated separately).
+              function ownText(el) {
+                if (el.tagName === 'TR') {
+                  return Array.prototype.map.call(el.children, function(c) {
+                    return c.textContent.trim();
+                  }).join(' | ');
+                }
+                if (el.tagName === 'LI') {
+                  var t = '';
+                  el.childNodes.forEach(function(c) {
+                    if (c.nodeType === 1 && (c.tagName === 'UL' || c.tagName === 'OL')) return;
+                    t += c.textContent;
+                  });
+                  return t;
+                }
+                return el.textContent;
+              }
+              function makeAccordion(translation) {
+                var details = document.createElement('details');
+                details.className = 'inline-translation';
+                var summary = document.createElement('summary');
+                summary.textContent = 'Translation';
+                details.appendChild(summary);
+                var body = document.createElement('div');
+                body.textContent = translation;
+                details.appendChild(body);
+                return details;
+              }
+              function insertTranslation(el, translation) {
+                var details = makeAccordion(translation);
+                if (el.tagName === 'LI') {
+                  el.appendChild(details);
+                } else if (el.tagName === 'TR') {
+                  var colCount = 0;
+                  Array.prototype.forEach.call(el.children, function(c) { colCount += (c.colSpan || 1); });
+                  var tr = document.createElement('tr');
+                  tr.dataset.translated = '1';
+                  var td = document.createElement('td');
+                  td.colSpan = colCount || 1;
+                  td.appendChild(details);
+                  tr.appendChild(td);
+                  el.parentNode.insertBefore(tr, el.nextSibling);
+                } else {
+                  el.parentNode.insertBefore(details, el.nextSibling);
+                }
+              }
+              btn.addEventListener('click', function() {
+                var main = document.querySelector('main');
+                if (!main) return;
+                var blocks = [];
+                main.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, tr').forEach(function(el) {
+                  if (el.dataset.translated) return;
+                  el.dataset.translated = '1';
+                  blocks.push(el);
+                });
+                if (!blocks.length) return;
+                btn.disabled = true;
+                var orig = btn.innerHTML;
+                btn.innerHTML = '&#x1F310; Translating\\u2026';
+                var pending = blocks.length;
+                function oneDone() {
+                  pending--;
+                  if (pending <= 0) { btn.innerHTML = orig; btn.disabled = false; }
+                }
+                blocks.forEach(function(el) {
+                  var text = ownText(el).trim();
+                  if (!text) { oneDone(); return; }
+                  fetch('/api/translate?lang=' + encodeURIComponent(targetLang), {
+                    method: 'POST',
+                    headers: {'Content-Type': 'text/plain; charset=UTF-8'},
+                    body: text
+                  }).then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(d) { if (d && d.translation) insertTranslation(el, d.translation); })
+                    .catch(function() {})
+                    .finally(oneDone);
+                });
+              });
+            })();
             // Right-side TOC: scroll-spy highlight
             (function() {
               var tocLinks = document.querySelectorAll('aside.toc a');

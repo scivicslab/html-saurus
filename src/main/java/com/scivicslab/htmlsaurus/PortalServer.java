@@ -49,6 +49,10 @@ public class PortalServer {
     private final SemanticIndex semanticIndex;
     /** Embedding client used to embed search queries at request time. */
     private final EmbeddingClient embed;
+    /** Generation client used for on-demand paragraph translation. */
+    private final TranslationClient translate;
+    /** On-disk cache of past translations, shared across all projects in the portal. */
+    private final TranslationCache translationCache;
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
     /** Deterministic keyword&rarr;document table (curated pointers), surfaced above search results. */
@@ -109,6 +113,8 @@ public class PortalServer {
                 : semanticIndex.servedMap((projectName, path) -> "/" + projectName + path);
         this.semanticIndex = semanticIndex;
         this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
+        this.translate = new TranslationClient(System.getenv("TRANSLATION_SERVER_URL"));
+        this.translationCache = TranslationCache.load(worksDir);
         System.out.println("Semantic related-docs: " + semanticRelated.size() + " entries (in-memory)");
 
         java.util.function.BiFunction<String, String, List<Map<String, String>>> textRelatedResolver = (text, locale) -> {
@@ -259,6 +265,12 @@ public class PortalServer {
         // Text similarity API: POST /api/find-related (non-production only)
         if (!production && path.equals("/api/find-related")) {
             handleFindRelated(ex);
+            return;
+        }
+
+        // On-demand paragraph translation API: POST /api/translate?lang=... (non-production only)
+        if (!production && path.equals("/api/translate")) {
+            handleTranslate(ex);
             return;
         }
 
@@ -1866,6 +1878,38 @@ public class PortalServer {
         ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         ex.sendResponseHeaders(200, body.length);
         try (var out = ex.getResponseBody()) { out.write(body); }
+    }
+
+    /**
+     * Handles {@code POST /api/translate?lang=English}. The request body is the raw source
+     * text of one block (paragraph, heading, list item, or table row). Checks
+     * {@link #translationCache} first and only calls {@link #translate} on a cache miss.
+     * The cache is shared across all projects since translation does not depend on which
+     * project a paragraph came from.
+     */
+    private void handleTranslate(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        String targetLang = queryParam(ex, "lang");
+        String text = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8).strip();
+        if (text.isEmpty() || targetLang.isEmpty()) {
+            respond(ex, 400, "text/plain", "Missing text or lang");
+            return;
+        }
+        String key = TranslationCache.key(text, targetLang);
+        String cached = translationCache.get(key);
+        String result = cached != null ? cached : translate.translate(text, targetLang);
+        if (result == null) {
+            respond(ex, 502, "application/json", "{\"error\":\"translation failed\"}");
+            return;
+        }
+        if (cached == null) {
+            translationCache.put(key, result);
+        }
+        respond(ex, 200, "application/json; charset=UTF-8",
+            "{\"translation\":" + jsonStr(result) + "}");
     }
 
     /** POST /find-related — form submission; renders an HTML page with up to 20 similar docs. */
