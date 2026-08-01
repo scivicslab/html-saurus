@@ -7,6 +7,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -16,6 +17,12 @@ import java.util.logging.Logger;
  *
  * <p>The server is a separate process — by default the W206 GPU host at
  * {@code http://192.168.5.17:8000} — so html-saurus never loads the model itself.
+ *
+ * <p>Circuit breaker: after a failed call, {@link #translate} stops attempting a connection
+ * for {@link #DOWN_BACKOFF_MS} and returns {@code null} immediately. Without this, a single
+ * page's on-demand translation fires one request per paragraph/heading/list item/table row;
+ * if the GPU node is down, each of those would otherwise pay its own connect-timeout instead
+ * of failing fast after the first one.
  */
 public class TranslationClient {
 
@@ -25,6 +32,8 @@ public class TranslationClient {
     public static final String DEFAULT_BASE_URL = "http://192.168.5.17:8000";
     /** Default model id sent in the request. */
     public static final String DEFAULT_MODEL = "google/gemma-4-26B-A4B-it";
+    /** How long to stop attempting connections after a failed call. */
+    private static final long DOWN_BACKOFF_MS = 30_000;
 
     private static final String SYSTEM_PROMPT_TEMPLATE =
             "You are a translation engine. Translate the user's text into %s. "
@@ -33,6 +42,8 @@ public class TranslationClient {
     private final String baseUrl;
     private final String model;
     private final HttpClient httpClient;
+    /** Epoch millis until which {@link #translate} should not attempt a connection; 0 = up. */
+    private final AtomicLong downUntilMs = new AtomicLong(0);
 
     /**
      * Creates a client for the given generation server base URL.
@@ -58,16 +69,20 @@ public class TranslationClient {
     }
 
     /**
-     * Translates a single block of text.
+     * Translates a single block of text. Returns {@code null} without attempting a connection
+     * if a previous call failed within the last {@link #DOWN_BACKOFF_MS} (see class doc).
      *
      * @param text       the source text
      * @param targetLang target language name sent to the model, e.g. {@code "English"} or
      *                   {@code "Japanese"}
-     * @return the translated text, or {@code null} on failure
+     * @return the translated text, or {@code null} on failure or while backed off
      */
     public String translate(String text, String targetLang) {
         if (text == null || text.isBlank()) {
             return "";
+        }
+        if (isDown(System.currentTimeMillis())) {
+            return null;
         }
         try {
             String body = buildRequestJson(text, targetLang, model);
@@ -82,16 +97,30 @@ public class TranslationClient {
             if (response.statusCode() != 200) {
                 logger.warning("Translation server status " + response.statusCode()
                         + " from " + baseUrl);
+                markDown();
                 return null;
             }
-            return parseContent(response.body());
+            String content = parseContent(response.body());
+            downUntilMs.set(0);
+            return content;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
         } catch (Exception e) {
-            logger.log(Level.WARNING, "Translation call to " + baseUrl + " failed", e);
+            logger.log(Level.WARNING, "Translation call to " + baseUrl + " failed"
+                    + " — pausing attempts for " + (DOWN_BACKOFF_MS / 1000) + "s", e);
+            markDown();
             return null;
         }
+    }
+
+    /** Whether {@link #translate} should skip attempting a connection at time {@code nowMs}. */
+    boolean isDown(long nowMs) {
+        return nowMs < downUntilMs.get();
+    }
+
+    void markDown() {
+        downUntilMs.set(System.currentTimeMillis() + DOWN_BACKOFF_MS);
     }
 
     /** Builds the OpenAI-style chat-completions request body for a translation call. */
