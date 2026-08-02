@@ -117,8 +117,17 @@ public class SearchServer {
             java.util.function.Function<String, List<Map<String, String>>> semanticQueryResolver = this::semanticSearch;
             java.util.function.Function<String, List<Map<String, String>>> semanticRelatedResolver =
                 p -> semanticRelated.getOrDefault(p, List.of());
+            // Single-project mode only supports the "all" stage (matching /api/build-all); the
+            // project argument is accepted but ignored, since there is only one implicit project.
+            McpHandler.StageBuilder stageBuilder = (project, stage) -> {
+                if (!"all".equals(stage)) return null;
+                long start = System.currentTimeMillis();
+                rebuild.run();
+                return System.currentTimeMillis() - start;
+            };
             var mcpHandler = new McpHandler(docsDir, searcher, rebuild, localeSearchers, null,
-                textRelatedResolver, semanticQueryResolver, semanticRelatedResolver);
+                textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
+                null, stageBuilder, null, null, null, this::translateCore);
             server.createContext("/mcp", mcpHandler::handle);
         }
         server.createContext("/", this::handleStatic);
@@ -150,6 +159,21 @@ public class SearchServer {
     // ---- Translation endpoint -------------------------------------
 
     /**
+     * Translates one block of text, checking {@link #translationCache} first and only calling
+     * {@link #translate} on a cache miss. Returns {@code null} on failure. Shared by
+     * {@link #handleTranslate} (REST) and the MCP {@code translate} tool.
+     */
+    private String translateCore(String text, String targetLang) {
+        String key = TranslationCache.key(text, targetLang);
+        String cached = translationCache.get(key);
+        String result = cached != null ? cached : translate.translate(text, targetLang);
+        if (result != null && cached == null) {
+            translationCache.put(key, result);
+        }
+        return result;
+    }
+
+    /**
      * Handles {@code POST /api/translate?lang=English}. The request body is the raw source
      * text of one block (paragraph, heading, list item, or table row). Checks
      * {@link #translationCache} first and only calls {@link #translate} on a cache miss.
@@ -165,15 +189,10 @@ public class SearchServer {
             HttpUtils.respond(ex, 400, "text/plain", "Missing text or lang");
             return;
         }
-        String key = TranslationCache.key(text, targetLang);
-        String cached = translationCache.get(key);
-        String result = cached != null ? cached : translate.translate(text, targetLang);
+        String result = translateCore(text, targetLang);
         if (result == null) {
             HttpUtils.respond(ex, 502, "application/json", "{\"error\":\"translation failed\"}");
             return;
-        }
-        if (cached == null) {
-            translationCache.put(key, result);
         }
         HttpUtils.respond(ex, 200, "application/json; charset=UTF-8",
             "{\"translation\":" + HttpUtils.jsonStr(result) + "}");

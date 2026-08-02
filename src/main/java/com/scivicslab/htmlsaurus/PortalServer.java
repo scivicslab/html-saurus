@@ -127,8 +127,27 @@ public class PortalServer {
         java.util.function.Function<String, List<Map<String, String>>> semanticQueryResolver = this::semanticSearch;
         java.util.function.Function<String, List<Map<String, String>>> semanticRelatedResolver =
             p -> semanticRelated.getOrDefault(p, List.of());
+        java.util.function.Function<String, List<Map<String, String>>> siblingsResolver = ref -> {
+            Map<String, String> self = resolveDocRef(ref);
+            return self == null ? List.of() : directorySiblings(self.getOrDefault("srcPath", ""));
+        };
+        McpHandler.StageBuilder stageBuilder = (project, stage) -> {
+            Project proj = projectMap.get(project);
+            if (proj == null) return null;
+            long start = System.currentTimeMillis();
+            runBuildStage(proj, stage);
+            return System.currentTimeMillis() - start;
+        };
+        java.util.concurrent.Callable<Integer> reindexAllRunner = this::reindexAllCore;
+        java.util.concurrent.Callable<int[]> scanWorksDirRunner = this::scanWorksDirCore;
+        java.util.function.Function<String, List<String>> navbarLabelsResolver = name -> {
+            Project proj = projectMap.get(name);
+            return proj == null ? null : readNavbarLabels(proj.projectDir());
+        };
         this.mcpHandler = new McpHandler(worksDir, defaultSearcher, rebuildAll, searchers, this::resolveDocRef,
-            textRelatedResolver, semanticQueryResolver, semanticRelatedResolver);
+            textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
+            siblingsResolver, stageBuilder, reindexAllRunner, scanWorksDirRunner,
+            navbarLabelsResolver, this::translateCore);
     }
 
     /**
@@ -331,39 +350,50 @@ public class PortalServer {
      * project subdirectories not yet known to this server, and builds and indexes each one
      * found. Existing projects are left untouched.
      */
-    private synchronized void handleScanWorksDir(HttpExchange ex) throws IOException {
+    private void handleScanWorksDir(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
         long start = System.currentTimeMillis();
-        System.out.println("Scan works dir requested: rescanning " + worksDir);
         try {
-            List<Path> found = Main.findProjects(worksDir);
-            int added = 0;
-            for (Path p : found) {
-                String name = p.getFileName().toString();
-                if (!projectMap.containsKey(name)) {
-                    Main.build(p.resolve("docs"), p.resolve("static-html"), production);
-                    Main.reindex(p.resolve("docs"), p.resolve("search-index"));
-                    String[] i18n = Main.readI18nConfig(p);
-                    String defaultLocale = (i18n.length > 0 && !i18n[0].isBlank()) ? i18n[0] : "ja";
-                    Project proj = new Project(name, p, p.resolve("static-html"), p.resolve("search-index"), defaultLocale);
-                    projects.add(proj);
-                    projectMap.put(name, proj);
-                    searchers.put(name, searcherSystem.actorOf(name, new LuceneSearcher(proj.indexDir(), defaultLocale)));
-                    searcherLocales.put(name, defaultLocale);
-                    System.out.println("  Added: " + name);
-                    added++;
-                }
-            }
+            int[] result = scanWorksDirCore();
             long elapsed = System.currentTimeMillis() - start;
             respond(ex, 200, "application/json",
-                "{\"status\":\"ok\",\"total\":" + projects.size() + ",\"added\":" + added + ",\"ms\":" + elapsed + "}");
+                "{\"status\":\"ok\",\"total\":" + result[0] + ",\"added\":" + result[1] + ",\"ms\":" + elapsed + "}");
         } catch (Exception e) {
             System.err.println("Scan works dir error: " + e.getMessage());
             respond(ex, 500, "application/json", "{\"error\":\"Scan failed\"}");
         }
+    }
+
+    /**
+     * Rescans the works directory for project subdirectories not yet known to this server, and
+     * builds and indexes each one found. Existing projects are left untouched. Returns
+     * {@code {total known projects, newly added}}. Shared by {@link #handleScanWorksDir} (REST)
+     * and the MCP {@code scan-works-dir} tool.
+     */
+    private synchronized int[] scanWorksDirCore() throws IOException {
+        System.out.println("Scan works dir requested: rescanning " + worksDir);
+        List<Path> found = Main.findProjects(worksDir);
+        int added = 0;
+        for (Path p : found) {
+            String name = p.getFileName().toString();
+            if (!projectMap.containsKey(name)) {
+                Main.build(p.resolve("docs"), p.resolve("static-html"), production);
+                Main.reindex(p.resolve("docs"), p.resolve("search-index"));
+                String[] i18n = Main.readI18nConfig(p);
+                String defaultLocale = (i18n.length > 0 && !i18n[0].isBlank()) ? i18n[0] : "ja";
+                Project proj = new Project(name, p, p.resolve("static-html"), p.resolve("search-index"), defaultLocale);
+                projects.add(proj);
+                projectMap.put(name, proj);
+                searchers.put(name, searcherSystem.actorOf(name, new LuceneSearcher(proj.indexDir(), defaultLocale)));
+                searcherLocales.put(name, defaultLocale);
+                System.out.println("  Added: " + name);
+                added++;
+            }
+        }
+        return new int[]{projects.size(), added};
     }
 
     // ---- Reindex All API endpoint -------------------------------
@@ -375,19 +405,28 @@ public class PortalServer {
             return;
         }
         long start = System.currentTimeMillis();
-        System.out.println("Reindex all requested");
         try {
-            for (Project p : projects) {
-                Main.reindexAll(p.projectDir(), production);
-                System.out.println("  Reindexed: " + p.name());
-            }
+            int total = reindexAllCore();
             long elapsed = System.currentTimeMillis() - start;
             respond(ex, 200, "application/json",
-                "{\"status\":\"ok\",\"total\":" + projects.size() + ",\"ms\":" + elapsed + "}");
+                "{\"status\":\"ok\",\"total\":" + total + ",\"ms\":" + elapsed + "}");
         } catch (Exception e) {
             System.err.println("Reindex all error: " + e.getMessage());
             respond(ex, 500, "application/json", "{\"error\":\"Reindex failed\"}");
         }
+    }
+
+    /**
+     * Re-runs the search indexer for every project, returning the project count. Shared by
+     * {@link #handleReindexAll} (REST) and the MCP {@code reindex-all} tool.
+     */
+    private int reindexAllCore() throws Exception {
+        System.out.println("Reindex all requested");
+        for (Project p : projects) {
+            Main.reindexAll(p.projectDir(), production);
+            System.out.println("  Reindexed: " + p.name());
+        }
+        return projects.size();
     }
 
     /**
@@ -616,26 +655,35 @@ public class PortalServer {
         long start = System.currentTimeMillis();
         System.out.println("Build stage '" + stage + "' requested: " + name);
         try {
-            switch (stage) {
-                case "html" -> Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
-                case "index" -> Main.reindexAll(proj.projectDir(), false);
-                case "embedding" -> Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
-                case "all" -> {
-                    Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
-                    Main.reindexAll(proj.projectDir(), false);
-                    Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
-                }
-                default -> {
-                    respond(ex, 400, "application/json", "{\"error\":\"Unknown stage\"}");
-                    return;
-                }
-            }
+            runBuildStage(proj, stage);
             long elapsed = System.currentTimeMillis() - start;
             respond(ex, 200, "application/json",
                 "{\"status\":\"ok\",\"project\":\"" + name + "\",\"stage\":\"" + stage + "\",\"ms\":" + elapsed + "}");
+        } catch (IllegalArgumentException e) {
+            respond(ex, 400, "application/json", "{\"error\":\"Unknown stage\"}");
         } catch (Exception e) {
             System.err.println("Build stage '" + stage + "' error for " + name + ": " + e.getMessage());
             respond(ex, 500, "application/json", "{\"error\":\"Build stage failed\"}");
+        }
+    }
+
+    /**
+     * Runs one build stage ({@code html}, {@code index}, {@code embedding}, or {@code all}) for a
+     * project. Shared by {@link #handleBuildStage} (REST) and the MCP {@code build-*} tools.
+     *
+     * @throws IllegalArgumentException if {@code stage} is none of the four known stages
+     */
+    private void runBuildStage(Project proj, String stage) throws Exception {
+        switch (stage) {
+            case "html" -> Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
+            case "index" -> Main.reindexAll(proj.projectDir(), false);
+            case "embedding" -> Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
+            case "all" -> {
+                Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
+                Main.reindexAll(proj.projectDir(), false);
+                Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
+            }
+            default -> throw new IllegalArgumentException("Unknown stage: " + stage);
         }
     }
 
@@ -1730,11 +1778,24 @@ public class PortalServer {
     }
 
     /**
+     * Translates one block of text, checking {@link #translationCache} first and only calling
+     * {@link #translate} on a cache miss. The cache is shared across all projects since
+     * translation does not depend on which project a paragraph came from. Returns {@code null}
+     * on failure. Shared by {@link #handleTranslate} (REST) and the MCP {@code translate} tool.
+     */
+    private String translateCore(String text, String targetLang) {
+        String key = TranslationCache.key(text, targetLang);
+        String cached = translationCache.get(key);
+        String result = cached != null ? cached : translate.translate(text, targetLang);
+        if (result != null && cached == null) {
+            translationCache.put(key, result);
+        }
+        return result;
+    }
+
+    /**
      * Handles {@code POST /api/translate?lang=English}. The request body is the raw source
-     * text of one block (paragraph, heading, list item, or table row). Checks
-     * {@link #translationCache} first and only calls {@link #translate} on a cache miss.
-     * The cache is shared across all projects since translation does not depend on which
-     * project a paragraph came from.
+     * text of one block (paragraph, heading, list item, or table row).
      */
     private void handleTranslate(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -1747,15 +1808,10 @@ public class PortalServer {
             respond(ex, 400, "text/plain", "Missing text or lang");
             return;
         }
-        String key = TranslationCache.key(text, targetLang);
-        String cached = translationCache.get(key);
-        String result = cached != null ? cached : translate.translate(text, targetLang);
+        String result = translateCore(text, targetLang);
         if (result == null) {
             respond(ex, 502, "application/json", "{\"error\":\"translation failed\"}");
             return;
-        }
-        if (cached == null) {
-            translationCache.put(key, result);
         }
         respond(ex, 200, "application/json; charset=UTF-8",
             "{\"translation\":" + jsonStr(result) + "}");
