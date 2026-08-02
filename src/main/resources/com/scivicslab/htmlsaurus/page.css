@@ -317,7 +317,17 @@ main details[open] > *:not(summary):last-child { margin-bottom: 1rem; }
 /* ---- Inline translation accordions (JS-inserted on demand): no click hint, smaller font ---- */
 main details.inline-translation > summary::after { display: none; }
 main details.inline-translation { font-size: 0.85rem; }
-main details.inline-translation > summary { font-size: 0.82rem; padding-right: 2.2rem; }
+main details.inline-translation > summary {
+  font-size: 0.82rem; padding-right: 0.9rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+}
+/* Expand-all/collapse-all controls embedded in each accordion's own title row. */
+main details.inline-translation > summary .translation-controls { display: flex; gap: 0.4rem; flex: none; }
+main details.inline-translation > summary .translation-controls button {
+  font-size: 0.72rem; padding: 1px 7px; border-radius: 3px;
+  border: 1px solid var(--c-border); background: transparent; color: inherit; cursor: pointer;
+}
+main details.inline-translation > summary .translation-controls button:hover { background: var(--c-hover); }
 /* ---- Source footer ---- */
 .source-footer { margin-top: 3rem; padding-top: 0.75rem; border-top: 1px solid var(--c-border);
                  font-size: 0.75rem; color: var(--c-arrow);

@@ -309,14 +309,9 @@ class PageScripts {
               var btn = document.getElementById('translate-btn');
               if (!btn) return;
               var targetLang = btn.dataset.targetLang;
-              var expandAllBtn = document.getElementById('expand-all-btn');
-              var collapseAllBtn = document.getElementById('collapse-all-btn');
-              if (expandAllBtn) expandAllBtn.addEventListener('click', function() {
-                document.querySelectorAll('main details.inline-translation').forEach(function(d) { d.open = true; });
-              });
-              if (collapseAllBtn) collapseAllBtn.addEventListener('click', function() {
-                document.querySelectorAll('main details.inline-translation').forEach(function(d) { d.open = false; });
-              });
+              function setAllOpen(open) {
+                document.querySelectorAll('main details.inline-translation').forEach(function(d) { d.open = open; });
+              }
               // A list item's own text, excluding nested <ul>/<ol> (translated separately).
               function ownText(el) {
                 if (el.tagName === 'TR') {
@@ -338,7 +333,25 @@ class PageScripts {
                 var details = document.createElement('details');
                 details.className = 'inline-translation';
                 var summary = document.createElement('summary');
-                summary.textContent = 'Translation';
+                var label = document.createElement('span');
+                label.textContent = 'Translation';
+                summary.appendChild(label);
+                // Expand-all/collapse-all only make sense once at least one accordion exists, so
+                // they live inside each accordion's own summary instead of a permanently-visible
+                // top button. They act on every accordion on the page, not just this one.
+                var controls = document.createElement('span');
+                controls.className = 'translation-controls';
+                var expandBtn = document.createElement('button');
+                expandBtn.type = 'button';
+                expandBtn.textContent = 'Expand all';
+                expandBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); setAllOpen(true); });
+                var collapseBtn = document.createElement('button');
+                collapseBtn.type = 'button';
+                collapseBtn.textContent = 'Collapse all';
+                collapseBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); setAllOpen(false); });
+                controls.appendChild(expandBtn);
+                controls.appendChild(collapseBtn);
+                summary.appendChild(controls);
                 details.appendChild(summary);
                 var body = document.createElement('div');
                 body.textContent = translation;
