@@ -273,8 +273,8 @@ class ModeTest {
         }
 
         @Test
-        @DisplayName("portal page (dev) contains Theme selector and Reload button")
-        void devPortalPage_hasThemeAndReload() throws Exception {
+        @DisplayName("portal page (dev) contains Theme selector and Scan Works Dir button")
+        void devPortalPage_hasThemeAndScanWorksDir() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
             PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null);
@@ -283,8 +283,8 @@ class ModeTest {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
                 assertTrue(html.contains("id=\"theme-select\""),
                         "Dev portal page must render Theme selector element");
-                assertTrue(html.contains("id=\"reload-btn\""),
-                        "Dev portal page must render Reload button element");
+                assertTrue(html.contains("id=\"scan-works-dir-btn\""),
+                        "Dev portal page must render Scan Works Dir button element");
             } finally {
                 http.stop(0);
             }
@@ -312,7 +312,7 @@ class ModeTest {
         }
 
         @Test
-        @DisplayName("portal page (production) has no Build button, no Theme, no Reload")
+        @DisplayName("portal page (production) has no Build button, no Theme, no Scan Works Dir")
         void productionPortalPage_hidesDevControls() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), true);
@@ -325,8 +325,8 @@ class ModeTest {
                 // CSS has "select#theme-select"; check HTML attribute is absent
                 assertFalse(html.contains("id=\"theme-select\""),
                         "Production portal must not render Theme selector element");
-                assertFalse(html.contains("id=\"reload-btn\""),
-                        "Production portal must not render Reload button element");
+                assertFalse(html.contains("id=\"scan-works-dir-btn\""),
+                        "Production portal must not render Scan Works Dir button element");
             } finally {
                 http.stop(0);
             }
@@ -392,8 +392,8 @@ class ModeTest {
         }
 
         @Test
-        @DisplayName("reload API adds only new projects, skips existing ones")
-        void reloadApi_addsOnlyNewProjects() throws Exception {
+        @DisplayName("scan works dir API adds only new projects, skips existing ones")
+        void scanWorksDirApi_addsOnlyNewProjects() throws Exception {
             Path proj1 = createProject("existing");
             Main.build(proj1.resolve("docs"), proj1.resolve("static-html"), false);
             Main.reindex(proj1.resolve("docs"), proj1.resolve("search-index"));
@@ -407,14 +407,14 @@ class ModeTest {
 
             try {
                 var client = HttpClient.newHttpClient();
-                var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/reload"))
+                var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/scan-works-dir"))
                         .POST(HttpRequest.BodyPublishers.noBody())
                         .build();
                 String response = client.send(request, HttpResponse.BodyHandlers.ofString()).body();
                 assertTrue(response.contains("\"added\":1"),
-                        "Reload should report 1 newly added project");
+                        "Scan should report 1 newly added project");
                 assertTrue(response.contains("\"total\":2"),
-                        "Reload should report total of 2 projects after adding new one");
+                        "Scan should report total of 2 projects after adding new one");
             } finally {
                 http.stop(0);
             }

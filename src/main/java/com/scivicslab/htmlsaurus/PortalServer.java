@@ -168,9 +168,9 @@ public class PortalServer {
             return;
         }
 
-        // Reload API: POST /api/reload (development mode only)
-        if (!production && path.equals("/api/reload")) {
-            handleReload(ex);
+        // Scan works dir API: POST /api/scan-works-dir (development mode only)
+        if (!production && path.equals("/api/scan-works-dir")) {
+            handleScanWorksDir(ex);
             return;
         }
 
@@ -324,19 +324,20 @@ public class PortalServer {
         }
     }
 
-    // ---- Reload API endpoint ------------------------------------
+    // ---- Scan works dir API endpoint -----------------------------
 
     /**
-     * Handles {@code POST /api/reload} requests. Rescans the works directory, rebuilds
-     * and reindexes any new projects, and refreshes the in-memory project list.
+     * Handles {@code POST /api/scan-works-dir} requests. Rescans the works directory for
+     * project subdirectories not yet known to this server, and builds and indexes each one
+     * found. Existing projects are left untouched.
      */
-    private synchronized void handleReload(HttpExchange ex) throws IOException {
+    private synchronized void handleScanWorksDir(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
         long start = System.currentTimeMillis();
-        System.out.println("Reload requested: rescanning " + worksDir);
+        System.out.println("Scan works dir requested: rescanning " + worksDir);
         try {
             List<Path> found = Main.findProjects(worksDir);
             int added = 0;
@@ -360,8 +361,8 @@ public class PortalServer {
             respond(ex, 200, "application/json",
                 "{\"status\":\"ok\",\"total\":" + projects.size() + ",\"added\":" + added + ",\"ms\":" + elapsed + "}");
         } catch (Exception e) {
-            System.err.println("Reload error: " + e.getMessage());
-            respond(ex, 500, "application/json", "{\"error\":\"Reload failed\"}");
+            System.err.println("Scan works dir error: " + e.getMessage());
+            respond(ex, 500, "application/json", "{\"error\":\"Scan failed\"}");
         }
     }
 
@@ -826,8 +827,8 @@ public class PortalServer {
                     <option value="light-red">Light Red</option>
                   </select>
                 </label>
-                <button class="btn btn-reload" id="reload-btn" onclick="doReload(this)">Reload</button>
-                <span class="build-status" id="reload-status"></span>
+                <button class="btn btn-reload" id="scan-works-dir-btn" onclick="doScanWorksDir(this)">Scan Works Dir</button>
+                <span class="build-status" id="scan-works-dir-status"></span>
                 <button class="btn" id="reindex-all-btn" onclick="doReindexAll(this)">Reindex All</button>
                 <span class="build-status" id="reindex-all-status"></span>
             """);
@@ -1042,13 +1043,13 @@ public class PortalServer {
               btn.disabled = false;
               btn.textContent = 'Reindex All';
             }
-            async function doReload(btn) {
-              const status = document.getElementById('reload-status');
+            async function doScanWorksDir(btn) {
+              const status = document.getElementById('scan-works-dir-status');
               btn.disabled = true;
-              btn.textContent = 'Reloading...';
+              btn.textContent = 'Scanning...';
               status.textContent = '';
               try {
-                const r = await fetch('/api/reload', {method: 'POST'});
+                const r = await fetch('/api/scan-works-dir', {method: 'POST'});
                 const j = await r.json();
                 if (j.status === 'ok') {
                   if (j.added > 0) {
@@ -1068,7 +1069,7 @@ public class PortalServer {
                 status.style.color = '#e06060';
               }
               btn.disabled = false;
-              btn.textContent = 'Reload';
+              btn.textContent = 'Scan Works Dir';
             }
             </script>
             """);
