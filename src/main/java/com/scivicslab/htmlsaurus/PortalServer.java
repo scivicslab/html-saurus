@@ -64,7 +64,7 @@ public class PortalServer {
      * @param worksDir    root directory containing all Docusaurus projects (used for reload)
      * @param projectDirs list of Docusaurus project root directories to serve
      * @param port        HTTP port to listen on (0 for a system-assigned port)
-     * @param production  {@code true} to disable the {@code /api/build} endpoint
+     * @param production  {@code true} to disable the {@code /api/build-all} endpoint
      */
     public PortalServer(Path worksDir, List<Path> projectDirs, int port, boolean production,
                         SemanticIndex semanticIndex) {
@@ -196,13 +196,6 @@ public class PortalServer {
         // Reindex all API: POST /api/reindex-all (development mode only)
         if (!production && path.equals("/api/reindex-all")) {
             handleReindexAll(ex);
-            return;
-        }
-
-        // Build API: POST /api/build/<project> (development mode only) — runs HTML + index together
-        if (!production && path.startsWith("/api/build/")) {
-            String name = path.substring("/api/build/".length());
-            handleBuild(ex, name);
             return;
         }
 
@@ -719,19 +712,6 @@ public class PortalServer {
             }
         }
         return null;
-    }
-
-    // ---- Build API endpoint -------------------------------------
-
-    /**
-     * Handles {@code POST /api/build/<project>} requests, used by the per-page "Rebuild" button.
-     * Runs the full rebuild for the named project — static HTML, the Lucene full-text index across
-     * all locales, and the embedding vectors — so a single "Rebuild" click regenerates everything
-     * (the same work as the portal's "All" action). Delegates to {@link #handleBuildStage} with the
-     * {@code "all"} stage.
-     */
-    private void handleBuild(HttpExchange ex, String name) throws IOException {
-        handleBuildStage(ex, name, "all");
     }
 
     /**

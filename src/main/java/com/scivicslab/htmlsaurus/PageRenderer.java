@@ -333,7 +333,7 @@ class PageRenderer {
         return sb.toString()
             .replace("YADOC_SEARCH_URL", escapeJs(siteRootPrefix + "search"
                 + (isNonDefaultLocale ? "?locale=" + currentLocale : "")))
-            .replace("YADOC_BUILD_URL", escapeJs("/api/build/" + siteName))
+            .replace("YADOC_BUILD_URL", escapeJs("/api/build-all/" + siteName))
             .replace("YADOC_PROJECT", escapeJs(siteName))
             .replace("YADOC_LANG", escapeHtml(langAttr))
             .replace("YADOC_FAVICON", faviconHref);

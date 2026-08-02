@@ -19,7 +19,7 @@ import java.util.Map;
  * HTTP development server for a single Docusaurus project.
  *
  * <p>Serves static HTML files, provides a full-text search API endpoint ({@code /search?q=...}),
- * and exposes a build trigger endpoint ({@code POST /api/build}) for on-demand rebuilds.
+ * and exposes a build trigger endpoint ({@code POST /api/build-all}) for on-demand rebuilds.
  */
 public class SearchServer {
 
@@ -49,7 +49,7 @@ public class SearchServer {
      * @param indexDir      directory containing the Lucene search index
      * @param port          HTTP port to listen on
      * @param rebuild       callback to trigger a full rebuild (build + reindex)
-     * @param production    {@code true} to disable the {@code /api/build} endpoint
+     * @param production    {@code true} to disable the {@code /api/build-all} endpoint
      * @param docsDir       source directory containing raw Markdown files (for MCP tools)
      * @param semanticIndex in-memory semantic neighbour index (may be {@code null})
      */
@@ -93,7 +93,7 @@ public class SearchServer {
     public HttpServer start() throws IOException {
         var server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         if (!production) {
-            server.createContext("/api/build", this::handleBuild);
+            server.createContext("/api/build-all", this::handleBuild);
             server.createContext("/api/upload", this::handleUpload);
             server.createContext("/upload", this::handleUploadPage);
         }
@@ -135,7 +135,7 @@ public class SearchServer {
     // ---- Build endpoint -----------------------------------------
 
     /**
-     * Handles {@code POST /api/build} requests. Triggers a full rebuild and returns
+     * Handles {@code POST /api/build-all} requests. Triggers a full rebuild and returns
      * the elapsed time in a JSON response. Non-POST requests receive a 405 response.
      */
     private void handleBuild(HttpExchange ex) throws IOException {
