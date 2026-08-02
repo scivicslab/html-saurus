@@ -262,3 +262,38 @@
   toggle関連の関数・分岐が出力に含まれることを確認。ブラウザでのクリック往復までは
   実施できていない（このマシンにヘッドレスブラウザの動作環境が揃っていないため）。
   検証後に使い捨てサーバは削除済み。
+
+## バグ修正: ドキュメント内の外部リンクがポータルのiframeで死ぬ
+
+ユーザー報告: `doc_SCI001/.../RemoteSwitchedPDU_260801_oo01.md` の `Sources:` にある
+外部リンク（`https://www.digital-loggers.com/` 等）をポータル上でクリックしても、
+何も起きたように見えない。
+
+### 原因
+ポータルは各ドキュメントページを iframe で埋め込んで表示する（`PortalServer.java` の
+`showInFrame`/`frameLoc` 機構）。`HttpUtils.java` の CSP には `frame-src` の指定が無く
+`default-src 'self'` にフォールバックするため、iframe 内から外部オリジンへ遷移しようと
+すると **ブラウザの CSP が framing 自体をブロックする**。ヘッドレスブラウザで実クリックを
+再現したところ、コンソールに次のエラーが出て iframe が `chrome-error://chromewebdata/`
+になることを確認した。
+
+```
+Framing 'https://www.digital-loggers.com/' violates the following Content Security
+Policy directive: "default-src 'self'". ... 'frame-src' was not explicitly set...
+```
+
+`frame-src` を緩めて外部サイトの埋め込みを許可する方向は採らなかった（任意の外部サイトを
+自アプリの iframe 内に読み込めるようにするのはセキュリティ上の後退）。ドキュメント内の
+外部参照リンクをポータルの iframe 内で開こうとすること自体が間違いで、新しいタブで開くのが
+利用者の期待にも合う。
+
+### 修正
+`MarkdownConverter.java`: CommonMark の `HtmlRenderer` に `AttributeProviderFactory` を追加し、
+`http://`/`https://` で始む `Link` ノードにだけ `target="_blank" rel="noopener noreferrer"` を
+付与する。ドキュメント内部の相対パスリンク（ポータルの iframe ナビゲーションで使う）は対象外。
+
+### 検証
+- 153テスト GREEN。
+- 使い捨てインスタンス（portal-mode、外部リンクを含むテストページ）をヘッドレスブラウザで
+  実クリックし、新しいタブが `https://www.digital-loggers.com/` で開き、元のポータルの
+  iframe は変化しない（引き続き元のドキュメントページのまま）ことを確認。検証後に停止・削除済み。

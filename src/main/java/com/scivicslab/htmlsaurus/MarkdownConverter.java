@@ -4,7 +4,10 @@ import org.commonmark.ext.autolink.AutolinkExtension;
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension;
 import org.commonmark.ext.gfm.tables.TablesExtension;
 import org.commonmark.ext.heading.anchor.HeadingAnchorExtension;
+import org.commonmark.node.Link;
+import org.commonmark.node.Node;
 import org.commonmark.parser.Parser;
+import org.commonmark.renderer.html.AttributeProvider;
 import org.commonmark.renderer.html.HtmlRenderer;
 
 import java.util.List;
@@ -44,7 +47,21 @@ class MarkdownConverter {
             AutolinkExtension.create()
         );
         this.parser = Parser.builder().extensions(extensions).build();
-        this.renderer = HtmlRenderer.builder().extensions(extensions).build();
+        // External links open in a new top-level tab. The portal renders every doc page inside an
+        // iframe with CSP default-src 'self' (no frame-src exception); clicking an external link
+        // without target="_blank" tries to load that site *inside* the iframe, which the CSP blocks
+        // (the browser shows an in-frame error page instead of navigating anywhere).
+        this.renderer = HtmlRenderer.builder().extensions(extensions)
+                .attributeProviderFactory(context -> (Node node, String tagName, Map<String, String> attributes) -> {
+                    if (node instanceof Link link) {
+                        String url = link.getDestination();
+                        if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+                            attributes.put("target", "_blank");
+                            attributes.put("rel", "noopener noreferrer");
+                        }
+                    }
+                })
+                .build();
     }
 
     /**
