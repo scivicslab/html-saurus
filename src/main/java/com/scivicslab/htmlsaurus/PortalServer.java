@@ -670,8 +670,6 @@ public class PortalServer {
         respond(ex, 200, "application/json", json.toString());
     }
 
-    // ---- Upload API endpoint ------------------------------------
-
     // ---- Portal index page --------------------------------------
 
     /**
