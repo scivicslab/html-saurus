@@ -44,11 +44,20 @@ class McpHandler {
     private static final String SERVER_NAME = "html-saurus";
     private static final String SERVER_VERSION = "1.4.0";
 
+    /**
+     * Resolves a document reference (a document id or a path fragment) to an enriched hit map with
+     * keys {@code id,title,path,srcPath,summary}; returns {@code null} when it cannot be resolved.
+     */
+    @FunctionalInterface
+    interface DocRefResolver {
+        Map<String, String> resolve(String ref);
+    }
+
     private final Path docsDir;
     private final ActorRef<LuceneSearcher> searcher;
     private final Runnable rebuild;
     private final Map<String, ActorRef<LuceneSearcher>> localeSearchers;
-    private final KeywordMap.Resolver docRefResolver;
+    private final DocRefResolver docRefResolver;
     private final BiFunction<String, String, List<Map<String, String>>> textRelatedResolver;
     private final Function<String, List<Map<String, String>>> semanticQueryResolver;
     private final Function<String, List<Map<String, String>>> semanticRelatedResolver;
@@ -74,7 +83,7 @@ class McpHandler {
      *                                path; same as {@code /api/related-semantic}
      */
     McpHandler(Path docsDir, ActorRef<LuceneSearcher> searcher, Runnable rebuild,
-               Map<String, ActorRef<LuceneSearcher>> localeSearchers, KeywordMap.Resolver docRefResolver,
+               Map<String, ActorRef<LuceneSearcher>> localeSearchers, DocRefResolver docRefResolver,
                BiFunction<String, String, List<Map<String, String>>> textRelatedResolver,
                Function<String, List<Map<String, String>>> semanticQueryResolver,
                Function<String, List<Map<String, String>>> semanticRelatedResolver) {

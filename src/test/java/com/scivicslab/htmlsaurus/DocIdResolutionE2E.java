@@ -6,7 +6,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -14,28 +13,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * End-to-end test: does a document id (as written in {@code keyword-map.tsv}) resolve, via
- * html-saurus search, back to the original document — and does that document actually get served?
+ * End-to-end test: does a document id resolve, via html-saurus search, back to the original
+ * document — and does that document actually get served?
  *
- * <p>For every document reference in the keyword map it checks, against a RUNNING portal:
+ * <p>For every document id passed as an argument, against a RUNNING portal:
  * <ol>
  *   <li><b>search</b> — {@code GET /api/search?q=<ref>} returns a hit whose id (or path) matches the
  *       reference, exposing the served page URL;</li>
  *   <li><b>display</b> — fetching that served URL returns HTTP 200 and the page actually contains the
  *       document's title (i.e. the original document is shown, not a 404 or the wrong page);</li>
- *   <li><b>curated lookup</b> — for each rule, {@code GET /api/keyword-map?q=<the rule's terms>}
- *       returns the same referenced document (the deterministic table path works end to end).</li>
  * </ol>
  *
  * <p>Requires an already-running portal (defaults to the live one on :28005):
  * <pre>
- *   # against the live portal, using ~/works/html-saurus/keyword-map.tsv:
- *   mvn test-compile exec:java \
- *     -Dexec.mainClass=com.scivicslab.htmlsaurus.DocIdResolutionE2E \
- *     -Dexec.classpathScope=test
- *
- *   # override target / map / extra ids:
- *   PORTAL_URL=http://localhost:8500 KEYWORD_MAP_PATH=/path/to/keyword-map.tsv \
+ *   PORTAL_URL=http://localhost:8500 \
  *   mvn test-compile exec:java -Dexec.mainClass=com.scivicslab.htmlsaurus.DocIdResolutionE2E \
  *     -Dexec.classpathScope=test -Dexec.args="ExtraDocId_001 AnotherId_002"
  * </pre>
@@ -54,22 +45,12 @@ public class DocIdResolutionE2E {
     public static void main(String[] args) {
         System.out.println("=== Document-id resolution E2E: " + BASE_URL + " ===");
 
-        // Collect the document references to test: explicit args first, then every docRef in the map.
         List<String> refs = new ArrayList<>(List.of(args));
-        Path mapPath = Path.of(System.getenv().getOrDefault(
-                "KEYWORD_MAP_PATH", System.getProperty("user.home") + "/works/html-saurus/keyword-map.tsv"));
-        KeywordMap map = KeywordMap.load(mapPath);
-        for (KeywordMap.Rule r : map.rules()) {
-            for (String ref : r.docRefs()) {
-                if (!refs.contains(ref)) refs.add(ref);
-            }
-        }
-        System.out.println("Keyword map: " + map.size() + " rule(s) from " + mapPath);
         System.out.println("Testing " + refs.size() + " document reference(s): " + refs);
         System.out.println();
 
         if (refs.isEmpty()) {
-            System.err.println("No document references to test (empty map and no args).");
+            System.err.println("No document references to test (pass document ids as arguments).");
             System.exit(1);
         }
 
@@ -79,10 +60,6 @@ public class DocIdResolutionE2E {
             checkSearchAndDisplay(ref);
             checkResolve(ref);
             checkSiblings(ref);
-        }
-        // (3) per rule: the curated lookup returns the referenced document.
-        for (KeywordMap.Rule r : map.rules()) {
-            checkKeywordMapLookup(r);
         }
         // (4) negative: a bogus id must NOT resolve (no silent fallback to an unrelated top hit).
         checkResolveNotFound("__no_such_doc_zzz999__");
@@ -179,23 +156,6 @@ public class DocIdResolutionE2E {
             fail(e.getMessage());
         } catch (Exception e) {
             fail("resolve-404 '" + bogusRef + "': " + e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
-    }
-
-    /** (3) the deterministic keyword-map lookup returns each rule's referenced document(s). */
-    private static void checkKeywordMapLookup(KeywordMap.Rule r) {
-        String prompt = String.join(" ", r.terms());
-        try {
-            List<Map<String, String>> hits = getHits("/api/keyword-map?q=" + enc(prompt));
-            for (String ref : r.docRefs()) {
-                check(pick(hits, ref) != null,
-                        "keyword-map '" + prompt + "': did not return referenced doc '" + ref + "'");
-            }
-            pass("keyword-map '" + prompt + "' -> " + r.docRefs());
-        } catch (AssertionError e) {
-            fail(e.getMessage());
-        } catch (Exception e) {
-            fail("keyword-map '" + prompt + "': " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 

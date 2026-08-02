@@ -49,7 +49,7 @@ final class HttpUtils {
 
     /**
      * Shared responsive rules for every html-saurus-generated SSR page (portal, search,
-     * related, semantic, keyword-map editor, upload). Kept in one place so responsiveness
+     * related, semantic, upload). Kept in one place so responsiveness
      * is systematic rather than per-page: it protects unexpectedly wide content (tables,
      * pre, images) from causing horizontal scroll and trims chrome padding on narrow
      * screens. Injected via {@link #injectResponsive(String)}. Not applied to docusaurus
