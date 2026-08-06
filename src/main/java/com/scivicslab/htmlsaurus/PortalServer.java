@@ -555,11 +555,13 @@ public class PortalServer {
         if (srcPath == null || srcPath.isBlank()) return out;
         try {
             String content = Files.readString(Path.of(srcPath), StandardCharsets.UTF_8);
-            for (String docRef : PrerequisiteSection.extractRefs(content)) {
-                Map<String, String> hit = resolveDocRef(docRef);
-                if (hit != null) out.add(hit);
+            for (PrerequisiteSection.Ref ref : PrerequisiteSection.extractRefs(content)) {
+                Map<String, String> hit = resolveDocRef(ref.docId());
+                if (hit != null) {
+                    out.add(PrerequisiteSection.withCategory(hit, ref));
+                }
             }
-        } catch (IOException e) {
+        } catch (IOException | PrerequisiteSection.MalformedPrerequisitesException e) {
             System.err.println("Prerequisites lookup failed for " + srcPath + ": " + e.getMessage());
         }
         return out;

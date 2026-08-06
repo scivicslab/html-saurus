@@ -22,22 +22,14 @@ final class RelatedDocsView {
 
     private RelatedDocsView() {}
 
-    /** Writes a hit list as a JSON array of {@code {id,title,path,srcPath,summary}} objects.
-     *  {@code id} (doc id) and {@code srcPath} (absolute source .md path) are emitted when present
-     *  in the hit map; absent keys serialize as JSON null. */
+    /** Writes a hit list as a JSON array of {@link #hitJson(Map)} objects. */
     static void writeJson(HttpExchange ex, List<Map<String, String>> hits) throws IOException {
         var sb = new StringBuilder("[");
         boolean first = true;
         for (var hit : hits) {
             if (!first) sb.append(",");
             first = false;
-            sb.append("{")
-              .append("\"id\":").append(HttpUtils.jsonStr(hit.get("id"))).append(",")
-              .append("\"title\":").append(HttpUtils.jsonStr(hit.get("title"))).append(",")
-              .append("\"path\":").append(HttpUtils.jsonStr(hit.get("path"))).append(",")
-              .append("\"srcPath\":").append(HttpUtils.jsonStr(hit.get("srcPath"))).append(",")
-              .append("\"summary\":").append(HttpUtils.jsonStr(hit.get("summary")))
-              .append("}");
+            sb.append(hitJson(hit));
         }
         sb.append("]");
         byte[] body = sb.toString().getBytes(StandardCharsets.UTF_8);
@@ -45,6 +37,25 @@ final class RelatedDocsView {
         ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         ex.sendResponseHeaders(200, body.length);
         try (var out = ex.getResponseBody()) { out.write(body); }
+    }
+
+    /** Serializes one hit map as a JSON object {@code {id,title,path,srcPath,summary}}. Absent
+     *  fixed keys serialize as an empty string ({@link HttpUtils#jsonStr} is null-safe). A
+     *  {@code "category"} key is appended when present in the map (even if its value is empty),
+     *  so endpoints that never set it (related, siblings, resolve, ...) keep their existing JSON
+     *  shape unchanged, while {@code /api/prerequisites} always includes the field. */
+    static String hitJson(Map<String, String> hit) {
+        var sb = new StringBuilder("{")
+          .append("\"id\":").append(HttpUtils.jsonStr(hit.get("id"))).append(",")
+          .append("\"title\":").append(HttpUtils.jsonStr(hit.get("title"))).append(",")
+          .append("\"path\":").append(HttpUtils.jsonStr(hit.get("path"))).append(",")
+          .append("\"srcPath\":").append(HttpUtils.jsonStr(hit.get("srcPath"))).append(",")
+          .append("\"summary\":").append(HttpUtils.jsonStr(hit.get("summary")));
+        if (hit.containsKey("category")) {
+            sb.append(",\"category\":").append(HttpUtils.jsonStr(hit.get("category")));
+        }
+        sb.append("}");
+        return sb.toString();
     }
 
     /** Renders the standalone related-documents HTML page (used by {@code /related} and {@code /related-semantic}). */

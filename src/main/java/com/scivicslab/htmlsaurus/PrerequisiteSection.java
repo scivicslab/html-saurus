@@ -1,89 +1,151 @@
 package com.scivicslab.htmlsaurus;
 
+import org.commonmark.node.Heading;
+import org.commonmark.node.HtmlBlock;
+import org.commonmark.node.Node;
+import org.commonmark.node.Text;
+import org.commonmark.parser.Parser;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.StringReader;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
- * Parses the {@code ## 前提文書} section that an author may place at the end of a document's
+ * Parses the {@code ## 参考文献} section that an author may place at the end of a document's
  * Markdown source, per {@code PrerequisiteDocument_260728_oo01} (doc_SCIVICS002/html-saurus/040_design).
  *
- * <p>The section is a plain bullet list of backtick-quoted document id references, one per line,
- * with an optional free-text reason after the reference:
+ * <p>The section body is a single well-formed HTML block, not hand-scanned Markdown bullets: a
+ * {@code <ul>} whose {@code <li>} items each contain one {@code <span data-doc-id="...">...}
+ * tag, with an optional {@code data-category} attribute for grouping references by kind (e.g. a
+ * direct-topic reference vs. a supporting-technique reference). {@code <span>} (not {@code <a>})
+ * is used deliberately: the tag exists only to be reliably parseable well-formed markup, not to
+ * create a hyperlink, and an unstyled {@code <a>} with no {@code href} rendered as dead-looking
+ * link text. The document id is included in the visible text so it survives the build, not only
+ * in the {@code data-doc-id} attribute (attributes are invisible in the rendered page).
  * <pre>
- *   ## 前提文書
+ *   ## 参考文献
  *
- *   - `POJOActorConcept_251023_oo01` — Turing-workflow is built on POJO-actor's actor model
+ *   &lt;ul&gt;
+ *   &lt;li&gt;&lt;span data-doc-id="POJOActorConcept_251023_oo01" data-category="direct"&gt;&lt;code&gt;POJOActorConcept_251023_oo01&lt;/code&gt; — Turing-workflow is built on POJO-actor's actor model&lt;/span&gt;&lt;/li&gt;
+ *   &lt;/ul&gt;
  * </pre>
+ *
+ * <p>Section boundaries are found using the CommonMark AST — the same parser
+ * {@link MarkdownConverter} already uses — instead of hand-rolled line scanning: fenced code
+ * blocks showing a {@code ## 参考文献} example are never mistaken for a real section, because
+ * CommonMark itself already excludes fence contents from the document structure. The block's own
+ * markup is then parsed as XML via {@link DocumentBuilder}, so a malformed tag fails loudly
+ * ({@link MalformedPrerequisitesException}) instead of being silently dropped.
  */
 final class PrerequisiteSection {
 
-    private static final String HEADING = "## 前提文書";
-    private static final Pattern HEADING_LEVEL = Pattern.compile("^(#{1,6})\\s");
-    private static final Pattern BULLET = Pattern.compile("^\\s*[-*+]\\s+.*");
-    private static final Pattern BACKTICKED = Pattern.compile("`([^`]+)`");
-    private static final Pattern FENCE = Pattern.compile("^\\s*```");
+    private static final String HEADING_TEXT = "参考文献";
 
     private PrerequisiteSection() {}
 
+    /** One {@code ## 参考文献} entry: the referenced document id and its optional category. */
+    record Ref(String docId, String category) {}
+
+    /** Thrown when the {@code ## 参考文献} HTML block is present but not well-formed XML. */
+    static final class MalformedPrerequisitesException extends RuntimeException {
+        MalformedPrerequisitesException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     /**
-     * Returns the document id references listed under the {@code ## 前提文書} heading, in the
-     * order they appear. Returns an empty list when the heading is absent or has no resolvable
-     * bullet items. The scan stops at the next heading (any level), or at end of file.
+     * Returns the document references listed under the {@code ## 参考文献} heading, in the order
+     * they appear, deduplicated by {@code data-doc-id}. Returns an empty list when the heading is
+     * absent, or is not immediately followed by an HTML block.
      *
-     * <p>Lines inside fenced code blocks ({@code ```...```}) are ignored when looking for the
-     * heading and its bullets, so a document that shows a {@code ## 前提文書} example as
-     * illustration (as this feature's own reference documentation does) does not have that
-     * example mistaken for its own real prerequisites section.
+     * @throws MalformedPrerequisitesException if the HTML block is present but not well-formed XML
      */
-    static List<String> extractRefs(String markdownSource) {
-        List<String> refs = new ArrayList<>();
+    static List<Ref> extractRefs(String markdownSource) {
+        List<Ref> refs = new ArrayList<>();
         if (markdownSource == null || markdownSource.isBlank()) {
             return refs;
         }
-        String[] lines = markdownSource.split("\n", -1);
-        int start = -1;
-        boolean inFence = false;
-        for (int i = 0; i < lines.length; i++) {
-            if (FENCE.matcher(lines[i]).find()) {
-                inFence = !inFence;
-                continue;
-            }
-            if (inFence) continue;
-            if (lines[i].strip().equals(HEADING)) {
-                start = i + 1;
-                break;
-            }
-        }
-        if (start < 0) {
+        Node document = Parser.builder().build().parse(markdownSource);
+        HtmlBlock block = findPrerequisitesBlock(document);
+        if (block == null) {
             return refs;
         }
+        Document dom = parseXml(block.getLiteral());
+        NodeList spans = dom.getElementsByTagName("span");
         Set<String> seen = new LinkedHashSet<>();
-        inFence = false;
-        for (int i = start; i < lines.length; i++) {
-            String line = lines[i];
-            if (FENCE.matcher(line).find()) {
-                inFence = !inFence;
+        for (int i = 0; i < spans.getLength(); i++) {
+            Element span = (Element) spans.item(i);
+            String docId = span.getAttribute("data-doc-id").strip();
+            if (docId.isEmpty() || !seen.add(docId)) {
                 continue;
             }
-            if (inFence) continue;
-            if (HEADING_LEVEL.matcher(line).find()) {
-                break;
-            }
-            if (!BULLET.matcher(line).matches()) {
-                continue;
-            }
-            Matcher m = BACKTICKED.matcher(line);
-            if (m.find()) {
-                String ref = m.group(1).strip();
-                if (!ref.isEmpty() && seen.add(ref)) {
-                    refs.add(ref);
-                }
-            }
+            String category = span.getAttribute("data-category").strip();
+            refs.add(new Ref(docId, category));
         }
         return refs;
+    }
+
+    /**
+     * Returns a copy of {@code hit} with a {@code "category"} entry set from {@code ref}
+     * (empty string when the author wrote no {@code data-category}). {@code hit} is never
+     * mutated — it is a defensive copy — so a resolver's possibly cached/shared map instance
+     * is left untouched for other callers.
+     *
+     * <p>Shared by {@code PortalServer.prerequisitesFor} (the {@code GET /api/prerequisites}
+     * endpoint) and {@code McpHandler.toolPrerequisites} (the {@code prerequisites} MCP tool,
+     * a thin wrapper around the same REST behavior), so the two never drift apart.
+     */
+    static Map<String, String> withCategory(Map<String, String> hit, Ref ref) {
+        Map<String, String> out = new LinkedHashMap<>(hit);
+        out.put("category", ref.category());
+        return out;
+    }
+
+    /** Walks the top-level AST nodes for the {@code ## 参考文献} heading's immediate next sibling. */
+    private static HtmlBlock findPrerequisitesBlock(Node document) {
+        Node node = document.getFirstChild();
+        while (node != null) {
+            if (node instanceof Heading heading && heading.getLevel() == 2
+                    && headingText(heading).equals(HEADING_TEXT)) {
+                Node next = heading.getNext();
+                return next instanceof HtmlBlock htmlBlock ? htmlBlock : null;
+            }
+            node = node.getNext();
+        }
+        return null;
+    }
+
+    private static String headingText(Heading heading) {
+        StringBuilder sb = new StringBuilder();
+        Node child = heading.getFirstChild();
+        while (child != null) {
+            if (child instanceof Text text) {
+                sb.append(text.getLiteral());
+            }
+            child = child.getNext();
+        }
+        return sb.toString();
+    }
+
+    private static Document parseXml(String html) {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            return builder.parse(new InputSource(new StringReader(html)));
+        } catch (Exception e) {
+            throw new MalformedPrerequisitesException(
+                    "## 参考文献 section is not well-formed XML: " + e.getMessage(), e);
+        }
     }
 }

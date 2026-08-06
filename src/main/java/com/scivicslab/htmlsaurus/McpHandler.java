@@ -554,9 +554,11 @@ class McpHandler {
         String srcPath = self.getOrDefault("srcPath", "");
         if (!srcPath.isBlank()) {
             String content = Files.readString(Path.of(srcPath), StandardCharsets.UTF_8);
-            for (String docRef : PrerequisiteSection.extractRefs(content)) {
-                Map<String, String> hit = docRefResolver.resolve(docRef);
-                if (hit != null) prereqs.add(hit);
+            for (PrerequisiteSection.Ref prereqRef : PrerequisiteSection.extractRefs(content)) {
+                Map<String, String> hit = docRefResolver.resolve(prereqRef.docId());
+                if (hit != null) {
+                    prereqs.add(PrerequisiteSection.withCategory(hit, prereqRef));
+                }
             }
         }
         return toolResult(formatHitList(prereqs, "No prerequisite documents found for: " + ref, "Prerequisite documents"));
@@ -746,9 +748,15 @@ class McpHandler {
 
     /**
      * Formats a list of {@code {title,path,summary,...}} hit maps as bullet points, or
-     * {@code emptyMessage} when {@code hits} is empty.
+     * {@code emptyMessage} when {@code hits} is empty. A {@code Category:} line is printed only
+     * when the hit map's {@code "category"} value is present and non-empty (uncategorized
+     * {@code /api/prerequisites} entries carry {@code category=""} and print no line; hits from
+     * other tools never set the key at all and are unaffected).
+     *
+     * <p>Package-private (not {@code private}) so {@link McpHandlerFormatHitListTest} can call it
+     * directly without a server/IO fixture.
      */
-    private static String formatHitList(List<Map<String, String>> hits, String emptyMessage, String foundLabel) {
+    static String formatHitList(List<Map<String, String>> hits, String emptyMessage, String foundLabel) {
         var sb = new StringBuilder();
         if (hits.isEmpty()) {
             sb.append(emptyMessage);
@@ -757,6 +765,10 @@ class McpHandler {
             for (var hit : hits) {
                 sb.append("- **").append(hit.getOrDefault("title", "")).append("**\n");
                 sb.append("  Path: ").append(hit.getOrDefault("path", "")).append("\n");
+                String category = hit.get("category");
+                if (category != null && !category.isEmpty()) {
+                    sb.append("  Category: ").append(category).append("\n");
+                }
                 String summary = hit.getOrDefault("summary", "");
                 if (!summary.isEmpty()) {
                     sb.append("  Summary: ").append(summary).append("\n");
