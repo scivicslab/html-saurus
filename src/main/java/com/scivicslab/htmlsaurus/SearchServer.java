@@ -127,7 +127,7 @@ public class SearchServer {
             };
             var mcpHandler = new McpHandler(docsDir, searcher, rebuild, localeSearchers, null,
                 textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
-                null, stageBuilder, null, null, null, this::translateCore);
+                null, null, stageBuilder, null, null, null, this::translateCore);
             server.createContext("/mcp", mcpHandler::handle);
         }
         server.createContext("/", this::handleStatic);

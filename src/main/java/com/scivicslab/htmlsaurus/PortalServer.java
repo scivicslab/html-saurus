@@ -53,6 +53,12 @@ public class PortalServer {
     private final TranslationClient translate;
     /** On-disk cache of past translations, shared across all projects in the portal. */
     private final TranslationCache translationCache;
+    /**
+     * Derived, in-memory reverse index of {@code ## 参考文献}: docId -> hit maps of documents
+     * that name it as a prerequisite. Rebuilt from Markdown source on demand; never persisted —
+     * see {@code PrerequisiteOf_260806_oo01} (doc_SCIVICS002/html-saurus/040_design).
+     */
+    private volatile Map<String, List<Map<String, String>>> prerequisiteOfIndex = Map.of();
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
 
@@ -131,6 +137,11 @@ public class PortalServer {
             Map<String, String> self = resolveDocRef(ref);
             return self == null ? List.of() : directorySiblings(self.getOrDefault("srcPath", ""));
         };
+        java.util.function.Function<String, List<Map<String, String>>> prerequisiteOfResolver = ref -> {
+            Map<String, String> self = resolveDocRef(ref);
+            return self == null ? List.of()
+                : prerequisiteOfIndex.getOrDefault(self.getOrDefault("id", ""), List.of());
+        };
         McpHandler.StageBuilder stageBuilder = (project, stage) -> {
             Project proj = projectMap.get(project);
             if (proj == null) return null;
@@ -146,8 +157,61 @@ public class PortalServer {
         };
         this.mcpHandler = new McpHandler(worksDir, defaultSearcher, rebuildAll, searchers, this::resolveDocRef,
             textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
-            siblingsResolver, stageBuilder, reindexAllRunner, scanWorksDirRunner,
+            siblingsResolver, prerequisiteOfResolver, stageBuilder, reindexAllRunner, scanWorksDirRunner,
             navbarLabelsResolver, this::translateCore);
+        try {
+            rebuildPrerequisiteOfIndex();
+        } catch (Exception e) {
+            System.err.println("Warning: could not build prerequisite-of index: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Rebuilds {@link #prerequisiteOfIndex} by walking every project's {@code docs/} tree and
+     * reading each document's {@code ## 参考文献} section via {@link PrerequisiteSection#extractRefs}.
+     * Swaps the whole map atomically at the end — never a partial update — so concurrent readers
+     * never see a half-built index. See {@code PrerequisiteOf_260806_oo01}
+     * (doc_SCIVICS002/html-saurus/040_design).
+     */
+    private void rebuildPrerequisiteOfIndex() {
+        Map<String, List<Map<String, String>>> next = new LinkedHashMap<>();
+        for (Project p : projects) {
+            Path projectDocsDir = p.projectDir().resolve("docs");
+            if (!Files.isDirectory(projectDocsDir)) continue;
+            List<Path> mdFiles;
+            try (var walk = Files.walk(projectDocsDir)) {
+                mdFiles = walk.filter(f -> f.toString().endsWith(".md")).collect(Collectors.toList());
+            } catch (IOException e) {
+                System.err.println("prerequisite-of index: could not walk " + projectDocsDir
+                    + ": " + e.getMessage());
+                continue;
+            }
+            for (Path md : mdFiles) {
+                String id = frontmatterId(md);
+                if (id == null || id.isBlank()) continue;
+                String content;
+                try {
+                    content = Files.readString(md, StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    continue;
+                }
+                List<PrerequisiteSection.Ref> refs;
+                try {
+                    refs = PrerequisiteSection.extractRefs(content);
+                } catch (PrerequisiteSection.MalformedPrerequisitesException e) {
+                    System.err.println("prerequisite-of index: skipping malformed ## 参考文献 in "
+                        + md + ": " + e.getMessage());
+                    continue;
+                }
+                if (refs.isEmpty()) continue;
+                Map<String, String> selfHit = resolveDocRef(id);
+                if (selfHit == null) continue;
+                for (PrerequisiteSection.Ref ref : refs) {
+                    next.computeIfAbsent(ref.docId(), k -> new ArrayList<>()).add(selfHit);
+                }
+            }
+        }
+        prerequisiteOfIndex = next;
     }
 
     /**
@@ -279,9 +343,16 @@ public class PortalServer {
             return;
         }
 
-        // Prerequisite documents (JSON): GET /api/prerequisites?id=... — the "### 前提文書" section
+        // Prerequisite documents (JSON): GET /api/prerequisites?id=... — the "## 参考文献" section
         if (path.equals("/api/prerequisites")) {
             handlePrerequisites(ex);
+            return;
+        }
+
+        // Reverse of prerequisites (JSON): GET /api/prerequisite-of?id=... — documents that name
+        // this one as a prerequisite in their own "## 参考文献" section
+        if (path.equals("/api/prerequisite-of")) {
+            handlePrerequisiteOf(ex);
             return;
         }
 
@@ -393,6 +464,9 @@ public class PortalServer {
                 added++;
             }
         }
+        if (added > 0) {
+            rebuildPrerequisiteOfIndex();
+        }
         return new int[]{projects.size(), added};
     }
 
@@ -426,6 +500,7 @@ public class PortalServer {
             Main.reindexAll(p.projectDir(), production);
             System.out.println("  Reindexed: " + p.name());
         }
+        rebuildPrerequisiteOfIndex();
         return projects.size();
     }
 
@@ -527,12 +602,12 @@ public class PortalServer {
 
     /**
      * Handles {@code GET /api/prerequisites?id=<docId>} (alias {@code ?ref=...}). Returns the
-     * documents listed under the referenced document's {@code ### 前提文書} section — a non-symmetric
+     * documents listed under the referenced document's {@code ## 参考文献} section — a non-symmetric
      * "read this first" relation distinct from similarity-based search, per
      * {@code PrerequisiteDocument_260728_oo01} (doc_SCIVICS002/html-saurus/040_design) — as a JSON array
      * of {@code {id,title,path,srcPath,summary}}. Returns HTTP 404 when {@code id}/{@code ref} itself
      * does not resolve; returns an empty array when the document resolves but has no
-     * {@code ### 前提文書} section (absence of the section does not mean no prerequisite exists).
+     * {@code ## 参考文献} section (absence of the section does not mean no prerequisite exists).
      */
     private void handlePrerequisites(HttpExchange ex) throws IOException {
         String ref = queryParam(ex, "id");
@@ -549,7 +624,7 @@ public class PortalServer {
         RelatedDocsView.writeJson(ex, prerequisitesFor(self.getOrDefault("srcPath", "")));
     }
 
-    /** Resolves the {@code ### 前提文書} references of a source {@code .md} file to hit maps. */
+    /** Resolves the {@code ## 参考文献} references of a source {@code .md} file to hit maps. */
     private List<Map<String, String>> prerequisitesFor(String srcPath) {
         List<Map<String, String>> out = new ArrayList<>();
         if (srcPath == null || srcPath.isBlank()) return out;
@@ -565,6 +640,31 @@ public class PortalServer {
             System.err.println("Prerequisites lookup failed for " + srcPath + ": " + e.getMessage());
         }
         return out;
+    }
+
+    /**
+     * Handles {@code GET /api/prerequisite-of?id=<docId>} (alias {@code ?ref=...}). Returns the
+     * documents whose own {@code ## 参考文献} section names the referenced document as a
+     * prerequisite — the reverse direction of {@link #handlePrerequisites}, served from the
+     * precomputed {@link #prerequisiteOfIndex} rather than read fresh per request, per
+     * {@code PrerequisiteOf_260806_oo01} (doc_SCIVICS002/html-saurus/040_design). Returns HTTP 404
+     * only when {@code id}/{@code ref} itself does not resolve; a document nobody references
+     * returns an empty array, not 404.
+     */
+    private void handlePrerequisiteOf(HttpExchange ex) throws IOException {
+        String ref = queryParam(ex, "id");
+        if (ref.isBlank()) ref = queryParam(ex, "ref");
+        if (ref.isBlank()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing id\"}");
+            return;
+        }
+        Map<String, String> self = resolveDocRef(ref);
+        if (self == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"not found\",\"id\":" + jsonStr(ref) + "}");
+            return;
+        }
+        List<Map<String, String>> hits = prerequisiteOfIndex.getOrDefault(self.getOrDefault("id", ""), List.of());
+        RelatedDocsView.writeJson(ex, hits);
     }
 
     /** Counts {@code .md} files directly inside a directory. */

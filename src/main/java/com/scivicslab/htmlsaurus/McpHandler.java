@@ -36,7 +36,9 @@ import java.util.stream.Stream;
  *   <li>{@code search-semantic} — embedding-based semantic search by query</li>
  *   <li>{@code related-semantic} — precomputed embedding-based neighbours of a document</li>
  *   <li>{@code prerequisites} — find the documents this one requires, from its
- *       {@code ### 前提文書} section (a directed, author-declared relation, not similarity)</li>
+ *       {@code ## 参考文献} section (a directed, author-declared relation, not similarity)</li>
+ *   <li>{@code prerequisite-of} — find the documents that name this one as a prerequisite (the
+ *       reverse of {@code prerequisites}), derived from every document's {@code ## 参考文献}</li>
  *   <li>{@code siblings} — documents in the same grouping directory (directory position,
  *       not similarity)</li>
  *   <li>{@code list-documents} — list all documents in the navigation tree</li>
@@ -90,6 +92,7 @@ class McpHandler {
     private final Function<String, List<Map<String, String>>> semanticQueryResolver;
     private final Function<String, List<Map<String, String>>> semanticRelatedResolver;
     private final Function<String, List<Map<String, String>>> siblingsResolver;
+    private final Function<String, List<Map<String, String>>> prerequisiteOfResolver;
     private final StageBuilder stageBuilder;
     private final Callable<Integer> reindexAllRunner;
     private final Callable<int[]> scanWorksDirRunner;
@@ -122,6 +125,10 @@ class McpHandler {
      * @param siblingsResolver        documents in the same grouping directory as a document id or
      *                                path fragment; same as {@code /api/siblings}. {@code null} in
      *                                single-project mode.
+     * @param prerequisiteOfResolver  documents whose own {@code ## 参考文献} section names this
+     *                                document as a prerequisite — the reverse of
+     *                                {@code prerequisites}; same as {@code /api/prerequisite-of}.
+     *                                {@code null} in single-project mode.
      * @param stageBuilder            runs one build stage for a project; same as
      *                                {@code /api/build-<stage>/<project>}. In single-project mode,
      *                                only the {@code all} stage is available (ignoring the project
@@ -145,6 +152,7 @@ class McpHandler {
                Function<String, List<Map<String, String>>> semanticQueryResolver,
                Function<String, List<Map<String, String>>> semanticRelatedResolver,
                Function<String, List<Map<String, String>>> siblingsResolver,
+               Function<String, List<Map<String, String>>> prerequisiteOfResolver,
                StageBuilder stageBuilder,
                Callable<Integer> reindexAllRunner,
                Callable<int[]> scanWorksDirRunner,
@@ -159,6 +167,7 @@ class McpHandler {
         this.semanticQueryResolver = semanticQueryResolver;
         this.semanticRelatedResolver = semanticRelatedResolver;
         this.siblingsResolver = siblingsResolver;
+        this.prerequisiteOfResolver = prerequisiteOfResolver;
         this.stageBuilder = stageBuilder;
         this.reindexAllRunner = reindexAllRunner;
         this.scanWorksDirRunner = scanWorksDirRunner;
@@ -264,9 +273,13 @@ class McpHandler {
                 """
                 {"type":"object","properties":{"path":{"type":"string","description":"The document's served path, as returned by other tools' \\"path\\" field (e.g. '/Guide/Auth.html'), not a .md source path"},"max_results":{"type":"integer","description":"Maximum results to return (default 5)"}},"required":["path"]}"""),
             toolDef("prerequisites",
-                "Find the documents that must be understood before this one, from its \"### 前提文書\" section. This is a directed, author-declared \"read this first\" relation, not a similarity score: it can point to a document that shares no vocabulary with this one, and it does not imply the reverse relation. Portal mode only.",
+                "Find the documents that must be understood before this one, from its \"## 参考文献\" section. This is a directed, author-declared \"read this first\" relation, not a similarity score: it can point to a document that shares no vocabulary with this one, and it does not imply the reverse relation. Portal mode only.",
                 """
                 {"type":"object","properties":{"id":{"type":"string","description":"Document id, or a fragment of its path, identifying the document whose prerequisites to look up"}},"required":["id"]}"""),
+            toolDef("prerequisite-of",
+                "Find the documents that name this one as a prerequisite in their own \"## 参考文献\" section — the reverse of prerequisites. Derived from every document's \"## 参考文献\" at index-build time, not read live, so a very recent edit elsewhere may not be reflected yet. Portal mode only.",
+                """
+                {"type":"object","properties":{"id":{"type":"string","description":"Document id, or a fragment of its path, identifying the document whose \\"referenced by\\" list to look up"}},"required":["id"]}"""),
             toolDef("siblings",
                 "Find documents in the same grouping directory as a given document — directory position, not similarity. Portal mode only.",
                 """
@@ -336,6 +349,7 @@ class McpHandler {
             case "search-semantic"     -> toolSearchSemantic(args);
             case "related-semantic"    -> toolRelatedSemantic(args);
             case "prerequisites"       -> toolPrerequisites(args);
+            case "prerequisite-of"     -> toolPrerequisiteOf(args);
             case "siblings"            -> toolSiblings(args);
             case "list-documents"      -> toolListDocuments(args);
             case "read-document"       -> toolReadDocument(args);
@@ -562,6 +576,18 @@ class McpHandler {
             }
         }
         return toolResult(formatHitList(prereqs, "No prerequisite documents found for: " + ref, "Prerequisite documents"));
+    }
+
+    private String toolPrerequisiteOf(Map<String, Object> args) {
+        String ref = McpJsonParser.getString(args, "id");
+        if (ref == null || ref.isBlank()) {
+            return toolError("Id is required");
+        }
+        if (prerequisiteOfResolver == null) {
+            return toolError("prerequisite-of is not available in single-project mode");
+        }
+        List<Map<String, String>> hits = prerequisiteOfResolver.apply(ref);
+        return toolResult(formatHitList(hits, "No documents reference: " + ref, "Referenced by"));
     }
 
     private String toolSiblings(Map<String, Object> args) {
