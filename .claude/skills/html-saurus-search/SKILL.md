@@ -1,7 +1,7 @@
 ---
 name: html-saurus-search
 description: "Search the local html-saurus documentation portal (all doc_* project docs under ~/works) instead of loading whole files into context. Use when unsure about a self-authored program's spec / API / behavior, or any question answerable from the internal docs. Three similarity search routes (full-text, TF-IDF similar-doc, embedding semantic), deterministic id/directory lookups, a directed prerequisite-reading relation (both directions), and a recursive read-only-what-you-need workflow that leans on the State-Machine doc structure (1 transition = 1 file, self-contained pre/post conditions)."
-version: 1.3.0
+version: 1.4.0
 ---
 
 # html-saurus search SKILL
@@ -99,14 +99,14 @@ to the docs that build on it — the complement of `prerequisites`, which moves 
 required background. See `PrerequisiteOf_260806_oo01`, doc_SCIVICS002, `040_design`.
 
 An MCP endpoint (JSON-RPC 2.0, `tools/list`/`tools/call`) is also exposed at `/mcp`, mirroring
-every REST route above as a tool with a matching name (21 total): `resolve`, `search`,
+every REST route above as a tool with a matching name (20 total): `resolve`, `search`,
 `find-related`, `related`, `search-semantic`, `related-semantic`, `prerequisites`,
 `prerequisite-of`, `siblings`, `list-documents`, `read-document`, `edit-document`, `build-html`,
 `build-index`, `build-embedding`, `build-all`, `reindex-all`, `scan-works-dir`, `navbar-labels`,
-`translate`, `upload-pdf` (the last four MCP tools and `list-documents`/`read-document`/
-`edit-document` have no REST equivalent). Full request/response examples are recorded in
-`057_html_saurus_mcp` (MCP) and `055_html_saurus_api` (REST) — both under doc_SCIVICS002,
-`quarkus-AI-workspace/050_tutorials` — read those directly (`Read`, not this skill) when you need
+`translate` (`list-documents`/`read-document`/`edit-document` have no REST equivalent). Full
+request/response examples are recorded in `HtmlSaurusMcp_260803_oo01` (MCP) and
+`HtmlSaurusApi_260802_oo01` (REST) — both under doc_SCIVICS002, `html-saurus/010_concepts` —
+read those directly (`Read`, not this skill) when you need
 the exact parameter/response contract rather than just "which route do I call."
 
 ### Examples

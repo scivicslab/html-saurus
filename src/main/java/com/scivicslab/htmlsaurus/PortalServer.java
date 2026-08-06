@@ -103,12 +103,6 @@ public class PortalServer {
         }
         // MCP handler: in portal mode, use worksDir as root so all projects' docs/ are accessible
         ActorRef<LuceneSearcher> defaultSearcher = searchers.values().stream().findFirst().orElse(null);
-        Runnable rebuildAll = () -> {
-            for (Project p : projects) {
-                Main.build(p.projectDir().resolve("docs"), p.staticDir(), production);
-                Main.reindexAll(p.projectDir(), production);
-            }
-        };
         // Semantic related-docs: render the in-memory neighbour index into portal URLs
         // (project-prefixed: /<project>/<page>). Empty index -> empty map -> widget shows nothing.
         this.semanticRelated = semanticIndex == null ? Map.of()
@@ -155,7 +149,7 @@ public class PortalServer {
             Project proj = projectMap.get(name);
             return proj == null ? null : readNavbarLabels(proj.projectDir());
         };
-        this.mcpHandler = new McpHandler(worksDir, defaultSearcher, rebuildAll, searchers, this::resolveDocRef,
+        this.mcpHandler = new McpHandler(worksDir, defaultSearcher, searchers, this::resolveDocRef,
             textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
             siblingsResolver, prerequisiteOfResolver, stageBuilder, reindexAllRunner, scanWorksDirRunner,
             navbarLabelsResolver, this::translateCore);

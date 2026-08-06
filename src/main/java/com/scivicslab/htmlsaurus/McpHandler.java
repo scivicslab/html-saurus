@@ -53,7 +53,6 @@ import java.util.stream.Stream;
  *   <li>{@code scan-works-dir} — discover and build new (not yet known) projects</li>
  *   <li>{@code navbar-labels} — read a project's Docusaurus navbar labels</li>
  *   <li>{@code translate} — on-demand translation of one block of text</li>
- *   <li>{@code upload-pdf} — import a PDF into the docs directory (no REST equivalent)</li>
  * </ul>
  */
 class McpHandler {
@@ -85,7 +84,6 @@ class McpHandler {
 
     private final Path docsDir;
     private final ActorRef<LuceneSearcher> searcher;
-    private final Runnable rebuild;
     private final Map<String, ActorRef<LuceneSearcher>> localeSearchers;
     private final DocRefResolver docRefResolver;
     private final BiFunction<String, String, List<Map<String, String>>> textRelatedResolver;
@@ -105,9 +103,6 @@ class McpHandler {
     /**
      * @param docsDir                 the docs/ directory containing raw Markdown source files
      * @param searcher                the default Lucene searcher actor for full-text search
-     * @param rebuild                 callback to trigger a full rebuild (build + reindex); used
-     *                                only by {@code upload-pdf}, which has no REST equivalent and
-     *                                no project scope of its own
      * @param localeSearchers         locale-specific searcher actors (may be empty)
      * @param docRefResolver          resolves a document id or path fragment to a hit map
      *                                ({@code id,title,path,srcPath,summary}); same resolver the
@@ -146,7 +141,7 @@ class McpHandler {
      *                                {@code (text, lang)}, returning {@code null} on failure; same
      *                                as {@code /api/translate}.
      */
-    McpHandler(Path docsDir, ActorRef<LuceneSearcher> searcher, Runnable rebuild,
+    McpHandler(Path docsDir, ActorRef<LuceneSearcher> searcher,
                Map<String, ActorRef<LuceneSearcher>> localeSearchers, DocRefResolver docRefResolver,
                BiFunction<String, String, List<Map<String, String>>> textRelatedResolver,
                Function<String, List<Map<String, String>>> semanticQueryResolver,
@@ -160,7 +155,6 @@ class McpHandler {
                BiFunction<String, String, String> translateFn) {
         this.docsDir = docsDir;
         this.searcher = searcher;
-        this.rebuild = rebuild;
         this.localeSearchers = localeSearchers != null ? localeSearchers : Map.of();
         this.docRefResolver = docRefResolver;
         this.textRelatedResolver = textRelatedResolver;
@@ -327,11 +321,7 @@ class McpHandler {
             toolDef("translate",
                 "Translate one block of text (a paragraph, heading, list item, or table row) to a target language.",
                 """
-                {"type":"object","properties":{"text":{"type":"string","description":"Source text to translate (one block)"},"lang":{"type":"string","description":"Target language name (e.g. Japanese, English)"}},"required":["text","lang"]}"""),
-            toolDef("upload-pdf",
-                "Import a PDF file into the docs directory. Copies the PDF, extracts text, writes a companion .md file with YAML frontmatter (title, authors, year, journal), and triggers a rebuild. No REST equivalent.",
-                """
-                {"type":"object","properties":{"source_path":{"type":"string","description":"Absolute path to the PDF file on the filesystem"},"dest_path":{"type":"string","description":"Relative path within docs/ where the PDF should be saved (e.g. 'papers/attention.pdf')"}},"required":["source_path","dest_path"]}""")
+                {"type":"object","properties":{"text":{"type":"string","description":"Source text to translate (one block)"},"lang":{"type":"string","description":"Target language name (e.g. Japanese, English)"}},"required":["text","lang"]}""")
         ) + "]}";
     }
 
@@ -362,7 +352,6 @@ class McpHandler {
             case "scan-works-dir"      -> toolScanWorksDir();
             case "navbar-labels"       -> toolNavbarLabels(args);
             case "translate"           -> toolTranslate(args);
-            case "upload-pdf"          -> toolUploadPdf(args);
             case null -> errorJson(-32602, "Missing tool name");
             default -> errorJson(-32602, "Unknown tool: " + toolName);
         };
@@ -722,52 +711,6 @@ class McpHandler {
             return toolError("Translation failed");
         }
         return toolResult(result);
-    }
-
-    private String toolUploadPdf(Map<String, Object> args) throws IOException {
-        String sourcePath = McpJsonParser.getString(args, "source_path");
-        String destPath   = McpJsonParser.getString(args, "dest_path");
-        if (sourcePath == null || sourcePath.isBlank()) {
-            return toolError("source_path is required");
-        }
-        if (destPath == null || destPath.isBlank()) {
-            return toolError("dest_path is required");
-        }
-        if (!destPath.toLowerCase().endsWith(".pdf")) {
-            return toolError("dest_path must end with .pdf");
-        }
-
-        Path src = Path.of(sourcePath).normalize();
-        if (!Files.exists(src)) {
-            return toolError("Source file not found: " + sourcePath);
-        }
-
-        Path dest = docsDir.resolve(destPath).normalize();
-        if (!dest.startsWith(docsDir)) {
-            return toolError("Path traversal not allowed");
-        }
-
-        Files.createDirectories(dest.getParent());
-        Files.copy(src, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-
-        String filename = dest.getFileName().toString();
-        String stem = filename.substring(0, filename.length() - 4);
-        Path mdPath = dest.getParent().resolve(stem + ".md");
-        try {
-            String md = PdfExtractor.extract(dest);
-            Files.writeString(mdPath, md, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            System.err.println("PDF extraction failed for " + filename + ": " + e.getMessage());
-            Files.writeString(mdPath,
-                "---\ntitle: \"" + stem + "\"\nsource_pdf: \"" + filename + "\"\n---\n\n(Text extraction failed)",
-                StandardCharsets.UTF_8);
-        }
-
-        long start = System.currentTimeMillis();
-        rebuild.run();
-        long ms = System.currentTimeMillis() - start;
-
-        return toolResult("PDF imported: " + destPath + " → " + stem + ".md (rebuilt in " + ms + " ms)");
     }
 
     // ---- Helpers ----
