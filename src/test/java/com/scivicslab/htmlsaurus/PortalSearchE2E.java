@@ -2,12 +2,15 @@ package com.scivicslab.htmlsaurus;
 
 import com.microsoft.playwright.*;
 
-import java.util.List;
-
 /**
- * E2E test for the portal search forms.
+ * E2E test for portal search: the sidebar's "one form, three search types" widget
+ * ({@code #search-input} + {@code search-type} radios, inside the Projects tab —
+ * see {@code ImportTab_260806_oo01} for the Projects/Import tab layout), and the two
+ * standalone results pages it dispatches to ({@code /search} for keyword and embedding,
+ * {@code /find-related} for TF-IDF).
  *
- * <p>Requires an already-running portal:
+ * <p>Requires an already-running portal with real, indexed content that contains the
+ * keyword {@link #KNOWN_KEYWORD}:
  * <pre>
  *   java -jar html-saurus.jar &lt;worksDir&gt; --portal-mode --serve --port 8500
  * </pre>
@@ -43,73 +46,85 @@ public class PortalSearchE2E {
             Browser browser = playwright.chromium().launch(
                     new BrowserType.LaunchOptions().setHeadless(true));
 
-            runForm1(browser);
-            runForm2(browser);
+            runSidebarWidget(browser);
+            runSearchResultsPage(browser);
+            runFindRelatedResultsPage(browser);
         }
 
         System.out.printf("%nResults: %d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
     }
 
-    // ---- Form 1: form.portal-search → GET /search -------------------------
+    // ---- Sidebar widget: #search-input + search-type radios, inside the Projects tab ----------
 
-    private static void runForm1(Browser browser) {
-        // P-1: portal page has form.portal-search with input[name=q]
-        withPage("P-1: portal page has form.portal-search and input[name=q]", browser, page -> {
+    private static void runSidebarWidget(Browser browser) {
+        withPage("S-1: search widget is visible by default (Projects tab is active on load)", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            check(page.querySelector("form.portal-search") != null,
-                    "form.portal-search not found");
-            check(page.querySelector("form.portal-search input[name=q]") != null,
-                    "input[name=q] not found inside form.portal-search");
-            check(page.querySelector("form.portal-search button[type=submit]") != null,
-                    "submit button not found inside form.portal-search");
+            check(page.isVisible("#search-input"), "#search-input must be visible on load");
+            check(page.isVisible("#search-btn"), "#search-btn must be visible on load");
+            check(page.isVisible("input[name='search-type'][value='fulltext']"), "Keyword radio must be visible");
+            check(page.isVisible("input[name='search-type'][value='tfidf']"), "TF-IDF radio must be visible");
+            check(page.isVisible("input[name='search-type'][value='embedding']"), "Embedding radio must be visible");
         });
 
-        // P-2: form has method=get and action=/search
-        withPage("P-2: form has method=get, action ends with /search", browser, page -> {
+        withPage("S-2: empty input shows a validation message and does not navigate the frame", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            ElementHandle form = page.querySelector("form.portal-search");
-            check(form != null, "form.portal-search not found");
-            String method = form.getAttribute("method");
-            check(method != null && method.equalsIgnoreCase("get"),
-                    "form method must be 'get', got: " + method);
-            String action = form.getAttribute("action");
-            check(action != null && action.endsWith("/search"),
-                    "form action must end with /search, got: " + action);
+            page.click("#search-btn");
+            check("Please enter some text.".equals(page.textContent("#search-status")),
+                    "empty submit must show the validation message");
         });
 
-        // P-3: submitting form via Enter navigates to /search?q=<keyword>
-        withPage("P-3: submitting form navigates to /search?q=<keyword>", browser, page -> {
+        withPage("S-3: Keyword search loads /search?q=... into the doc-frame iframe", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.fill("form.portal-search input[name=q]", KNOWN_KEYWORD);
-            page.press("form.portal-search input[name=q]", "Enter");
-            page.waitForLoadState();
-            String url = page.url();
-            check(url.contains("/search"), "After submit, URL must contain /search, got: " + url);
-            check(url.contains("q="), "After submit, URL must contain q=, got: " + url);
+            page.fill("#search-input", KNOWN_KEYWORD);
+            page.click("#search-btn");
+            String url = waitForFrameUrlContains(page, "/search?q=");
+            check(url.contains("q=" + KNOWN_KEYWORD), "doc-frame URL must carry the query, got: " + url);
         });
 
-        // P-4: /search?q=<keyword> renders a <body>
-        withPage("P-4: search result page renders <body>", browser, page -> {
+        withPage("S-4: TF-IDF search loads /find-related results into the doc-frame iframe", browser, page -> {
+            page.navigate(BASE_URL + "/");
+            page.waitForLoadState();
+            page.fill("#search-input", KNOWN_KEYWORD);
+            page.check("input[name='search-type'][value='tfidf']");
+            page.click("#search-btn");
+            String html = waitForFrameHtmlContaining(page, ".result-count");
+            check(html.contains("class=\"result\"") || html.contains("No related documents found"),
+                    "find-related frame must show either results or the no-results message");
+        });
+
+        withPage("S-5: Embedding search loads /search-semantic?q=... into the doc-frame iframe", browser, page -> {
+            page.navigate(BASE_URL + "/");
+            page.waitForLoadState();
+            page.fill("#search-input", KNOWN_KEYWORD);
+            page.check("input[name='search-type'][value='embedding']");
+            page.click("#search-btn");
+            String url = waitForFrameUrlContains(page, "/search-semantic?q=");
+            check(url.contains(KNOWN_KEYWORD), "doc-frame URL must carry the query, got: " + url);
+        });
+    }
+
+    // ---- /search?q=... standalone results page (SSR) -----------------------------------------
+
+    private static void runSearchResultsPage(Browser browser) {
+        withPage("R-1: /search?q=<keyword> renders a <body>", browser, page -> {
             page.navigate(BASE_URL + "/search?q=" + KNOWN_KEYWORD);
             page.waitForLoadState();
             check(page.querySelector("body") != null, "<body> not found on search result page");
         });
 
-        // P-5: known keyword returns at least one .result
-        withPage("P-5: known keyword returns at least one .result", browser, page -> {
+        withPage("R-2: known keyword returns at least one .result", browser, page -> {
             page.navigate(BASE_URL + "/search?q=" + KNOWN_KEYWORD);
             page.waitForLoadState();
             check(page.querySelector(".result") != null,
                     "No .result elements found for keyword: " + KNOWN_KEYWORD);
         });
 
-        // P-6: unknown keyword shows "No results found", no .result
         // Single token (no underscores) that is guaranteed absent from any indexed document.
-        withPage("P-6: unknown keyword shows 'No results found'", browser, page -> {
+        withPage("R-3: unknown keyword shows 'No results found'", browser, page -> {
             page.navigate(BASE_URL + "/search?q=zzznomatch9876543xyzabc");
             page.waitForLoadState();
             check(page.querySelector(".result") == null,
@@ -118,18 +133,16 @@ public class PortalSearchE2E {
                     "Unknown keyword must show 'No results found'");
         });
 
-        // P-7: empty ?q= shows "Please enter a search query"
-        withPage("P-7: empty query shows 'Please enter a search query'", browser, page -> {
+        withPage("R-4: empty query shows 'Please enter a search query'", browser, page -> {
             page.navigate(BASE_URL + "/search?q=");
             page.waitForLoadState();
             check(page.content().contains("Please enter a search query"),
                     "Empty query page must show 'Please enter a search query'");
         });
 
-        // P-8: results page main search widget (#search-input) retains keyword.
-        // The search widget lives in <main>, not <header>: the header holds only the
-        // home link, so it stays a fixed-height nav bar regardless of query length.
-        withPage("P-8: results page main search widget retains submitted keyword", browser, page -> {
+        // The results page embeds the same #search-input widget (in <main>, not <header> —
+        // the header holds only the home link) and pre-fills it with the submitted query.
+        withPage("R-5: results page's own search widget retains the submitted keyword", browser, page -> {
             page.navigate(BASE_URL + "/search?q=" + KNOWN_KEYWORD);
             page.waitForLoadState();
             check(page.querySelector("header form") == null,
@@ -142,8 +155,7 @@ public class PortalSearchE2E {
                     "main #search-input must retain '" + KNOWN_KEYWORD + "', got: " + value);
         });
 
-        // P-9: result links stay in the same frame (no new tab) so they open in the right pane
-        withPage("P-9: result links do not open a new tab", browser, page -> {
+        withPage("R-6: result links do not open a new tab", browser, page -> {
             page.navigate(BASE_URL + "/search?q=" + KNOWN_KEYWORD);
             page.waitForLoadState();
             ElementHandle link = page.querySelector("a.result");
@@ -153,8 +165,7 @@ public class PortalSearchE2E {
                     + link.getAttribute("target"));
         });
 
-        // P-10: result href starts with /<projectName>/
-        withPage("P-10: result href starts with /<project>/", browser, page -> {
+        withPage("R-7: result href starts with /<project>/", browser, page -> {
             page.navigate(BASE_URL + "/search?q=" + KNOWN_KEYWORD);
             page.waitForLoadState();
             ElementHandle link = page.querySelector("a.result");
@@ -164,8 +175,7 @@ public class PortalSearchE2E {
                     "a.result href must be /<project>/..., got: " + href);
         });
 
-        // P-11: .result-count shows non-blank text
-        withPage("P-11: .result-count shows non-blank text", browser, page -> {
+        withPage("R-8: .result-count shows non-blank text", browser, page -> {
             page.navigate(BASE_URL + "/search?q=" + KNOWN_KEYWORD);
             page.waitForLoadState();
             ElementHandle el = page.querySelector(".result-count");
@@ -174,8 +184,7 @@ public class PortalSearchE2E {
             check(text != null && !text.isBlank(), ".result-count must contain non-blank text");
         });
 
-        // P-12: result structure has .result-title, .result-project, .result-summary
-        withPage("P-12: result has .result-title, .result-project, .result-summary", browser, page -> {
+        withPage("R-9: result has .result-title, .result-project, .result-summary", browser, page -> {
             page.navigate(BASE_URL + "/search?q=" + KNOWN_KEYWORD);
             page.waitForLoadState();
             check(page.querySelector(".result .result-title") != null,
@@ -186,12 +195,12 @@ public class PortalSearchE2E {
                     ".result-summary not found inside .result");
         });
 
-        // P-13 through P-16: special chars must not crash the server
+        // R-10 through R-13: special chars must not crash the server
         for (String[] tc : new String[][]{
-                {"P-13", "100%25",     "percent"},
-                {"P-14", "html+saurus","plus"},
-                {"P-15", "%28unclosed","open-paren"},
-                {"P-16", "field%3Avalue", "colon"},
+                {"R-10", "100%25",     "percent"},
+                {"R-11", "html+saurus","plus"},
+                {"R-12", "%28unclosed","open-paren"},
+                {"R-13", "field%3Avalue", "colon"},
         }) {
             String id = tc[0], q = tc[1], label = tc[2];
             withPage(id + ": special char " + label + " does not crash server", browser, page -> {
@@ -204,75 +213,73 @@ public class PortalSearchE2E {
         }
     }
 
-    // ---- Form 2: #find-related-input → POST /api/find-related -------------
+    // ---- /find-related standalone results page (POST-only, reached via the sidebar widget) ---
 
-    private static void runForm2(Browser browser) {
-        // FR-1: find-related input and button exist
-        withPage("FR-1: #find-related-input and #find-related-btn exist", browser, page -> {
+    private static void runFindRelatedResultsPage(Browser browser) {
+        withPage("FR-1: results have title, project name, and non-blank summary", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            check(page.querySelector("#find-related-input") != null,
-                    "#find-related-input not found on portal page");
-            check(page.querySelector("#find-related-btn") != null,
-                    "#find-related-btn not found on portal page");
+            page.fill("#search-input", KNOWN_KEYWORD);
+            page.check("input[name='search-type'][value='tfidf']");
+            page.click("#search-btn");
+            String html = waitForFrameHtmlContaining(page, ".result");
+            check(html.contains("class=\"result-title\""), ".result-title not found inside .result");
+            check(html.contains("class=\"result-project\""), ".result-project not found inside .result");
+            check(html.matches("(?s).*class=\"result-summary\">[^<]*\\S[^<]*</div>.*"),
+                    ".result-summary must contain non-blank text");
         });
 
-        // FR-2: clicking button with empty input shows validation message
-        withPage("FR-2: empty input shows 'Please enter some text.'", browser, page -> {
+        withPage("FR-2: result links do not open a new tab", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#find-related-btn");
-            page.waitForLoadState();
-            check(page.content().contains("Please enter some text."),
-                    "Empty find-related must show 'Please enter some text.'");
-        });
-
-        // FR-3: valid text input returns results in #find-related-list
-        withPage("FR-3: valid text returns results in #find-related-list", browser, page -> {
-            page.navigate(BASE_URL + "/");
-            page.waitForLoadState();
-            page.fill("#find-related-input", KNOWN_KEYWORD);
-            page.click("#find-related-btn");
-            page.waitForSelector("#find-related-list a, #find-related-list .find-related-item",
-                    new Page.WaitForSelectorOptions().setTimeout(10_000));
-            List<ElementHandle> items = page.querySelectorAll(
-                    "#find-related-list a, #find-related-list .find-related-item");
-            check(!items.isEmpty(), "#find-related-list must contain at least one result");
-        });
-
-        // FR-4: results have title and project name
-        withPage("FR-4: results have title and project name", browser, page -> {
-            page.navigate(BASE_URL + "/");
-            page.waitForLoadState();
-            page.fill("#find-related-input", KNOWN_KEYWORD);
-            page.click("#find-related-btn");
-            page.waitForSelector("#find-related-list a, #find-related-list .find-related-item",
-                    new Page.WaitForSelectorOptions().setTimeout(10_000));
-            ElementHandle first = page.querySelector(
-                    "#find-related-list a, #find-related-list .find-related-item");
-            check(first != null, "#find-related-list must have at least one item");
-            String text = first.textContent();
-            check(text != null && !text.isBlank(),
-                    "First find-related result must contain non-blank text");
-        });
-
-        // FR-5: result links stay in the same frame (no new tab) so they open in the right pane
-        withPage("FR-5: find-related result links do not open a new tab", browser, page -> {
-            page.navigate(BASE_URL + "/");
-            page.waitForLoadState();
-            page.fill("#find-related-input", KNOWN_KEYWORD);
-            page.click("#find-related-btn");
-            page.waitForSelector("#find-related-list a",
-                    new Page.WaitForSelectorOptions().setTimeout(10_000));
-            ElementHandle link = page.querySelector("#find-related-list a");
-            check(link != null, "No <a> link found in #find-related-list");
-            check(!"_blank".equals(link.getAttribute("target")),
-                    "#find-related-list a must not open a new tab (target must not be _blank), got: "
-                    + link.getAttribute("target"));
+            page.fill("#search-input", KNOWN_KEYWORD);
+            page.check("input[name='search-type'][value='tfidf']");
+            page.click("#search-btn");
+            String html = waitForFrameHtmlContaining(page, "a.result");
+            check(!html.contains("target=\"_blank\""),
+                    "a.result must not open a new tab (no element in the find-related frame may set target=_blank)");
         });
     }
 
     // ---- Helpers -----------------------------------------------------------
+
+    /**
+     * Polls {@code doc-frame}'s URL until it contains {@code substr}, returning the matched URL
+     * as a plain string. The CSP has no {@code 'unsafe-eval'}, so {@code page.waitForFunction}
+     * (which evals a predicate in the page) cannot be used here — poll from the Java side
+     * instead. Returning a string rather than the live {@code Frame} avoids a second live call
+     * racing a follow-up navigation inside the frame.
+     */
+    private static String waitForFrameUrlContains(Page page, String substr) {
+        for (int i = 0; i < 100; i++) {
+            Frame frame = page.frame("doc-frame");
+            String url = frame == null ? null : frame.url();
+            if (url != null && url.contains(substr)) return url;
+            page.waitForTimeout(100);
+        }
+        throw new AssertionError("doc-frame did not navigate to a URL containing '" + substr + "'");
+    }
+
+    /**
+     * Polls {@code doc-frame} until {@code selector} appears inside it, then returns the frame's
+     * full HTML as a plain string (captured atomically with the selector check, in the same live
+     * call). A transient {@link PlaywrightException} while the frame is mid-navigation is treated
+     * as "not ready yet" and retried, rather than failing the test.
+     */
+    private static String waitForFrameHtmlContaining(Page page, String selector) {
+        for (int i = 0; i < 100; i++) {
+            Frame frame = page.frame("doc-frame");
+            if (frame != null) {
+                try {
+                    if (frame.querySelector(selector) != null) return frame.content();
+                } catch (PlaywrightException transientNavigation) {
+                    // frame is mid-navigation; fall through and retry
+                }
+            }
+            page.waitForTimeout(100);
+        }
+        throw new AssertionError("doc-frame never showed an element matching '" + selector + "'");
+    }
 
     @FunctionalInterface
     interface PageTest {

@@ -943,7 +943,16 @@ public class PortalServer {
                 #portal-sidebar h2 { margin-top: 1.5rem; }
                 #portal-sidebar h2:first-of-type { margin-top: 0; }
                 body.sidebar-collapsed #portal-sidebar { display: none; }
-                /* Second-level sub-tabs inside the Import section (PDF / Word), styled after
+                /* Top-level sidebar tabs: Projects (which contains Search) and Import. */
+                .tab-bar { display: flex; gap: 0.25rem; margin-bottom: 1rem;
+                           border-bottom: 1px solid var(--border-color); }
+                .tab-btn { flex: 1 1 auto; padding: 0.5rem 0.4rem; border: none; background: none;
+                           color: var(--text-secondary); font-size: 0.85rem; cursor: pointer;
+                           border-bottom: 2px solid transparent; }
+                .tab-btn:hover { color: var(--text-primary); }
+                .tab-btn.active { color: var(--text-primary); border-bottom-color: var(--accent-green); }
+                .tab-panel[hidden] { display: none; }
+                /* Second-level sub-tabs inside the Import tab (PDF / Word), styled after
                    quarkus-english-drill's ingest_form.html. */
                 .import-tab-bar { display: flex; gap: 0.25rem; margin: 0.6rem 0 0.75rem;
                                    border-bottom: 1px solid var(--border-color); }
@@ -1046,6 +1055,11 @@ public class PortalServer {
 
         if (!production) {
             sb.append("""
+              <div class="tab-bar" role="tablist">
+                <button class="tab-btn active" id="tab-btn-projects" data-tab="projects" onclick="selectTab('projects')">Projects</button>
+                <button class="tab-btn" id="tab-btn-import" data-tab="import" onclick="selectTab('import')">Import</button>
+              </div>
+              <div class="tab-panel" id="tab-projects">
               <h2>Search</h2>
               <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.6rem 0 0.75rem;">
                 Enter keywords, or paste a paragraph of text, then pick a search type.</p>
@@ -1109,10 +1123,13 @@ public class PortalServer {
         }
 
         sb.append("  </div>\n"); // close .project-list
+        if (!production) {
+            sb.append("  </div>\n"); // close .tab-panel#tab-projects
+        }
 
         if (!production) {
             sb.append("""
-              <h2>Import</h2>
+              <div class="tab-panel" id="tab-import" hidden>
               <div class="import-tab-bar" role="tablist">
                 <button type="button" class="import-tab active" data-panel="pdf" id="import-tab-pdf">PDF</button>
                 <button type="button" class="import-tab" data-panel="word" id="import-tab-word">Word</button>
@@ -1180,6 +1197,7 @@ public class PortalServer {
               </section>
 
               <p class="hint" id="import-progress" style="white-space:pre-line;"></p>
+              </div>
             """);
         }
 
@@ -1298,6 +1316,12 @@ public class PortalServer {
               status.textContent = 'Showing results in the right pane.';
               status.style.color = 'var(--accent-green)';
             }
+            function selectTab(name) {
+              document.querySelectorAll('.tab-panel').forEach(function(p) { p.hidden = (p.id !== 'tab-' + name); });
+              document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === name); });
+              localStorage.setItem('portal-active-tab', name);
+            }
+            selectTab(localStorage.getItem('portal-active-tab') || 'projects');
             (function () {
               // Second-level tabs inside Import (PDF / Word), same pattern as
               // quarkus-english-drill's ingest_form.html.

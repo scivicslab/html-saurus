@@ -6,8 +6,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * E2E test for the portal sidebar's Import section (PDF / Word sub-tabs, styled after
- * quarkus-english-drill's Import screen: a server-side file path input, not a browser upload).
+ * E2E test for the portal sidebar's Import tab (top-level tab, alongside Projects — Search lives
+ * inside the Projects tab). Import has its own PDF / Word sub-tabs, styled after
+ * quarkus-english-drill's Import screen: a server-side file path input, not a browser upload.
  *
  * <p>Requires an already-running dev-mode portal with at least one project named {@code proj1}
  * that has a {@code docs/} directory:
@@ -45,16 +46,28 @@ public class ImportTabE2E {
     }
 
     private static void runSubTabSwitching(Browser browser) {
-        withPage("T-1: PDF panel visible by default, Word panel hidden", browser, page -> {
+        withPage("T-0: Projects tab (with Search) visible by default, Import tab hidden", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            check(page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be visible on load");
-            check(!page.isVisible("#import-panel-word"), "#import-panel-word must be hidden on load");
+            check(page.isVisible("#tab-projects"), "#tab-projects must be visible on load");
+            check(page.isVisible("#search-input"), "Search must be inside the Projects tab");
+            check(!page.isVisible("#tab-import"), "#tab-import must be hidden on load");
         });
 
-        withPage("T-2: clicking Word tab shows it and hides PDF", browser, page -> {
+        withPage("T-1: clicking Import tab shows it (PDF sub-panel visible, Word hidden)", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
+            page.click("#tab-btn-import");
+            check(page.isVisible("#tab-import"), "#tab-import must be visible after click");
+            check(!page.isVisible("#tab-projects"), "#tab-projects must be hidden after click");
+            check(page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be visible by default within Import");
+            check(!page.isVisible("#import-panel-word"), "#import-panel-word must be hidden by default within Import");
+        });
+
+        withPage("T-2: clicking Word sub-tab shows it and hides PDF", browser, page -> {
+            page.navigate(BASE_URL + "/");
+            page.waitForLoadState();
+            page.click("#tab-btn-import");
             page.click("#import-tab-word");
             check(page.isVisible("#import-panel-word"), "#import-panel-word must be visible after click");
             check(!page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be hidden after click");
@@ -63,6 +76,7 @@ public class ImportTabE2E {
         withPage("T-3: project dropdowns are populated from the project list", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
+            page.click("#tab-btn-import");
             int pdfCount = ((Number) page.evalOnSelector("#import-pdf-project", "el => el.options.length")).intValue();
             check(pdfCount > 0, "#import-pdf-project must have at least one option");
             page.click("#import-tab-word");
@@ -78,6 +92,7 @@ public class ImportTabE2E {
                 Files.write(docx, buildFixtureDocx());
                 page.navigate(BASE_URL + "/");
                 page.waitForLoadState();
+                page.click("#tab-btn-import");
                 page.click("#import-tab-word");
                 page.selectOption("#import-word-project", "proj1");
                 page.fill("#import-word-dest", "e2e-import-test");
