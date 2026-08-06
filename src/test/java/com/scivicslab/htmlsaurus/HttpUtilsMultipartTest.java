@@ -2,62 +2,59 @@ package com.scivicslab.htmlsaurus;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for {@link HttpUtils#buildMultipart} and {@link HttpUtils#parseMultipart}: round-trips
- * a request through the same builder used to call OCR servers, and the parser used to receive a
- * browser upload — no HTTP or filesystem I/O.
+ * Unit tests for {@link HttpUtils#buildMultipart}: the request body it builds is what the OCR
+ * clients ({@link YomiTokuOcrClient}, {@link MarkerOcrClient}) send to the external OCR servers —
+ * no HTTP or filesystem I/O here, just the raw byte layout.
  */
 class HttpUtilsMultipartTest {
 
     @Test
-    void roundTrip_textFieldsAndFileAllRecovered() throws Exception {
+    void body_containsTextFieldsAndFilePartInOrder() throws Exception {
         var textFields = new LinkedHashMap<String, String>();
         textFields.put("project", "myproj");
         textFields.put("destPath", "papers/book");
         byte[] fileBytes = {1, 2, 3, 4, 5, (byte) 0xFF, 0};
 
         byte[] body = HttpUtils.buildMultipart("test-boundary-123", textFields, "file", "book.pdf", fileBytes);
-        List<HttpUtils.MultipartField> fields =
-                HttpUtils.parseMultipart(body, "multipart/form-data; boundary=test-boundary-123");
+        String text = new String(body, StandardCharsets.ISO_8859_1);
 
-        assertEquals(3, fields.size());
-        assertEquals("myproj", fieldByName(fields, "project").asText());
-        assertEquals("papers/book", fieldByName(fields, "destPath").asText());
-        HttpUtils.MultipartField file = fieldByName(fields, "file");
-        assertTrue(file.isFile());
-        assertEquals("book.pdf", file.filename());
-        assertArrayEquals(fileBytes, file.data());
+        assertTrue(text.contains("--test-boundary-123\r\n"));
+        assertTrue(text.contains("Content-Disposition: form-data; name=\"project\"\r\n\r\nmyproj\r\n"));
+        assertTrue(text.contains("Content-Disposition: form-data; name=\"destPath\"\r\n\r\npapers/book\r\n"));
+        assertTrue(text.contains("Content-Disposition: form-data; name=\"file\"; filename=\"book.pdf\"\r\n"
+                + "Content-Type: application/octet-stream\r\n\r\n"));
+        assertTrue(text.endsWith("--test-boundary-123--\r\n"));
+        assertTrue(contains(body, fileBytes), "raw file bytes must appear intact in the body");
+
+        int projectPos = text.indexOf("name=\"project\"");
+        int filePos = text.indexOf("name=\"file\"");
+        assertTrue(projectPos >= 0 && projectPos < filePos, "text fields must precede the file part");
     }
 
     @Test
-    void parseMultipart_noBoundaryInContentType_returnsEmpty() {
-        assertTrue(HttpUtils.parseMultipart("irrelevant".getBytes(), "multipart/form-data").isEmpty());
-    }
-
-    @Test
-    void parseMultipart_nullContentType_returnsEmpty() {
-        assertTrue(HttpUtils.parseMultipart("irrelevant".getBytes(), null).isEmpty());
-    }
-
-    @Test
-    void roundTrip_binaryFileWithEmbeddedCrlfBytes_survivesIntact() throws Exception {
+    void body_binaryFileWithEmbeddedCrlfAndDashes_survivesIntact() throws Exception {
         var textFields = new LinkedHashMap<String, String>();
-        byte[] fileBytes = "line1\r\nline2\r\n--fake-boundary--".getBytes();
+        byte[] fileBytes = "line1\r\nline2\r\n--fake-boundary--".getBytes(StandardCharsets.UTF_8);
 
         byte[] body = HttpUtils.buildMultipart("b2", textFields, "file", "x.bin", fileBytes);
-        List<HttpUtils.MultipartField> fields = HttpUtils.parseMultipart(body, "multipart/form-data; boundary=b2");
 
-        assertEquals(1, fields.size());
-        assertArrayEquals(fileBytes, fields.get(0).data());
+        assertTrue(contains(body, fileBytes), "embedded CRLF/dash bytes must not be altered or truncated");
     }
 
-    private static HttpUtils.MultipartField fieldByName(List<HttpUtils.MultipartField> fields, String name) {
-        return fields.stream().filter(f -> f.name().equals(name)).findFirst()
-                .orElseThrow(() -> new AssertionError("no field named " + name));
+    private static boolean contains(byte[] haystack, byte[] needle) {
+        outer:
+        for (int i = 0; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) continue outer;
+            }
+            return true;
+        }
+        return false;
     }
 }

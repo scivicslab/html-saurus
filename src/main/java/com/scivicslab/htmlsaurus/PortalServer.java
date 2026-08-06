@@ -943,14 +943,28 @@ public class PortalServer {
                 #portal-sidebar h2 { margin-top: 1.5rem; }
                 #portal-sidebar h2:first-of-type { margin-top: 0; }
                 body.sidebar-collapsed #portal-sidebar { display: none; }
-                .tab-bar { display: flex; gap: 0.25rem; margin-bottom: 1rem;
-                           border-bottom: 1px solid var(--border-color); }
-                .tab-btn { flex: 1 1 auto; padding: 0.5rem 0.4rem; border: none; background: none;
-                           color: var(--text-secondary); font-size: 0.85rem; cursor: pointer;
-                           border-bottom: 2px solid transparent; }
-                .tab-btn:hover { color: var(--text-primary); }
-                .tab-btn.active { color: var(--text-primary); border-bottom-color: var(--accent-green); }
-                .tab-panel[hidden] { display: none; }
+                /* Second-level sub-tabs inside the Import section (PDF / Word), styled after
+                   quarkus-english-drill's ingest_form.html. */
+                .import-tab-bar { display: flex; gap: 0.25rem; margin: 0.6rem 0 0.75rem;
+                                   border-bottom: 1px solid var(--border-color); }
+                .import-tab { flex: 1 1 auto; padding: 0.4rem 0.4rem; border: none; background: none;
+                               color: var(--text-secondary); font-size: 0.82rem; cursor: pointer;
+                               border-bottom: 2px solid transparent; }
+                .import-tab:hover { color: var(--text-primary); }
+                .import-tab.active { color: var(--text-primary); border-bottom-color: var(--accent-green); }
+                .import-panel[hidden] { display: none; }
+                .import-panel .hint { font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 0.6rem; }
+                .import-panel .card { border: 1px solid var(--border-color); border-radius: 8px;
+                                       padding: 0.75rem 0.9rem; background: var(--bg-tertiary); }
+                .import-panel .field { margin-bottom: 0.5rem; }
+                .import-panel .field:last-child { margin-bottom: 0; }
+                .import-panel .field-label { display: block; font-size: 0.8rem;
+                                              color: var(--text-secondary); margin-bottom: 0.25rem; }
+                .import-panel .field input, .import-panel .field select {
+                  width: 100%%; padding: 0.4rem 0.6rem; border-radius: 6px;
+                  border: 1px solid var(--border-color); background: var(--bg-primary);
+                  color: var(--text-primary); font-size: 0.85rem; box-sizing: border-box; }
+                .import-panel .btn-row { margin-top: 0.6rem; }
                 .doc-pane { flex: 1 1 auto; position: relative; min-width: 0; }
                 #doc-frame { width: 100%%; height: 100%%; border: 0; display: block; background: #fff; }
                 #doc-placeholder { position: absolute; inset: 0; display: flex; align-items: center;
@@ -1032,70 +1046,25 @@ public class PortalServer {
 
         if (!production) {
             sb.append("""
-              <div class="tab-bar" role="tablist">
-                <button class="tab-btn" id="tab-btn-search" data-tab="search" onclick="selectTab('search')">Search</button>
-                <button class="tab-btn" id="tab-btn-projects" data-tab="projects" onclick="selectTab('projects')">Projects</button>
-                <button class="tab-btn" id="tab-btn-import" data-tab="import" onclick="selectTab('import')">Import</button>
+              <h2>Search</h2>
+              <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.6rem 0 0.75rem;">
+                Enter keywords, or paste a paragraph of text, then pick a search type.</p>
+              <textarea id="search-input" rows="6"
+                placeholder="Type keywords, or paste a paragraph..."
+                style="width:100%;padding:0.6rem 0.75rem;border-radius:6px;
+                       border:1px solid var(--border-color);background:var(--bg-tertiary);
+                       color:var(--text-primary);font-size:0.875rem;resize:vertical;
+                       font-family:inherit;line-height:1.5;"></textarea>
+              <div style="margin-top:0.5rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+                <button class="btn" id="search-btn" onclick="doSearch()">Search</button>
+                <span style="font-size:0.8rem;color:var(--text-secondary);display:flex;gap:0.6rem;align-items:center;">
+                  <label style="cursor:pointer;"><input type="radio" name="search-type" value="fulltext" checked style="margin-right:0.15rem;">Keyword</label>
+                  <label style="cursor:pointer;"><input type="radio" name="search-type" value="tfidf" style="margin-right:0.15rem;">TF-IDF</label>
+                  <label style="cursor:pointer;"><input type="radio" name="search-type" value="embedding" style="margin-right:0.15rem;">Embedding</label>
+                </span>
+                <span id="search-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
               </div>
-              <div class="tab-panel" id="tab-search" hidden>
-                <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.6rem 0 0.75rem;">
-                  Enter keywords, or paste a paragraph of text, then pick a search type.</p>
-                <textarea id="search-input" rows="6"
-                  placeholder="Type keywords, or paste a paragraph..."
-                  style="width:100%;padding:0.6rem 0.75rem;border-radius:6px;
-                         border:1px solid var(--border-color);background:var(--bg-tertiary);
-                         color:var(--text-primary);font-size:0.875rem;resize:vertical;
-                         font-family:inherit;line-height:1.5;"></textarea>
-                <div style="margin-top:0.5rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
-                  <button class="btn" id="search-btn" onclick="doSearch()">Search</button>
-                  <span style="font-size:0.8rem;color:var(--text-secondary);display:flex;gap:0.6rem;align-items:center;">
-                    <label style="cursor:pointer;"><input type="radio" name="search-type" value="fulltext" checked style="margin-right:0.15rem;">Keyword</label>
-                    <label style="cursor:pointer;"><input type="radio" name="search-type" value="tfidf" style="margin-right:0.15rem;">TF-IDF</label>
-                    <label style="cursor:pointer;"><input type="radio" name="search-type" value="embedding" style="margin-right:0.15rem;">Embedding</label>
-                  </span>
-                  <span id="search-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
-                </div>
-              </div>
-              <div class="tab-panel" id="tab-import" hidden>
-                <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.6rem 0 0.75rem;">
-                  Convert a PDF (via OCR) or a Word document into a Markdown page under a project's docs/.</p>
-                <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">File type:
-                  <select id="import-type" onchange="updateImportFields()" style="margin-left:0.4rem;">
-                    <option value="pdf">PDF (OCR)</option>
-                    <option value="word">Word (.docx)</option>
-                  </select>
-                </label>
-                <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">Project:
-                  <select id="import-project" style="margin-left:0.4rem;"></select>
-                </label>
-                <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">Destination path (under docs/):
-                  <input type="text" id="import-dest" placeholder="papers/my-book"
-                    style="width:100%;margin-top:0.25rem;padding:0.4rem 0.6rem;border-radius:6px;
-                           border:1px solid var(--border-color);background:var(--bg-tertiary);
-                           color:var(--text-primary);font-size:0.85rem;">
-                </label>
-                <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">Title (optional):
-                  <input type="text" id="import-title" placeholder="defaults to the filename"
-                    style="width:100%;margin-top:0.25rem;padding:0.4rem 0.6rem;border-radius:6px;
-                           border:1px solid var(--border-color);background:var(--bg-tertiary);
-                           color:var(--text-primary);font-size:0.85rem;">
-                </label>
-                <div id="import-pdf-fields">
-                  <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">OCR backend:
-                    <select id="import-backend" style="margin-left:0.4rem;">
-                      <option value="yomitoku">YomiToku (Japanese, multi-column)</option>
-                      <option value="marker">Marker (math/LaTeX, GPU)</option>
-                    </select>
-                  </label>
-                  <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">Pages per file:
-                    <input type="number" id="import-pages-per-file" value="10" min="1" style="width:4rem;margin-left:0.4rem;">
-                  </label>
-                </div>
-                <input type="file" id="import-file" accept=".pdf,.docx" style="margin:0.5rem 0;display:block;">
-                <button class="btn" id="import-btn" onclick="doImport()">Import</button>
-                <div id="import-progress" style="margin-top:0.6rem;font-size:0.8rem;color:var(--text-secondary);white-space:pre-line;"></div>
-              </div>
-              <div class="tab-panel" id="tab-projects">
+              <h2>Projects</h2>
               <div class="project-list">
             """);
         } else {
@@ -1139,9 +1108,79 @@ public class PortalServer {
             sb.append("    </div>\n");
         }
 
-        sb.append("  </div>\n");
+        sb.append("  </div>\n"); // close .project-list
+
         if (!production) {
-            sb.append("  </div>\n"); // close .tab-panel#tab-projects
+            sb.append("""
+              <h2>Import</h2>
+              <div class="import-tab-bar" role="tablist">
+                <button type="button" class="import-tab active" data-panel="pdf" id="import-tab-pdf">PDF</button>
+                <button type="button" class="import-tab" data-panel="word" id="import-tab-word">Word</button>
+              </div>
+
+              <section class="import-panel" id="import-panel-pdf">
+                <p class="hint">Give the path of a PDF on this server. It is OCR'd page by page with the
+                  chosen engine and written as Markdown, one file per batch of pages, under the chosen
+                  project's docs/.</p>
+                <div class="card">
+                  <div class="field">
+                    <span class="field-label">Project</span>
+                    <select id="import-pdf-project"></select>
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Destination path (under docs/)</span>
+                    <input type="text" id="import-pdf-dest" autocomplete="off" placeholder="papers/my-book">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Title (optional)</span>
+                    <input type="text" id="import-pdf-title" autocomplete="off" placeholder="defaults to the filename">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">OCR engine</span>
+                    <select id="import-pdf-backend">
+                      <option value="yomitoku">YomiToku (Japanese, multi-column)</option>
+                      <option value="marker">Marker (math/LaTeX, GPU)</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Pages per file</span>
+                    <input type="number" id="import-pdf-pages-per-file" value="10" min="1">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">PDF file path</span>
+                    <input type="text" id="import-pdf-path" autocomplete="off" placeholder="/home/devteam/works/document.pdf">
+                  </div>
+                  <div class="btn-row"><button class="btn" type="button" id="import-pdf-start">OCR &amp; save</button></div>
+                </div>
+              </section>
+
+              <section class="import-panel" id="import-panel-word" hidden>
+                <p class="hint">Give the path of a Word (.docx) document on this server. It is read directly
+                  (no OCR) and written as one Markdown file under the chosen project's docs/. Embedded
+                  images are kept in an images/ subdirectory next to it.</p>
+                <div class="card">
+                  <div class="field">
+                    <span class="field-label">Project</span>
+                    <select id="import-word-project"></select>
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Destination path (under docs/)</span>
+                    <input type="text" id="import-word-dest" autocomplete="off" placeholder="papers/my-book">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Title (optional)</span>
+                    <input type="text" id="import-word-title" autocomplete="off" placeholder="defaults to the filename">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">.docx file path</span>
+                    <input type="text" id="import-word-path" autocomplete="off" placeholder="/home/devteam/works/document.docx">
+                  </div>
+                  <div class="btn-row"><button class="btn" type="button" id="import-word-start">Convert &amp; save</button></div>
+                </div>
+              </section>
+
+              <p class="hint" id="import-progress" style="white-space:pre-line;"></p>
+            """);
         }
 
         sb.append("</aside>\n");
@@ -1259,91 +1298,123 @@ public class PortalServer {
               status.textContent = 'Showing results in the right pane.';
               status.style.color = 'var(--accent-green)';
             }
-            function selectTab(name) {
-              document.querySelectorAll('.tab-panel').forEach(function(p) { p.hidden = (p.id !== 'tab-' + name); });
-              document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === name); });
-              localStorage.setItem('portal-active-tab', name);
-              if (name === 'import') populateImportProjects();
-            }
+            (function () {
+              // Second-level tabs inside Import (PDF / Word), same pattern as
+              // quarkus-english-drill's ingest_form.html.
+              var tabs = Array.prototype.slice.call(document.querySelectorAll('.import-tab'));
+              if (!tabs.length) return;
+              function selectImportTab(name) {
+                tabs.forEach(function (t) {
+                  var on = t.dataset.panel === name;
+                  t.classList.toggle('active', on);
+                  var panel = document.getElementById('import-panel-' + t.dataset.panel);
+                  if (panel) panel.hidden = !on;
+                });
+                try { sessionStorage.setItem('importTab', name); } catch (e) {}
+              }
+              tabs.forEach(function (t) {
+                t.addEventListener('click', function () { selectImportTab(t.dataset.panel); });
+              });
+              var saved;
+              try { saved = sessionStorage.getItem('importTab'); } catch (e) {}
+              if (saved && document.getElementById('import-panel-' + saved)) selectImportTab(saved);
+              populateImportProjects();
+            })();
             function populateImportProjects() {
-              const sel = document.getElementById('import-project');
-              if (!sel || sel.options.length > 0) return;
-              document.querySelectorAll('.project-name a.project-link').forEach(function(a) {
-                const opt = document.createElement('option');
-                opt.value = a.textContent; opt.textContent = a.textContent;
-                sel.appendChild(opt);
+              var names = Array.prototype.map.call(
+                document.querySelectorAll('.project-name a.project-link'), function(a) { return a.textContent; });
+              ['import-pdf-project', 'import-word-project'].forEach(function(id) {
+                var sel = document.getElementById(id);
+                if (!sel || sel.options.length > 0) return;
+                names.forEach(function(name) {
+                  var opt = document.createElement('option');
+                  opt.value = name; opt.textContent = name;
+                  sel.appendChild(opt);
+                });
               });
             }
-            function updateImportFields() {
-              const type = document.getElementById('import-type').value;
-              document.getElementById('import-pdf-fields').style.display = (type === 'pdf') ? 'block' : 'none';
-              document.getElementById('import-file').accept = (type === 'pdf') ? '.pdf' : '.docx';
+            function importField(id) {
+              var el = document.getElementById(id);
+              return el ? el.value.trim() : '';
             }
-            async function doImport() {
-              const type = document.getElementById('import-type').value;
-              const fileInput = document.getElementById('import-file');
+            async function startPdfImport() {
               const progress = document.getElementById('import-progress');
-              const btn = document.getElementById('import-btn');
-              if (!fileInput.files.length) { progress.textContent = 'Choose a file first.'; return; }
-              const project = document.getElementById('import-project').value;
-              const destPath = document.getElementById('import-dest').value.trim();
-              const title = document.getElementById('import-title').value.trim();
+              const btn = document.getElementById('import-pdf-start');
+              const path = importField('import-pdf-path');
+              if (!path) { progress.textContent = 'Give a PDF file path first.'; return; }
+              const body = new URLSearchParams();
+              body.set('path', path);
+              body.set('project', importField('import-pdf-project'));
+              body.set('destPath', importField('import-pdf-dest'));
+              body.set('backend', importField('import-pdf-backend'));
+              body.set('pagesPerFile', importField('import-pdf-pages-per-file'));
+              const title = importField('import-pdf-title');
+              if (title) body.set('title', title);
               btn.disabled = true;
               progress.textContent = '';
               try {
-                if (type === 'word') {
-                  const fd = new FormData();
-                  fd.append('file', fileInput.files[0]);
-                  fd.append('project', project);
-                  fd.append('destPath', destPath);
-                  if (title) fd.append('title', title);
-                  const r = await fetch('/api/import/word', {method: 'POST', body: fd});
+                const startResp = await fetch('/api/import/pdf/start', {
+                  method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
+                const startJson = await startResp.json();
+                if (!startResp.ok) {
+                  progress.textContent = 'Error: ' + (startJson.error || 'unknown');
+                  btn.disabled = false;
+                  return;
+                }
+                const importId = startJson.importId;
+                const totalBatches = startJson.totalBatches;
+                progress.textContent = '0 / ' + totalBatches + ' batches';
+                for (let i = 0; i < totalBatches; i++) {
+                  const r = await fetch('/api/import/pdf/batch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({importId: importId, batchIndex: i})
+                  });
                   const j = await r.json();
-                  progress.textContent = r.ok
-                    ? ('Done: ' + j.file + ' (' + j.images + ' image(s))')
-                    : ('Error: ' + (j.error || 'unknown'));
-                } else {
-                  const backend = document.getElementById('import-backend').value;
-                  const pagesPerFile = document.getElementById('import-pages-per-file').value;
-                  const fd = new FormData();
-                  fd.append('file', fileInput.files[0]);
-                  fd.append('project', project);
-                  fd.append('destPath', destPath);
-                  fd.append('backend', backend);
-                  fd.append('pagesPerFile', pagesPerFile);
-                  if (title) fd.append('title', title);
-                  const startResp = await fetch('/api/import/pdf/start', {method: 'POST', body: fd});
-                  const startJson = await startResp.json();
-                  if (!startResp.ok) {
-                    progress.textContent = 'Error: ' + (startJson.error || 'unknown');
+                  if (!r.ok) {
+                    progress.textContent = 'Error on batch ' + (i + 1) + ': ' + (j.error || 'unknown');
                     btn.disabled = false;
                     return;
                   }
-                  const importId = startJson.importId;
-                  const totalBatches = startJson.totalBatches;
-                  progress.textContent = '0 / ' + totalBatches + ' batches';
-                  for (let i = 0; i < totalBatches; i++) {
-                    const r = await fetch('/api/import/pdf/batch', {
-                      method: 'POST',
-                      headers: {'Content-Type': 'application/json'},
-                      body: JSON.stringify({importId: importId, batchIndex: i})
-                    });
-                    const j = await r.json();
-                    if (!r.ok) {
-                      progress.textContent = 'Error on batch ' + (i + 1) + ': ' + (j.error || 'unknown');
-                      btn.disabled = false;
-                      return;
-                    }
-                    progress.textContent = (i + 1) + ' / ' + totalBatches + ' batches — wrote ' + j.file;
-                  }
-                  progress.textContent = 'Done: ' + totalBatches + ' file(s) written.';
+                  progress.textContent = (i + 1) + ' / ' + totalBatches + ' batches — wrote ' + j.file;
                 }
+                progress.textContent = 'Done: ' + totalBatches + ' file(s) written.';
               } catch (e) {
                 progress.textContent = 'Error: ' + e.message;
               }
               btn.disabled = false;
             }
-            selectTab(localStorage.getItem('portal-active-tab') || 'projects');
+            async function startWordImport() {
+              const progress = document.getElementById('import-progress');
+              const btn = document.getElementById('import-word-start');
+              const path = importField('import-word-path');
+              if (!path) { progress.textContent = 'Give a .docx file path first.'; return; }
+              const body = new URLSearchParams();
+              body.set('path', path);
+              body.set('project', importField('import-word-project'));
+              body.set('destPath', importField('import-word-dest'));
+              const title = importField('import-word-title');
+              if (title) body.set('title', title);
+              btn.disabled = true;
+              progress.textContent = '';
+              try {
+                const r = await fetch('/api/import/word', {
+                  method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
+                const j = await r.json();
+                progress.textContent = r.ok
+                  ? ('Done: ' + j.file + ' (' + j.images + ' image(s))')
+                  : ('Error: ' + (j.error || 'unknown'));
+              } catch (e) {
+                progress.textContent = 'Error: ' + e.message;
+              }
+              btn.disabled = false;
+            }
+            (function () {
+              var pdfBtn = document.getElementById('import-pdf-start');
+              if (pdfBtn) pdfBtn.addEventListener('click', startPdfImport);
+              var wordBtn = document.getElementById('import-word-start');
+              if (wordBtn) wordBtn.addEventListener('click', startWordImport);
+            })();
             async function doReindexAll(btn) {
               const status = document.getElementById('reindex-all-status');
               btn.disabled = true;
@@ -2094,50 +2165,43 @@ public class PortalServer {
             "{\"translation\":" + jsonStr(result) + "}");
     }
 
-    /** Returns the first multipart field with the given name, or {@code null}. */
-    private static HttpUtils.MultipartField fieldByName(List<HttpUtils.MultipartField> fields, String name) {
-        for (var f : fields) if (f.name().equals(name)) return f;
-        return null;
-    }
-
-    /** Returns the text value of a named multipart field, or {@code null} if absent/is a file. */
-    private static String textField(List<HttpUtils.MultipartField> fields, String name) {
-        HttpUtils.MultipartField f = fieldByName(fields, name);
-        return (f == null || f.isFile()) ? null : f.asText();
-    }
-
     /**
-     * Handles {@code POST /api/import/pdf/start}. Multipart fields: {@code file} (the PDF),
-     * {@code project}, {@code destPath} (directory under that project's {@code docs/} to write
-     * into), {@code backend} ({@code yomitoku} or {@code marker}), {@code pagesPerFile},
-     * {@code title} (optional, defaults to the filename). Holds the uploaded PDF in memory under a
-     * new import id and returns the page/batch count, so the browser can drive
-     * {@link #handleImportPdfBatch} in a loop, one batch at a time, and show progress as each
-     * batch's file is written.
+     * Handles {@code POST /api/import/pdf/start}. Form fields: {@code path} (absolute path of the
+     * PDF on this server's filesystem — the browser never uploads the file's bytes, matching
+     * {@code quarkus-english-drill}'s Import screen), {@code project}, {@code destPath} (directory
+     * under that project's {@code docs/} to write into), {@code backend} ({@code yomitoku} or
+     * {@code marker}), {@code pagesPerFile}, {@code title} (optional, defaults to the filename).
+     * Holds the PDF's bytes in memory under a new import id and returns the page/batch count, so
+     * the browser can drive {@link #handleImportPdfBatch} in a loop, one batch at a time, and show
+     * progress as each batch's file is written.
      */
     private void handleImportPdfStart(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
-        List<HttpUtils.MultipartField> fields = HttpUtils.parseMultipart(
-            ex.getRequestBody().readAllBytes(), ex.getRequestHeaders().getFirst("Content-Type"));
-        HttpUtils.MultipartField fileField = fieldByName(fields, "file");
-        if (fileField == null || !fileField.isFile()) {
-            respond(ex, 400, "application/json", "{\"error\":\"missing file\"}");
+        Map<String, String> form = parseFormBody(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String srcPathStr = form.get("path");
+        if (srcPathStr == null || srcPathStr.isBlank()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing path\"}");
             return;
         }
-        Project proj = projectMap.get(textField(fields, "project"));
+        Path srcPath = Path.of(srcPathStr).normalize();
+        if (!Files.exists(srcPath)) {
+            respond(ex, 404, "application/json", "{\"error\":\"file not found: " + srcPathStr.replace("\"", "'") + "\"}");
+            return;
+        }
+        Project proj = projectMap.get(form.get("project"));
         if (proj == null) {
             respond(ex, 404, "application/json", "{\"error\":\"unknown project\"}");
             return;
         }
-        OcrClient ocr = ocrClients.get(textField(fields, "backend"));
+        OcrClient ocr = ocrClients.get(form.get("backend"));
         if (ocr == null) {
             respond(ex, 400, "application/json", "{\"error\":\"unknown backend\"}");
             return;
         }
-        String destPath = Objects.requireNonNullElse(textField(fields, "destPath"), "");
+        String destPath = Objects.requireNonNullElse(form.get("destPath"), "");
         Path docsDir = proj.projectDir().resolve("docs");
         Path destDir = docsDir.resolve(destPath).normalize();
         if (!destDir.startsWith(docsDir)) {
@@ -2146,13 +2210,13 @@ public class PortalServer {
         }
         int pagesPerFile;
         try {
-            pagesPerFile = Integer.parseInt(textField(fields, "pagesPerFile"));
+            pagesPerFile = Integer.parseInt(form.get("pagesPerFile"));
         } catch (NumberFormatException e) {
             pagesPerFile = 10;
         }
         if (pagesPerFile < 1) pagesPerFile = 10;
 
-        byte[] pdfBytes = fileField.data();
+        byte[] pdfBytes = Files.readAllBytes(srcPath);
         int totalPages;
         try {
             totalPages = PdfPageSplitter.pageCount(pdfBytes);
@@ -2160,8 +2224,8 @@ public class PortalServer {
             respond(ex, 400, "application/json", "{\"error\":\"could not read PDF\"}");
             return;
         }
-        String stem = PageRenderer.stripExtension(fileField.filename());
-        String title = textField(fields, "title");
+        String stem = PageRenderer.stripExtension(srcPath.getFileName().toString());
+        String title = form.get("title");
         String importId = java.util.UUID.randomUUID().toString();
         importSessions.put(importId, new ImportSession(pdfBytes, proj, destPath, stem, ocr,
             pagesPerFile, totalPages, (title == null || title.isBlank()) ? stem : title));
@@ -2237,30 +2301,35 @@ public class PortalServer {
     }
 
     /**
-     * Handles {@code POST /api/import/word}. Multipart fields: {@code file} (the {@code .docx}),
-     * {@code project}, {@code destPath} (directory under that project's {@code docs/} to write
-     * into), {@code title} (optional, defaults to the filename). No OCR — Word documents carry
-     * their own text layer. Embedded images are written to an {@code images/} subdirectory next
-     * to the generated Markdown file (see {@link WordImportService}).
+     * Handles {@code POST /api/import/word}. Form fields: {@code path} (absolute path of the
+     * {@code .docx} on this server's filesystem), {@code project}, {@code destPath} (directory
+     * under that project's {@code docs/} to write into), {@code title} (optional, defaults to the
+     * filename). No OCR — Word documents carry their own text layer. Embedded images are written
+     * to an {@code images/} subdirectory next to the generated Markdown file (see
+     * {@link WordImportService}).
      */
     private void handleImportWord(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
-        List<HttpUtils.MultipartField> fields = HttpUtils.parseMultipart(
-            ex.getRequestBody().readAllBytes(), ex.getRequestHeaders().getFirst("Content-Type"));
-        HttpUtils.MultipartField fileField = fieldByName(fields, "file");
-        if (fileField == null || !fileField.isFile()) {
-            respond(ex, 400, "application/json", "{\"error\":\"missing file\"}");
+        Map<String, String> form = parseFormBody(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String srcPathStr = form.get("path");
+        if (srcPathStr == null || srcPathStr.isBlank()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing path\"}");
             return;
         }
-        Project proj = projectMap.get(textField(fields, "project"));
+        Path srcPath = Path.of(srcPathStr).normalize();
+        if (!Files.exists(srcPath)) {
+            respond(ex, 404, "application/json", "{\"error\":\"file not found: " + srcPathStr.replace("\"", "'") + "\"}");
+            return;
+        }
+        Project proj = projectMap.get(form.get("project"));
         if (proj == null) {
             respond(ex, 404, "application/json", "{\"error\":\"unknown project\"}");
             return;
         }
-        String destPath = Objects.requireNonNullElse(textField(fields, "destPath"), "");
+        String destPath = Objects.requireNonNullElse(form.get("destPath"), "");
         Path docsDir = proj.projectDir().resolve("docs");
         Path destDir = docsDir.resolve(destPath).normalize();
         if (!destDir.startsWith(docsDir)) {
@@ -2268,14 +2337,15 @@ public class PortalServer {
             return;
         }
 
-        String stem = PageRenderer.stripExtension(fileField.filename());
-        String title = textField(fields, "title");
+        String filename = srcPath.getFileName().toString();
+        String stem = PageRenderer.stripExtension(filename);
+        String title = form.get("title");
         WordImportService.Result result;
         try {
-            result = WordImportService.convert(fileField.data(), fileField.filename() + "",
+            result = WordImportService.convert(Files.readAllBytes(srcPath), filename,
                 (title == null || title.isBlank()) ? stem : title);
         } catch (Exception e) {
-            System.err.println("Word import failed for " + fileField.filename() + ": " + e.getMessage());
+            System.err.println("Word import failed for " + filename + ": " + e.getMessage());
             respond(ex, 400, "application/json", "{\"error\":\"could not read .docx\"}");
             return;
         }

@@ -1,13 +1,13 @@
 package com.scivicslab.htmlsaurus;
 
 import com.microsoft.playwright.*;
-import com.microsoft.playwright.options.FilePayload;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * E2E test for the portal sidebar's tabbed Import UI (Search / Projects / Import).
+ * E2E test for the portal sidebar's Import section (PDF / Word sub-tabs, styled after
+ * quarkus-english-drill's Import screen: a server-side file path input, not a browser upload).
  *
  * <p>Requires an already-running dev-mode portal with at least one project named {@code proj1}
  * that has a {@code docs/} directory:
@@ -37,63 +37,53 @@ public class ImportTabE2E {
     public static void main(String[] args) throws Exception {
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
-            runTabSwitching(browser);
+            runSubTabSwitching(browser);
             runWordImport(browser);
         }
         System.out.printf("%nResults: %d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
     }
 
-    private static void runTabSwitching(Browser browser) {
-        withPage("T-1: Projects tab visible by default", browser, page -> {
+    private static void runSubTabSwitching(Browser browser) {
+        withPage("T-1: PDF panel visible by default, Word panel hidden", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            check(page.isVisible("#tab-projects"), "#tab-projects must be visible on load");
-            check(!page.isVisible("#tab-import"), "#tab-import must be hidden on load");
+            check(page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be visible on load");
+            check(!page.isVisible("#import-panel-word"), "#import-panel-word must be hidden on load");
         });
 
-        withPage("T-2: clicking Import tab shows it and hides Projects", browser, page -> {
+        withPage("T-2: clicking Word tab shows it and hides PDF", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#tab-btn-import");
-            check(page.isVisible("#tab-import"), "#tab-import must be visible after click");
-            check(!page.isVisible("#tab-projects"), "#tab-projects must be hidden after click");
+            page.click("#import-tab-word");
+            check(page.isVisible("#import-panel-word"), "#import-panel-word must be visible after click");
+            check(!page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be hidden after click");
         });
 
-        withPage("T-3: Import tab's project dropdown is populated from the project list", browser, page -> {
+        withPage("T-3: project dropdowns are populated from the project list", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#tab-btn-import");
-            int count = ((Number) page.evalOnSelector("#import-project", "el => el.options.length")).intValue();
-            check(count > 0, "#import-project must have at least one option");
-        });
-
-        withPage("T-4: PDF fields hidden when Word is selected", browser, page -> {
-            page.navigate(BASE_URL + "/");
-            page.waitForLoadState();
-            page.click("#tab-btn-import");
-            page.selectOption("#import-type", "word");
-            check(!page.isVisible("#import-pdf-fields"), "#import-pdf-fields must hide for Word");
-            page.selectOption("#import-type", "pdf");
-            check(page.isVisible("#import-pdf-fields"), "#import-pdf-fields must show again for PDF");
+            int pdfCount = ((Number) page.evalOnSelector("#import-pdf-project", "el => el.options.length")).intValue();
+            check(pdfCount > 0, "#import-pdf-project must have at least one option");
+            page.click("#import-tab-word");
+            int wordCount = ((Number) page.evalOnSelector("#import-word-project", "el => el.options.length")).intValue();
+            check(wordCount > 0, "#import-word-project must have at least one option");
         });
     }
 
     private static void runWordImport(Browser browser) {
-        withPage("W-1: importing a real .docx writes a Markdown file and reports success", browser, page -> {
+        withPage("W-1: importing a real .docx by server path writes a Markdown file and reports success", browser, page -> {
             try {
-                byte[] docx = buildFixtureDocx();
+                Path docx = Files.createTempFile("e2e-fixture-", ".docx");
+                Files.write(docx, buildFixtureDocx());
                 page.navigate(BASE_URL + "/");
                 page.waitForLoadState();
-                page.click("#tab-btn-import");
-                page.selectOption("#import-type", "word");
-                page.selectOption("#import-project", "proj1");
-                page.fill("#import-dest", "e2e-import-test");
-                page.fill("#import-title", "E2E Import Test");
-                page.setInputFiles("#import-file",
-                        new FilePayload("e2e-fixture.docx",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx));
-                page.click("#import-btn");
+                page.click("#import-tab-word");
+                page.selectOption("#import-word-project", "proj1");
+                page.fill("#import-word-dest", "e2e-import-test");
+                page.fill("#import-word-title", "E2E Import Test");
+                page.fill("#import-word-path", docx.toAbsolutePath().toString());
+                page.click("#import-word-start");
                 // CSP has no 'unsafe-eval', so page.waitForFunction() (which evals a predicate in the
                 // page) is unusable here — poll from the Java side instead.
                 String progressText = "";
