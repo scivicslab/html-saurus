@@ -308,7 +308,15 @@ class PageScripts {
             (function() {
               var btn = document.getElementById('translate-btn');
               if (!btn) return;
-              var targetLang = btn.dataset.targetLang;
+              // Some pages mix languages (e.g. an English review followed by its Japanese
+              // translation), so the direction is decided per block from that block's own
+              // text, not once for the whole page.
+              function isJapaneseText(text) {
+                var letters = (text.match(/\\p{L}/gu) || []).length;
+                if (!letters) return false;
+                var kana = (text.match(/[\\u3040-\\u30FF]/g) || []).length;
+                return kana * 20 >= letters;
+              }
               function setAllOpen(open) {
                 document.querySelectorAll('main details.inline-translation').forEach(function(d) { d.open = open; });
               }
@@ -408,7 +416,8 @@ class PageScripts {
                 blocks.forEach(function(el) {
                   var text = ownText(el).trim();
                   if (!text) { oneDone(); return; }
-                  fetch('/api/translate?lang=' + encodeURIComponent(targetLang), {
+                  var lang = isJapaneseText(text) ? 'English' : 'Japanese';
+                  fetch('/api/translate?lang=' + encodeURIComponent(lang), {
                     method: 'POST',
                     headers: {'Content-Type': 'text/plain; charset=UTF-8'},
                     body: text
