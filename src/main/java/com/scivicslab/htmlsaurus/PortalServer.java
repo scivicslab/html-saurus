@@ -2262,9 +2262,11 @@ public class PortalServer {
 
     /**
      * Handles {@code POST /api/import/pdf/batch}. JSON body {@code {"importId":"...","batchIndex":N}}
-     * (0-based). OCRs and writes the Markdown file for one page-batch of an import started by
-     * {@link #handleImportPdfStart}. On the batch that reaches the last page, rebuilds the target
-     * project's HTML and full-text index, and removes the import session.
+     * (0-based). OCRs one page-batch of an import started by {@link #handleImportPdfStart} and
+     * writes it as {@code <batchStem>/<batchStem>.md} — one directory per batch, per
+     * {@code DocumentationStandard_260401_oo01}, even though OCR output carries no images today.
+     * On the batch that reaches the last page, rebuilds the target project's HTML and full-text
+     * index, and removes the import session.
      */
     private void handleImportPdfBatch(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -2304,8 +2306,12 @@ public class PortalServer {
         Path docsDir = session.project().projectDir().resolve("docs");
         Path destDir = docsDir.resolve(session.destDir()).normalize();
         String filename = PdfImportService.batchFilename(session.stem(), fromPage, toPage);
-        Path mdPath = destDir.resolve(filename);
-        Files.createDirectories(destDir);
+        String batchStem = filename.substring(0, filename.length() - 3); // strip ".md"
+        // One document = one directory (DocumentationStandard_260401_oo01 / DocumentStructureAndStateMachine_260404_oo01):
+        // each batch is its own document, so it gets its own directory even though OCR output has no images today.
+        Path batchDocDir = destDir.resolve(batchStem);
+        Path mdPath = batchDocDir.resolve(filename);
+        Files.createDirectories(batchDocDir);
         Files.writeString(mdPath, markdown, StandardCharsets.UTF_8);
 
         boolean done = toPage >= session.totalPages();
@@ -2319,7 +2325,7 @@ public class PortalServer {
             }
         }
         respond(ex, 200, "application/json",
-            "{\"status\":\"ok\",\"file\":" + jsonStr(session.destDir() + "/" + filename)
+            "{\"status\":\"ok\",\"file\":" + jsonStr(session.project().name() + "/docs/" + session.destDir() + "/" + batchStem + "/" + filename)
             + ",\"fromPage\":" + (fromPage + 1) + ",\"toPage\":" + toPage
             + ",\"totalPages\":" + session.totalPages() + ",\"done\":" + done + "}");
     }
@@ -2328,9 +2334,10 @@ public class PortalServer {
      * Handles {@code POST /api/import/word}. Form fields: {@code path} (absolute path of the
      * {@code .docx} on this server's filesystem), {@code project}, {@code destPath} (directory
      * under that project's {@code docs/} to write into), {@code title} (optional, defaults to the
-     * filename). No OCR — Word documents carry their own text layer. Embedded images are written
-     * to an {@code images/} subdirectory next to the generated Markdown file (see
-     * {@link WordImportService}).
+     * filename). No OCR — Word documents carry their own text layer. Writes {@code <stem>/<stem>.md}
+     * and, when the document has embedded images, {@code <stem>/images/} next to it — one directory
+     * per document, per {@code DocumentationStandard_260401_oo01} — so a second import into the same
+     * {@code destPath} cannot collide with this one's image filenames (see {@link WordImportService}).
      */
     private void handleImportWord(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -2374,11 +2381,15 @@ public class PortalServer {
             return;
         }
 
-        Files.createDirectories(destDir);
-        Path mdPath = destDir.resolve(stem + ".md");
+        // One document = one directory (DocumentationStandard_260401_oo01 / DocumentStructureAndStateMachine_260404_oo01):
+        // the .md file and its images/ live together under a directory named after the document,
+        // so a second import into the same destPath cannot collide with this one's image filenames.
+        Path docDir = destDir.resolve(stem);
+        Files.createDirectories(docDir);
+        Path mdPath = docDir.resolve(stem + ".md");
         Files.writeString(mdPath, result.markdown(), StandardCharsets.UTF_8);
         if (!result.images().isEmpty()) {
-            Path imagesDir = destDir.resolve("images");
+            Path imagesDir = docDir.resolve("images");
             Files.createDirectories(imagesDir);
             for (var e : result.images().entrySet()) {
                 Files.write(imagesDir.resolve(e.getKey()), e.getValue());
@@ -2391,7 +2402,7 @@ public class PortalServer {
             System.err.println("Post-import rebuild failed for " + proj.name() + ": " + e.getMessage());
         }
         respond(ex, 200, "application/json",
-            "{\"status\":\"ok\",\"file\":" + jsonStr(destPath + "/" + stem + ".md")
+            "{\"status\":\"ok\",\"file\":" + jsonStr(proj.name() + "/docs/" + destPath + "/" + stem + "/" + stem + ".md")
             + ",\"images\":" + result.images().size() + "}");
     }
 
