@@ -275,9 +275,7 @@ class PageRenderer {
             sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
             sb.append("<button class=\"copy-btn\" id=\"copy-path-btn\" data-path=\"").append(escapeHtml(mdSourcePath))
               .append("\" title=\"").append(escapeHtml(mdSourcePath)).append("\">&#x1F4C2; Path</button>");
-            String pageLocale = (currentLocale != null) ? currentLocale
-                : (defaultLocale != null) ? defaultLocale : "ja";
-            String translateTargetLang = "ja".equals(pageLocale) ? "English" : "Japanese";
+            String translateTargetLang = isJapaneseText(content) ? "English" : "Japanese";
             sb.append("<button class=\"copy-btn\" id=\"translate-btn\" data-target-lang=\"")
               .append(escapeHtml(translateTargetLang))
               .append("\" title=\"Translate paragraphs, headings, lists, and tables on demand\">")
@@ -422,6 +420,29 @@ class PageRenderer {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 .replace("\"", "&quot;").replace("'", "&#39;");
+    }
+
+    /**
+     * Detects whether {@code text} is Japanese, by the share of letters that are Hiragana or
+     * Katakana — unlike Kanji, those scripts are unambiguously Japanese. Used to pick the
+     * on-demand translation direction from the page's actual body text rather than from its
+     * locale directory, since a page filed under the {@code ja} locale can have English-only
+     * body text (and vice versa).
+     */
+    static boolean isJapaneseText(String text) {
+        if (text == null || text.isEmpty()) return false;
+        int letters = 0;
+        int kana = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!Character.isLetter(c)) continue;
+            letters++;
+            Character.UnicodeBlock block = Character.UnicodeBlock.of(c);
+            if (block == Character.UnicodeBlock.HIRAGANA || block == Character.UnicodeBlock.KATAKANA) {
+                kana++;
+            }
+        }
+        return letters > 0 && kana * 20 >= letters;
     }
 
     static String escapeJs(String s) {
