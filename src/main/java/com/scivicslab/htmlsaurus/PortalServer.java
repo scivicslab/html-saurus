@@ -62,6 +62,17 @@ public class PortalServer {
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
 
+    /** One in-progress PDF import, keyed by a random id, between {@code /api/import/pdf/start} and
+     * its {@code /api/import/pdf/batch} calls. Removed once the last batch completes. */
+    private record ImportSession(byte[] pdfBytes, Project project, String destDir, String stem,
+                                  OcrClient ocr, int pagesPerFile, int totalPages, String title) {}
+    private final Map<String, ImportSession> importSessions = new java.util.concurrent.ConcurrentHashMap<>();
+    /** OCR backends available to the Import tab, keyed by {@link OcrClient#backendId()}. */
+    private final Map<String, OcrClient> ocrClients = Map.of(
+        "yomitoku", new YomiTokuOcrClient(System.getenv("YOMITOKU_SERVER_URL")),
+        "marker", new MarkerOcrClient(System.getenv("MARKER_SERVER_URL"))
+    );
+
     /**
      * @param worksDir    root directory containing all Docusaurus projects (used for reload)
      * @param projectDirs list of Docusaurus project root directories to serve
@@ -326,6 +337,26 @@ public class PortalServer {
         // On-demand paragraph translation API: POST /api/translate?lang=... (non-production only)
         if (!production && path.equals("/api/translate")) {
             handleTranslate(ex);
+            return;
+        }
+
+        // Import tab: begin a PDF OCR import (non-production only). Multipart: file, project,
+        // destPath, backend, pagesPerFile, title (optional).
+        if (!production && path.equals("/api/import/pdf/start")) {
+            handleImportPdfStart(ex);
+            return;
+        }
+
+        // Import tab: OCR and write one page-batch of an in-progress PDF import (non-production only).
+        if (!production && path.equals("/api/import/pdf/batch")) {
+            handleImportPdfBatch(ex);
+            return;
+        }
+
+        // Import tab: import a Word (.docx) file, no OCR (non-production only). Multipart: file,
+        // project, destPath, title (optional).
+        if (!production && path.equals("/api/import/word")) {
+            handleImportWord(ex);
             return;
         }
 
@@ -912,6 +943,14 @@ public class PortalServer {
                 #portal-sidebar h2 { margin-top: 1.5rem; }
                 #portal-sidebar h2:first-of-type { margin-top: 0; }
                 body.sidebar-collapsed #portal-sidebar { display: none; }
+                .tab-bar { display: flex; gap: 0.25rem; margin-bottom: 1rem;
+                           border-bottom: 1px solid var(--border-color); }
+                .tab-btn { flex: 1 1 auto; padding: 0.5rem 0.4rem; border: none; background: none;
+                           color: var(--text-secondary); font-size: 0.85rem; cursor: pointer;
+                           border-bottom: 2px solid transparent; }
+                .tab-btn:hover { color: var(--text-primary); }
+                .tab-btn.active { color: var(--text-primary); border-bottom-color: var(--accent-green); }
+                .tab-panel[hidden] { display: none; }
                 .doc-pane { flex: 1 1 auto; position: relative; min-width: 0; }
                 #doc-frame { width: 100%%; height: 100%%; border: 0; display: block; background: #fff; }
                 #doc-placeholder { position: absolute; inset: 0; display: flex; align-items: center;
@@ -993,8 +1032,12 @@ public class PortalServer {
 
         if (!production) {
             sb.append("""
-              <div style="margin-top:2rem;">
-                <h2>Search</h2>
+              <div class="tab-bar" role="tablist">
+                <button class="tab-btn" id="tab-btn-search" data-tab="search" onclick="selectTab('search')">Search</button>
+                <button class="tab-btn" id="tab-btn-projects" data-tab="projects" onclick="selectTab('projects')">Projects</button>
+                <button class="tab-btn" id="tab-btn-import" data-tab="import" onclick="selectTab('import')">Import</button>
+              </div>
+              <div class="tab-panel" id="tab-search" hidden>
                 <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.6rem 0 0.75rem;">
                   Enter keywords, or paste a paragraph of text, then pick a search type.</p>
                 <textarea id="search-input" rows="6"
@@ -1013,13 +1056,54 @@ public class PortalServer {
                   <span id="search-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
                 </div>
               </div>
+              <div class="tab-panel" id="tab-import" hidden>
+                <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.6rem 0 0.75rem;">
+                  Convert a PDF (via OCR) or a Word document into a Markdown page under a project's docs/.</p>
+                <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">File type:
+                  <select id="import-type" onchange="updateImportFields()" style="margin-left:0.4rem;">
+                    <option value="pdf">PDF (OCR)</option>
+                    <option value="word">Word (.docx)</option>
+                  </select>
+                </label>
+                <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">Project:
+                  <select id="import-project" style="margin-left:0.4rem;"></select>
+                </label>
+                <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">Destination path (under docs/):
+                  <input type="text" id="import-dest" placeholder="papers/my-book"
+                    style="width:100%;margin-top:0.25rem;padding:0.4rem 0.6rem;border-radius:6px;
+                           border:1px solid var(--border-color);background:var(--bg-tertiary);
+                           color:var(--text-primary);font-size:0.85rem;">
+                </label>
+                <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">Title (optional):
+                  <input type="text" id="import-title" placeholder="defaults to the filename"
+                    style="width:100%;margin-top:0.25rem;padding:0.4rem 0.6rem;border-radius:6px;
+                           border:1px solid var(--border-color);background:var(--bg-tertiary);
+                           color:var(--text-primary);font-size:0.85rem;">
+                </label>
+                <div id="import-pdf-fields">
+                  <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">OCR backend:
+                    <select id="import-backend" style="margin-left:0.4rem;">
+                      <option value="yomitoku">YomiToku (Japanese, multi-column)</option>
+                      <option value="marker">Marker (math/LaTeX, GPU)</option>
+                    </select>
+                  </label>
+                  <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:0.4rem;">Pages per file:
+                    <input type="number" id="import-pages-per-file" value="10" min="1" style="width:4rem;margin-left:0.4rem;">
+                  </label>
+                </div>
+                <input type="file" id="import-file" accept=".pdf,.docx" style="margin:0.5rem 0;display:block;">
+                <button class="btn" id="import-btn" onclick="doImport()">Import</button>
+                <div id="import-progress" style="margin-top:0.6rem;font-size:0.8rem;color:var(--text-secondary);white-space:pre-line;"></div>
+              </div>
+              <div class="tab-panel" id="tab-projects">
+              <div class="project-list">
             """);
-        }
-
-        sb.append("""
+        } else {
+            sb.append("""
               <h2>Projects</h2>
               <div class="project-list">
             """);
+        }
 
         for (Project p : projects) {
             List<String> labels = readNavbarLabels(p.projectDir());
@@ -1056,6 +1140,9 @@ public class PortalServer {
         }
 
         sb.append("  </div>\n");
+        if (!production) {
+            sb.append("  </div>\n"); // close .tab-panel#tab-projects
+        }
 
         sb.append("</aside>\n");
         sb.append("<div id=\"pane-splitter\" title=\"Drag to resize\"></div>\n");
@@ -1172,6 +1259,91 @@ public class PortalServer {
               status.textContent = 'Showing results in the right pane.';
               status.style.color = 'var(--accent-green)';
             }
+            function selectTab(name) {
+              document.querySelectorAll('.tab-panel').forEach(function(p) { p.hidden = (p.id !== 'tab-' + name); });
+              document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === name); });
+              localStorage.setItem('portal-active-tab', name);
+              if (name === 'import') populateImportProjects();
+            }
+            function populateImportProjects() {
+              const sel = document.getElementById('import-project');
+              if (!sel || sel.options.length > 0) return;
+              document.querySelectorAll('.project-name a.project-link').forEach(function(a) {
+                const opt = document.createElement('option');
+                opt.value = a.textContent; opt.textContent = a.textContent;
+                sel.appendChild(opt);
+              });
+            }
+            function updateImportFields() {
+              const type = document.getElementById('import-type').value;
+              document.getElementById('import-pdf-fields').style.display = (type === 'pdf') ? 'block' : 'none';
+              document.getElementById('import-file').accept = (type === 'pdf') ? '.pdf' : '.docx';
+            }
+            async function doImport() {
+              const type = document.getElementById('import-type').value;
+              const fileInput = document.getElementById('import-file');
+              const progress = document.getElementById('import-progress');
+              const btn = document.getElementById('import-btn');
+              if (!fileInput.files.length) { progress.textContent = 'Choose a file first.'; return; }
+              const project = document.getElementById('import-project').value;
+              const destPath = document.getElementById('import-dest').value.trim();
+              const title = document.getElementById('import-title').value.trim();
+              btn.disabled = true;
+              progress.textContent = '';
+              try {
+                if (type === 'word') {
+                  const fd = new FormData();
+                  fd.append('file', fileInput.files[0]);
+                  fd.append('project', project);
+                  fd.append('destPath', destPath);
+                  if (title) fd.append('title', title);
+                  const r = await fetch('/api/import/word', {method: 'POST', body: fd});
+                  const j = await r.json();
+                  progress.textContent = r.ok
+                    ? ('Done: ' + j.file + ' (' + j.images + ' image(s))')
+                    : ('Error: ' + (j.error || 'unknown'));
+                } else {
+                  const backend = document.getElementById('import-backend').value;
+                  const pagesPerFile = document.getElementById('import-pages-per-file').value;
+                  const fd = new FormData();
+                  fd.append('file', fileInput.files[0]);
+                  fd.append('project', project);
+                  fd.append('destPath', destPath);
+                  fd.append('backend', backend);
+                  fd.append('pagesPerFile', pagesPerFile);
+                  if (title) fd.append('title', title);
+                  const startResp = await fetch('/api/import/pdf/start', {method: 'POST', body: fd});
+                  const startJson = await startResp.json();
+                  if (!startResp.ok) {
+                    progress.textContent = 'Error: ' + (startJson.error || 'unknown');
+                    btn.disabled = false;
+                    return;
+                  }
+                  const importId = startJson.importId;
+                  const totalBatches = startJson.totalBatches;
+                  progress.textContent = '0 / ' + totalBatches + ' batches';
+                  for (let i = 0; i < totalBatches; i++) {
+                    const r = await fetch('/api/import/pdf/batch', {
+                      method: 'POST',
+                      headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify({importId: importId, batchIndex: i})
+                    });
+                    const j = await r.json();
+                    if (!r.ok) {
+                      progress.textContent = 'Error on batch ' + (i + 1) + ': ' + (j.error || 'unknown');
+                      btn.disabled = false;
+                      return;
+                    }
+                    progress.textContent = (i + 1) + ' / ' + totalBatches + ' batches — wrote ' + j.file;
+                  }
+                  progress.textContent = 'Done: ' + totalBatches + ' file(s) written.';
+                }
+              } catch (e) {
+                progress.textContent = 'Error: ' + e.message;
+              }
+              btn.disabled = false;
+            }
+            selectTab(localStorage.getItem('portal-active-tab') || 'projects');
             async function doReindexAll(btn) {
               const status = document.getElementById('reindex-all-status');
               btn.disabled = true;
@@ -1920,6 +2092,213 @@ public class PortalServer {
         }
         respond(ex, 200, "application/json; charset=UTF-8",
             "{\"translation\":" + jsonStr(result) + "}");
+    }
+
+    /** Returns the first multipart field with the given name, or {@code null}. */
+    private static HttpUtils.MultipartField fieldByName(List<HttpUtils.MultipartField> fields, String name) {
+        for (var f : fields) if (f.name().equals(name)) return f;
+        return null;
+    }
+
+    /** Returns the text value of a named multipart field, or {@code null} if absent/is a file. */
+    private static String textField(List<HttpUtils.MultipartField> fields, String name) {
+        HttpUtils.MultipartField f = fieldByName(fields, name);
+        return (f == null || f.isFile()) ? null : f.asText();
+    }
+
+    /**
+     * Handles {@code POST /api/import/pdf/start}. Multipart fields: {@code file} (the PDF),
+     * {@code project}, {@code destPath} (directory under that project's {@code docs/} to write
+     * into), {@code backend} ({@code yomitoku} or {@code marker}), {@code pagesPerFile},
+     * {@code title} (optional, defaults to the filename). Holds the uploaded PDF in memory under a
+     * new import id and returns the page/batch count, so the browser can drive
+     * {@link #handleImportPdfBatch} in a loop, one batch at a time, and show progress as each
+     * batch's file is written.
+     */
+    private void handleImportPdfStart(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        List<HttpUtils.MultipartField> fields = HttpUtils.parseMultipart(
+            ex.getRequestBody().readAllBytes(), ex.getRequestHeaders().getFirst("Content-Type"));
+        HttpUtils.MultipartField fileField = fieldByName(fields, "file");
+        if (fileField == null || !fileField.isFile()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing file\"}");
+            return;
+        }
+        Project proj = projectMap.get(textField(fields, "project"));
+        if (proj == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"unknown project\"}");
+            return;
+        }
+        OcrClient ocr = ocrClients.get(textField(fields, "backend"));
+        if (ocr == null) {
+            respond(ex, 400, "application/json", "{\"error\":\"unknown backend\"}");
+            return;
+        }
+        String destPath = Objects.requireNonNullElse(textField(fields, "destPath"), "");
+        Path docsDir = proj.projectDir().resolve("docs");
+        Path destDir = docsDir.resolve(destPath).normalize();
+        if (!destDir.startsWith(docsDir)) {
+            respond(ex, 400, "application/json", "{\"error\":\"path traversal not allowed\"}");
+            return;
+        }
+        int pagesPerFile;
+        try {
+            pagesPerFile = Integer.parseInt(textField(fields, "pagesPerFile"));
+        } catch (NumberFormatException e) {
+            pagesPerFile = 10;
+        }
+        if (pagesPerFile < 1) pagesPerFile = 10;
+
+        byte[] pdfBytes = fileField.data();
+        int totalPages;
+        try {
+            totalPages = PdfPageSplitter.pageCount(pdfBytes);
+        } catch (Exception e) {
+            respond(ex, 400, "application/json", "{\"error\":\"could not read PDF\"}");
+            return;
+        }
+        String stem = PageRenderer.stripExtension(fileField.filename());
+        String title = textField(fields, "title");
+        String importId = java.util.UUID.randomUUID().toString();
+        importSessions.put(importId, new ImportSession(pdfBytes, proj, destPath, stem, ocr,
+            pagesPerFile, totalPages, (title == null || title.isBlank()) ? stem : title));
+
+        int totalBatches = (totalPages + pagesPerFile - 1) / pagesPerFile;
+        respond(ex, 200, "application/json",
+            "{\"importId\":" + jsonStr(importId) + ",\"totalPages\":" + totalPages
+            + ",\"totalBatches\":" + totalBatches + "}");
+    }
+
+    /**
+     * Handles {@code POST /api/import/pdf/batch}. JSON body {@code {"importId":"...","batchIndex":N}}
+     * (0-based). OCRs and writes the Markdown file for one page-batch of an import started by
+     * {@link #handleImportPdfStart}. On the batch that reaches the last page, rebuilds the target
+     * project's HTML and full-text index, and removes the import session.
+     */
+    private void handleImportPdfBatch(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, Object> body = McpJsonParser.parseObject(
+            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String importId = body.get("importId") instanceof String s ? s : null;
+        int batchIndex = body.get("batchIndex") instanceof Number n ? n.intValue() : -1;
+        ImportSession session = importId == null ? null : importSessions.get(importId);
+        if (session == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"unknown or expired importId\"}");
+            return;
+        }
+        int fromPage = batchIndex * session.pagesPerFile();
+        int toPage = Math.min(fromPage + session.pagesPerFile(), session.totalPages());
+        if (batchIndex < 0 || fromPage >= session.totalPages()) {
+            respond(ex, 400, "application/json", "{\"error\":\"batchIndex out of range\"}");
+            return;
+        }
+
+        String markdown;
+        try {
+            markdown = PdfImportService.importPageRange(session.pdfBytes(), session.ocr(),
+                fromPage, toPage, session.stem() + ".pdf", session.title());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            respond(ex, 502, "application/json", "{\"error\":\"OCR call interrupted\"}");
+            return;
+        } catch (IOException e) {
+            System.err.println("PDF import OCR failed for " + importId + " batch " + batchIndex + ": " + e.getMessage());
+            respond(ex, 502, "application/json", "{\"error\":\"OCR call failed\"}");
+            return;
+        }
+
+        Path docsDir = session.project().projectDir().resolve("docs");
+        Path destDir = docsDir.resolve(session.destDir()).normalize();
+        String filename = PdfImportService.batchFilename(session.stem(), fromPage, toPage);
+        Path mdPath = destDir.resolve(filename);
+        Files.createDirectories(destDir);
+        Files.writeString(mdPath, markdown, StandardCharsets.UTF_8);
+
+        boolean done = toPage >= session.totalPages();
+        if (done) {
+            importSessions.remove(importId);
+            try {
+                runBuildStage(session.project(), "html");
+                runBuildStage(session.project(), "index");
+            } catch (Exception e) {
+                System.err.println("Post-import rebuild failed for " + session.project().name() + ": " + e.getMessage());
+            }
+        }
+        respond(ex, 200, "application/json",
+            "{\"status\":\"ok\",\"file\":" + jsonStr(session.destDir() + "/" + filename)
+            + ",\"fromPage\":" + (fromPage + 1) + ",\"toPage\":" + toPage
+            + ",\"totalPages\":" + session.totalPages() + ",\"done\":" + done + "}");
+    }
+
+    /**
+     * Handles {@code POST /api/import/word}. Multipart fields: {@code file} (the {@code .docx}),
+     * {@code project}, {@code destPath} (directory under that project's {@code docs/} to write
+     * into), {@code title} (optional, defaults to the filename). No OCR — Word documents carry
+     * their own text layer. Embedded images are written to an {@code images/} subdirectory next
+     * to the generated Markdown file (see {@link WordImportService}).
+     */
+    private void handleImportWord(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        List<HttpUtils.MultipartField> fields = HttpUtils.parseMultipart(
+            ex.getRequestBody().readAllBytes(), ex.getRequestHeaders().getFirst("Content-Type"));
+        HttpUtils.MultipartField fileField = fieldByName(fields, "file");
+        if (fileField == null || !fileField.isFile()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing file\"}");
+            return;
+        }
+        Project proj = projectMap.get(textField(fields, "project"));
+        if (proj == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"unknown project\"}");
+            return;
+        }
+        String destPath = Objects.requireNonNullElse(textField(fields, "destPath"), "");
+        Path docsDir = proj.projectDir().resolve("docs");
+        Path destDir = docsDir.resolve(destPath).normalize();
+        if (!destDir.startsWith(docsDir)) {
+            respond(ex, 400, "application/json", "{\"error\":\"path traversal not allowed\"}");
+            return;
+        }
+
+        String stem = PageRenderer.stripExtension(fileField.filename());
+        String title = textField(fields, "title");
+        WordImportService.Result result;
+        try {
+            result = WordImportService.convert(fileField.data(), fileField.filename() + "",
+                (title == null || title.isBlank()) ? stem : title);
+        } catch (Exception e) {
+            System.err.println("Word import failed for " + fileField.filename() + ": " + e.getMessage());
+            respond(ex, 400, "application/json", "{\"error\":\"could not read .docx\"}");
+            return;
+        }
+
+        Files.createDirectories(destDir);
+        Path mdPath = destDir.resolve(stem + ".md");
+        Files.writeString(mdPath, result.markdown(), StandardCharsets.UTF_8);
+        if (!result.images().isEmpty()) {
+            Path imagesDir = destDir.resolve("images");
+            Files.createDirectories(imagesDir);
+            for (var e : result.images().entrySet()) {
+                Files.write(imagesDir.resolve(e.getKey()), e.getValue());
+            }
+        }
+        try {
+            runBuildStage(proj, "html");
+            runBuildStage(proj, "index");
+        } catch (Exception e) {
+            System.err.println("Post-import rebuild failed for " + proj.name() + ": " + e.getMessage());
+        }
+        respond(ex, 200, "application/json",
+            "{\"status\":\"ok\",\"file\":" + jsonStr(destPath + "/" + stem + ".md")
+            + ",\"images\":" + result.images().size() + "}");
     }
 
     /** POST /find-related — form submission; renders an HTML page with up to 20 similar docs. */

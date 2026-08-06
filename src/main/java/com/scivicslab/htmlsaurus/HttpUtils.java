@@ -5,6 +5,10 @@ import com.sun.net.httpserver.HttpExchange;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Shared HTTP utility methods used by {@link SearchServer} and {@link PortalServer}.
@@ -238,5 +242,93 @@ final class HttpUtils {
             }
         }
         return "";
+    }
+
+    /**
+     * Builds a {@code multipart/form-data} request body, for calling an external HTTP service
+     * that only accepts multipart uploads (the OCR backends have no JSON/binary alternative).
+     * Field order is preserved.
+     *
+     * @param boundary  the multipart boundary string (without leading dashes)
+     * @param fields    text form fields, in order
+     * @param fileField the file field's name (e.g. {@code "file"})
+     * @param filename  the file field's filename (server-facing; need not exist on disk)
+     * @param fileBytes the file field's raw content
+     */
+    static byte[] buildMultipart(String boundary, java.util.LinkedHashMap<String, String> fields,
+                                  String fileField, String filename, byte[] fileBytes) throws IOException {
+        var out = new java.io.ByteArrayOutputStream();
+        for (var e : fields.entrySet()) {
+            out.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+            out.write(("Content-Disposition: form-data; name=\"" + e.getKey() + "\"\r\n\r\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            out.write(e.getValue().getBytes(StandardCharsets.UTF_8));
+            out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+        }
+        out.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+        out.write(("Content-Disposition: form-data; name=\"" + fileField + "\"; filename=\""
+                + filename + "\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+                .getBytes(StandardCharsets.UTF_8));
+        out.write(fileBytes);
+        out.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        return out.toByteArray();
+    }
+
+    /** One field of a parsed {@code multipart/form-data} request: a text value, or a file's name+bytes. */
+    record MultipartField(String name, String filename, byte[] data) {
+        boolean isFile() { return filename != null; }
+        String asText() { return new String(data, StandardCharsets.UTF_8); }
+    }
+
+    private static final Pattern BOUNDARY_PARAM = Pattern.compile("boundary=\"?([^\";]+)\"?");
+    private static final Pattern NAME_PARAM = Pattern.compile("name=\"([^\"]*)\"");
+    private static final Pattern FILENAME_PARAM = Pattern.compile("filename=\"([^\"]*)\"");
+
+    /**
+     * Parses an incoming {@code multipart/form-data} request body (e.g. a browser file upload)
+     * into named fields. Returns an empty list if {@code contentType} has no boundary or the body
+     * has no matching delimiter — never throws on malformed input.
+     */
+    static List<MultipartField> parseMultipart(byte[] body, String contentType) {
+        List<MultipartField> fields = new ArrayList<>();
+        if (body == null || contentType == null) return fields;
+        Matcher bm = BOUNDARY_PARAM.matcher(contentType);
+        if (!bm.find()) return fields;
+        byte[] delimiter = ("--" + bm.group(1)).getBytes(StandardCharsets.UTF_8);
+        byte[] headerEnd = "\r\n\r\n".getBytes(StandardCharsets.UTF_8);
+
+        int pos = indexOf(body, delimiter, 0);
+        if (pos < 0) return fields;
+        pos += delimiter.length;
+        while (pos + 1 < body.length && !(body[pos] == '-' && body[pos + 1] == '-')) {
+            if (pos + 1 < body.length && body[pos] == '\r' && body[pos + 1] == '\n') pos += 2;
+            int nextDelim = indexOf(body, delimiter, pos);
+            if (nextDelim < 0) break;
+            int partEnd = Math.max(pos, nextDelim - 2); // strip the \r\n immediately before the delimiter
+            int headerEndPos = indexOf(body, headerEnd, pos);
+            if (headerEndPos >= pos && headerEndPos < partEnd) {
+                String headers = new String(body, pos, headerEndPos - pos, StandardCharsets.UTF_8);
+                byte[] data = java.util.Arrays.copyOfRange(body, headerEndPos + headerEnd.length, partEnd);
+                Matcher nm = NAME_PARAM.matcher(headers);
+                String name = nm.find() ? nm.group(1) : null;
+                Matcher fm = FILENAME_PARAM.matcher(headers);
+                String filename = fm.find() ? fm.group(1) : null;
+                if (name != null) fields.add(new MultipartField(name, filename, data));
+            }
+            pos = nextDelim + delimiter.length;
+        }
+        return fields;
+    }
+
+    /** Returns the first index at or after {@code from} where {@code needle} occurs in {@code haystack}, or -1. */
+    private static int indexOf(byte[] haystack, byte[] needle, int from) {
+        outer:
+        for (int i = from; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) continue outer;
+            }
+            return i;
+        }
+        return -1;
     }
 }

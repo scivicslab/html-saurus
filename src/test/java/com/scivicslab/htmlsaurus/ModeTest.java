@@ -539,6 +539,12 @@ class ModeTest {
                         "/related-semantic page must be closed");
                 assertNotEquals(200, status(client, base + "/search-semantic?q=Introduction", false),
                         "/search-semantic page must be closed");
+                assertNotEquals(200, status(client, base + "/api/import/pdf/start", true),
+                        "/api/import/pdf/start must be closed");
+                assertNotEquals(200, status(client, base + "/api/import/pdf/batch", true),
+                        "/api/import/pdf/batch must be closed");
+                assertNotEquals(200, status(client, base + "/api/import/word", true),
+                        "/api/import/word must be closed");
             } finally {
                 http.stop(0);
             }
