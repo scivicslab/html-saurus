@@ -5,11 +5,15 @@ import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFPicture;
 import org.apache.poi.xwpf.usermodel.XWPFPictureData;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
+import org.apache.poi.xwpf.usermodel.XWPFStyle;
+import org.apache.poi.xwpf.usermodel.XWPFStyles;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -45,10 +49,11 @@ final class WordImportService {
         int imageCounter = 0;
 
         try (XWPFDocument doc = new XWPFDocument(new ByteArrayInputStream(docxBytes))) {
+            XWPFStyles styles = doc.getStyles();
             for (XWPFParagraph para : doc.getParagraphs()) {
                 String text = para.getText();
                 if (text != null && !text.isBlank()) {
-                    body.append(headingPrefix(para)).append(text.strip()).append("\n\n");
+                    body.append(headingPrefix(para, styles)).append(text.strip()).append("\n\n");
                 }
                 for (XWPFRun run : para.getRuns()) {
                     for (XWPFPicture pic : run.getEmbeddedPictures()) {
@@ -71,14 +76,65 @@ final class WordImportService {
         return new Result(frontmatter + body, images);
     }
 
-    /** Returns {@code "## "}-style Markdown heading prefix for a {@code HeadingN} style, or {@code ""}. */
-    private static String headingPrefix(XWPFParagraph para) {
+    /**
+     * Returns a {@code "## "}-style Markdown heading prefix, or {@code ""} for a body paragraph.
+     *
+     * <p>Determines the heading level from Word's own {@code w:outlineLvl} (0 = Heading 1, ...,
+     * 8 = Heading 9) rather than the paragraph's raw {@code w:styleId}. A document's built-in
+     * heading styles keep this outline level regardless of the document's UI language or how the
+     * style got renamed/recreated (e.g. a Japanese Word installation's built-in headings carry
+     * style IDs like {@code "a3"} with the display name {@code "見出し 1"}, not the literal string
+     * {@code "Heading1"} the old {@link #HEADING_LEVEL} regex required) — outline level is what
+     * Word itself uses to build the Navigation Pane / table of contents, so it is the one signal
+     * that survives localization, style renaming, and custom styles based on a built-in heading.
+     */
+    private static String headingPrefix(XWPFParagraph para, XWPFStyles styles) {
+        Integer outlineLvl = directOutlineLvl(para.getCTP().getPPr());
+        if (outlineLvl == null && styles != null) {
+            outlineLvl = styleOutlineLvl(para.getStyleID(), styles, new HashSet<>());
+        }
+        if (outlineLvl != null) {
+            int level = Math.min(6, outlineLvl + 1);
+            return "#".repeat(level) + " ";
+        }
+        // Fallback for the (rare) case outline level cannot be resolved at all: the original
+        // literal "Heading1".."Heading9" styleId check, in case some writer produces that
+        // exact styleId without ever setting outlineLvl on the style.
         String styleId = para.getStyleID();
         if (styleId == null) return "";
         Matcher m = HEADING_LEVEL.matcher(styleId);
         if (!m.matches()) return "";
         int level = Math.min(6, Integer.parseInt(m.group(1)));
         return "#".repeat(level) + " ";
+    }
+
+    /**
+     * Reads {@code w:outlineLvl} directly off a {@code w:pPr}, or {@code null} if unset.
+     * {@code CTPPrBase} is the common ancestor of the paragraph's own {@code CTPPr} and a style
+     * definition's {@code CTPPrGeneral} — neither is a subtype of the other, so this accepts both.
+     */
+    private static Integer directOutlineLvl(org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPPrBase pPr) {
+        if (pPr == null || !pPr.isSetOutlineLvl()) return null;
+        var val = pPr.getOutlineLvl().getVal();
+        return val == null ? null : val.intValue();
+    }
+
+    /**
+     * Resolves the outline level a style carries, walking the {@code w:basedOn} chain when the
+     * style itself does not set one directly (a custom style based on a built-in heading style
+     * inherits that heading's outline level). {@code seen} guards against a malformed circular
+     * {@code basedOn} chain.
+     */
+    private static Integer styleOutlineLvl(String styleId, XWPFStyles styles, Set<String> seen) {
+        if (styleId == null || !seen.add(styleId)) return null;
+        XWPFStyle style = styles.getStyle(styleId);
+        if (style == null) return null;
+        var ctStyle = style.getCTStyle();
+        if (ctStyle != null) {
+            Integer direct = directOutlineLvl(ctStyle.getPPr());
+            if (direct != null) return direct;
+        }
+        return styleOutlineLvl(style.getBasisStyleID(), styles, seen);
     }
 
     private static String yamlQuote(String s) {
