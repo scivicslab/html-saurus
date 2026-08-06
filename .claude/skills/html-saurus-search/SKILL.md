@@ -1,7 +1,7 @@
 ---
 name: html-saurus-search
-description: "Search the local html-saurus documentation portal (all doc_* project docs under ~/works) instead of loading whole files into context. Use when unsure about a self-authored program's spec / API / behavior, or any question answerable from the internal docs. Three similarity search routes (full-text, TF-IDF similar-doc, embedding semantic), deterministic id/directory lookups, a directed prerequisite-reading relation, and a recursive read-only-what-you-need workflow that leans on the State-Machine doc structure (1 transition = 1 file, self-contained pre/post conditions)."
-version: 1.2.0
+description: "Search the local html-saurus documentation portal (all doc_* project docs under ~/works) instead of loading whole files into context. Use when unsure about a self-authored program's spec / API / behavior, or any question answerable from the internal docs. Three similarity search routes (full-text, TF-IDF similar-doc, embedding semantic), deterministic id/directory lookups, a directed prerequisite-reading relation (both directions), and a recursive read-only-what-you-need workflow that leans on the State-Machine doc structure (1 transition = 1 file, self-contained pre/post conditions)."
+version: 1.3.0
 ---
 
 # html-saurus search SKILL
@@ -77,10 +77,11 @@ cannot express (all return the same `{id,title,path,srcPath,summary}` hit shape)
 | `GET /api/resolve?id=<docId>` (alias `?ref=`) | You know the exact document id (or a path fragment) and want its canonical URL/`srcPath` with no search noise. 404 if it doesn't resolve. |
 | `GET /api/siblings?id=<docId>` | Table-of-contents proximity — other docs in the same grouping directory (same transition/spec unit). |
 | `GET /api/prerequisites?id=<docId>` | **Prerequisite documents** — see below. Directed, not a similarity score. |
+| `GET /api/prerequisite-of?id=<docId>` | **Reverse of `prerequisites`** — see below. |
 
 ### Prerequisite documents
 
-Distinct from every route above: a document can declare, in a trailing `## 前提文書` section,
+Distinct from every route above: a document can declare, in a trailing `## 参考文献` section,
 which other documents must be understood first. This relation is **directed and can hold between
 documents that share almost no vocabulary** (e.g. a physical-cluster doc as prerequisite for an
 unrelated-sounding k8s-operations doc) — so full-text/TF-IDF/semantic search will not reliably
@@ -90,14 +91,21 @@ hits, read those first. An empty array does **not** mean "no prerequisites exist
 has been recorded yet (the section is author-written, not computed). The equivalent MCP tool is
 `prerequisites`.
 
+The reverse direction — which documents name *this* one as a prerequisite — is
+`GET /api/prerequisite-of?id=<docId>` (MCP tool `prerequisite-of`). It is not author-written: it is
+derived by walking every document's `## 参考文献` at index-build time, so it can lag a very recent
+edit elsewhere. Use it to move *forward* along the state machine from a doc you already understand
+to the docs that build on it — the complement of `prerequisites`, which moves *backward* to
+required background. See `PrerequisiteOf_260806_oo01`, doc_SCIVICS002, `040_design`.
+
 An MCP endpoint (JSON-RPC 2.0, `tools/list`/`tools/call`) is also exposed at `/mcp`, mirroring
-every REST route above as a tool with a matching name (20 total): `resolve`, `search`,
-`find-related`, `related`, `search-semantic`, `related-semantic`, `prerequisites`, `siblings`,
-`list-documents`, `read-document`, `edit-document`, `build-html`, `build-index`,
-`build-embedding`, `build-all`, `reindex-all`, `scan-works-dir`, `navbar-labels`, `translate`,
-`upload-pdf` (the last four MCP tools and `list-documents`/`read-document`/`edit-document` have
-no REST equivalent). Full request/response examples are recorded in `057_html_saurus_mcp` (MCP)
-and `055_html_saurus_api` (REST) — both under doc_SCIVICS002,
+every REST route above as a tool with a matching name (21 total): `resolve`, `search`,
+`find-related`, `related`, `search-semantic`, `related-semantic`, `prerequisites`,
+`prerequisite-of`, `siblings`, `list-documents`, `read-document`, `edit-document`, `build-html`,
+`build-index`, `build-embedding`, `build-all`, `reindex-all`, `scan-works-dir`, `navbar-labels`,
+`translate`, `upload-pdf` (the last four MCP tools and `list-documents`/`read-document`/
+`edit-document` have no REST equivalent). Full request/response examples are recorded in
+`057_html_saurus_mcp` (MCP) and `055_html_saurus_api` (REST) — both under doc_SCIVICS002,
 `quarkus-AI-workspace/050_tutorials` — read those directly (`Read`, not this skill) when you need
 the exact parameter/response contract rather than just "which route do I call."
 
@@ -122,6 +130,9 @@ curl -s -X POST "$BASE/api/find-related" \
 
 # Before deep-reading a doc, check its declared prerequisites
 curl -s "$BASE/api/prerequisites?id=<paste hit.id here>" | python3 -m json.tool
+
+# Move forward: which docs build on the one you just read?
+curl -s "$BASE/api/prerequisite-of?id=<paste hit.id here>" | python3 -m json.tool
 ```
 
 ## Recommended workflow (read only what you need)
@@ -135,8 +146,9 @@ corpus — retrieve, then read the exact node.
    first (they can be on a completely different topic — that is the point of the relation).
 3. **Read only** the best hit's `srcPath` with the `Read` tool — and within it, the `用語定義`
    block plus the single transition/section that matches. Skip the rest.
-4. **If insufficient**, fan out: `GET /api/related?path=<hit.path>` (or `related-semantic`) and
-   repeat from step 2 on the new neighbor. Recurse until the question is answered.
+4. **If insufficient**, fan out: `GET /api/related?path=<hit.path>` (or `related-semantic`) for
+   similar docs, or `GET /api/prerequisite-of?id=<hit.id>` to move forward to docs that build on
+   this one. Repeat from step 2 on the new neighbor. Recurse until the question is answered.
 5. **Stop early.** Each transition file states its own achievement check; once the matching
    node answers the question, do not keep reading siblings.
 

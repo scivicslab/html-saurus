@@ -245,8 +245,10 @@ public class PortalServer {
             return;
         }
 
-        // MCP endpoint for LLM tool access
-        if (path.equals("/mcp")) {
+        // MCP endpoint for LLM tool access (development mode only — exposes unauthenticated
+        // file read/write/rebuild tools that must not be reachable from a production deployment,
+        // per ProductionModeSpec_260806_oo01, doc_SCIVICS002, 010_concepts)
+        if (!production && path.equals("/mcp")) {
             mcpHandler.handle(ex);
             return;
         }
@@ -295,26 +297,28 @@ public class PortalServer {
 
 
 
-        // Cross-project search API (JSON): GET /api/search?q=...
-        if (path.equals("/api/search")) {
+        // Cross-project search API (JSON): GET /api/search?q=... (development mode only — the
+        // public, production-safe equivalent is the SSR /search page below)
+        if (!production && path.equals("/api/search")) {
             handleGlobalSearch(ex);
             return;
         }
 
-        // Related documents API (JSON): GET /api/related?path=...
-        if (path.equals("/api/related")) {
+        // Related documents API (JSON): GET /api/related?path=... (development mode only)
+        if (!production && path.equals("/api/related")) {
             handleRelated(ex);
             return;
         }
 
         // Semantic (embedding-based) related documents API (JSON): GET /api/related-semantic?path=...
-        if (path.equals("/api/related-semantic")) {
+        // (development mode only)
+        if (!production && path.equals("/api/related-semantic")) {
             handleRelatedSemantic(ex);
             return;
         }
 
-        // Semantic query search API (JSON): GET /api/search-semantic?q=...
-        if (path.equals("/api/search-semantic")) {
+        // Semantic query search API (JSON): GET /api/search-semantic?q=... (development mode only)
+        if (!production && path.equals("/api/search-semantic")) {
             handleSearchSemantic(ex);
             return;
         }
@@ -331,51 +335,56 @@ public class PortalServer {
             return;
         }
 
-        // Resolve a document id (or path fragment) to its canonical served URL (JSON): GET /api/resolve?id=...
-        if (path.equals("/api/resolve")) {
+        // Resolve a document id (or path fragment) to its canonical served URL (JSON): GET
+        // /api/resolve?id=... (development mode only)
+        if (!production && path.equals("/api/resolve")) {
             handleResolve(ex);
             return;
         }
 
-        // Table-of-contents proximity: docs in the same grouping directory (JSON): GET /api/siblings?id=...
-        if (path.equals("/api/siblings")) {
+        // Table-of-contents proximity: docs in the same grouping directory (JSON): GET
+        // /api/siblings?id=... (development mode only)
+        if (!production && path.equals("/api/siblings")) {
             handleSiblings(ex);
             return;
         }
 
         // Prerequisite documents (JSON): GET /api/prerequisites?id=... — the "## 参考文献" section
-        if (path.equals("/api/prerequisites")) {
+        // (development mode only)
+        if (!production && path.equals("/api/prerequisites")) {
             handlePrerequisites(ex);
             return;
         }
 
         // Reverse of prerequisites (JSON): GET /api/prerequisite-of?id=... — documents that name
-        // this one as a prerequisite in their own "## 参考文献" section
-        if (path.equals("/api/prerequisite-of")) {
+        // this one as a prerequisite in their own "## 参考文献" section (development mode only)
+        if (!production && path.equals("/api/prerequisite-of")) {
             handlePrerequisiteOf(ex);
             return;
         }
 
-        // Cross-project search page (SSR): GET /search?q=...
+        // Cross-project search page (SSR): GET /search?q=... — the production-safe, human-facing
+        // search surface (see ProductionModeSpec_260806_oo01, doc_SCIVICS002, 010_concepts);
+        // stays open in production
         if (path.equals("/search")) {
             handleSearchPage(ex);
             return;
         }
 
-        // Related documents page (SSR): GET /related?path=...
-        if (path.equals("/related")) {
+        // Related documents page (SSR): GET /related?path=... (development mode only)
+        if (!production && path.equals("/related")) {
             handleRelatedPage(ex);
             return;
         }
 
-        // Semantic related documents page (SSR): GET /related-semantic?path=...
-        if (path.equals("/related-semantic")) {
+        // Semantic related documents page (SSR): GET /related-semantic?path=... (development mode only)
+        if (!production && path.equals("/related-semantic")) {
             handleRelatedSemanticPage(ex);
             return;
         }
 
-        // Semantic query search page (SSR): GET /search-semantic?q=...
-        if (path.equals("/search-semantic")) {
+        // Semantic query search page (SSR): GET /search-semantic?q=... (development mode only)
+        if (!production && path.equals("/search-semantic")) {
             handleSearchSemanticPage(ex);
             return;
         }

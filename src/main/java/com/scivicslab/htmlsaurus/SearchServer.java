@@ -203,8 +203,19 @@ public class SearchServer {
     /**
      * Handles {@code GET /search?q=...} requests. Extracts the query string from the
      * URL parameters and returns search results as a JSON array with CORS headers.
+     *
+     * <p>{@link HttpServer#createContext} matches by path prefix, not exact path, and {@code
+     * /search} is the one context registered unconditionally (open in production — see
+     * {@code ProductionModeSpec_260806_oo01}, doc_SCIVICS002, {@code 010_concepts}). Without this
+     * guard, a request to a longer path sharing the same prefix (e.g. {@code /search-semantic},
+     * whose own context is registered only in dev mode) would silently fall through to this
+     * handler instead of 404ing, exposing search results under a path meant to be closed.
      */
     private void handleSearch(HttpExchange ex) throws IOException {
+        if (!"/search".equals(ex.getRequestURI().getPath())) {
+            respond(ex, 404, "text/plain", "Not Found");
+            return;
+        }
         String q = HttpUtils.queryParam(ex, "q");
         String locale = HttpUtils.queryParam(ex, "locale");
         ActorRef<LuceneSearcher> sRef = (!locale.isEmpty() && localeSearchers.containsKey(locale))
@@ -216,6 +227,11 @@ public class SearchServer {
      * Executes a Lucene full-text search against the index directory.
      * Searches across title, document ID, and body fields with boosted weighting.
      * Returns up to 20 results as a JSON array of objects with title, path, and summary.
+     *
+     * <p>Omits {@code srcPath} (the local filesystem path of the Markdown source) in production
+     * mode: {@code /search} is the one endpoint left reachable from an internet-facing deployment
+     * (see {@code ProductionModeSpec_260806_oo01}, doc_SCIVICS002, {@code 010_concepts}), and a
+     * public reader has no use for a path on the server's local disk.
      *
      * @param queryStr the user's search query; blank returns an empty array
      * @return JSON array string of search results
@@ -233,9 +249,11 @@ public class SearchServer {
                 first = false;
                 sb.append("{")
                   .append("\"title\":").append(HttpUtils.jsonStr(hit.title())).append(",")
-                  .append("\"path\":").append(HttpUtils.jsonStr(hit.path())).append(",")
-                  .append("\"srcPath\":").append(HttpUtils.jsonStr(hit.srcPath())).append(",")
-                  .append("\"summary\":").append(HttpUtils.jsonStr(hit.summary()))
+                  .append("\"path\":").append(HttpUtils.jsonStr(hit.path())).append(",");
+                if (!production) {
+                    sb.append("\"srcPath\":").append(HttpUtils.jsonStr(hit.srcPath())).append(",");
+                }
+                sb.append("\"summary\":").append(HttpUtils.jsonStr(hit.summary()))
                   .append("}");
             }
             return sb.append("]").toString();

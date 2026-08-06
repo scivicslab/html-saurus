@@ -420,4 +420,148 @@ class ModeTest {
             }
         }
     }
+
+    // ---- Production mode security: closed API surface --------------
+    //
+    // See ProductionModeSpec_260806_oo01 (doc_SCIVICS002, html-saurus/010_concepts): in
+    // production mode only "/" (static files) and "/search" may be reachable, from either
+    // server class, and "/search" must never include srcPath (a local filesystem path).
+
+    @Nested
+    @Tag("S_prod")
+    @DisplayName("Production mode security — closed API surface")
+    class ProductionSecurity {
+
+        private int status(HttpClient client, String url, boolean post) throws Exception {
+            var builder = HttpRequest.newBuilder(URI.create(url));
+            builder = post ? builder.POST(HttpRequest.BodyPublishers.noBody()) : builder.GET();
+            return client.send(builder.build(), HttpResponse.BodyHandlers.discarding()).statusCode();
+        }
+
+        @Test
+        @DisplayName("SearchServer (production): /mcp, /api/build-all, /api/related, /api/translate are closed")
+        void searchServerProduction_closesDevAndApiEndpoints() throws Exception {
+            Path proj = createProject("proj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), true);
+            Path indexDir = proj.resolve("search-index");
+            Main.reindex(proj.resolve("docs"), indexDir);
+            SearchServer ss = new SearchServer(proj.resolve("static-html"), indexDir, 0, () -> {}, true,
+                    proj.resolve("docs"), null);
+            HttpServer http = ss.start();
+            try {
+                int port = http.getAddress().getPort();
+                var client = HttpClient.newHttpClient();
+                String base = "http://localhost:" + port;
+                assertNotEquals(200, status(client, base + "/mcp", true), "/mcp must be closed in production");
+                assertNotEquals(200, status(client, base + "/api/build-all", true),
+                        "/api/build-all must be closed in production");
+                assertNotEquals(200, status(client, base + "/api/related?path=/intro.html", false),
+                        "/api/related must be closed in production");
+                assertNotEquals(200, status(client, base + "/api/translate?lang=English", true),
+                        "/api/translate must be closed in production");
+            } finally {
+                http.stop(0);
+            }
+        }
+
+        @Test
+        @DisplayName("SearchServer (production): /search stays open and never includes srcPath")
+        void searchServerProduction_searchOpenWithoutSrcPath() throws Exception {
+            Path proj = createProject("proj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), true);
+            Path indexDir = proj.resolve("search-index");
+            Main.reindex(proj.resolve("docs"), indexDir);
+            SearchServer ss = new SearchServer(proj.resolve("static-html"), indexDir, 0, () -> {}, true,
+                    proj.resolve("docs"), null);
+            HttpServer http = ss.start();
+            try {
+                int port = http.getAddress().getPort();
+                String json = httpGet("http://localhost:" + port + "/search?q=Introduction");
+                assertFalse(json.equals("[]"), "Search must return at least one hit for 'Introduction'");
+                assertFalse(json.contains("srcPath"),
+                        "Production /search response must never include srcPath (local filesystem path)");
+            } finally {
+                http.stop(0);
+            }
+        }
+
+        @Test
+        @DisplayName("SearchServer (dev, not production): /search still includes srcPath")
+        void searchServerDev_searchIncludesSrcPath() throws Exception {
+            Path proj = createProject("proj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
+            Path indexDir = proj.resolve("search-index");
+            Main.reindex(proj.resolve("docs"), indexDir);
+            SearchServer ss = new SearchServer(proj.resolve("static-html"), indexDir, 0, () -> {}, false,
+                    proj.resolve("docs"), null);
+            HttpServer http = ss.start();
+            try {
+                int port = http.getAddress().getPort();
+                String json = httpGet("http://localhost:" + port + "/search?q=Introduction");
+                assertTrue(json.contains("srcPath"),
+                        "Dev-mode /search response must include srcPath (agents/authors Read the source from it)");
+            } finally {
+                http.stop(0);
+            }
+        }
+
+        @Test
+        @DisplayName("PortalServer (production): /mcp, /api/*, /related*, /search-semantic are closed")
+        void portalServerProduction_closesDevAndApiEndpoints() throws Exception {
+            Path proj = createProject("proj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), true);
+            Main.reindexAll(proj, true);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, true, null);
+            HttpServer http = ps.start();
+            try {
+                var client = HttpClient.newHttpClient();
+                String base = "http://localhost:" + http.getAddress().getPort();
+                assertNotEquals(200, status(client, base + "/mcp", true), "/mcp must be closed");
+                assertNotEquals(200, status(client, base + "/api/resolve?id=Introduction", false),
+                        "/api/resolve must be closed");
+                assertNotEquals(200, status(client, base + "/api/siblings?id=Introduction", false),
+                        "/api/siblings must be closed");
+                assertNotEquals(200, status(client, base + "/api/prerequisites?id=Introduction", false),
+                        "/api/prerequisites must be closed");
+                assertNotEquals(200, status(client, base + "/api/prerequisite-of?id=Introduction", false),
+                        "/api/prerequisite-of must be closed");
+                assertNotEquals(200, status(client, base + "/api/search?q=Introduction", false),
+                        "/api/search must be closed");
+                assertNotEquals(200, status(client, base + "/api/related?path=/proj/intro.html", false),
+                        "/api/related must be closed");
+                assertNotEquals(200, status(client, base + "/api/related-semantic?path=/proj/intro.html", false),
+                        "/api/related-semantic must be closed");
+                assertNotEquals(200, status(client, base + "/api/search-semantic?q=Introduction", false),
+                        "/api/search-semantic must be closed");
+                assertNotEquals(200, status(client, base + "/related?path=/proj/intro.html", false),
+                        "/related page must be closed");
+                assertNotEquals(200, status(client, base + "/related-semantic?path=/proj/intro.html", false),
+                        "/related-semantic page must be closed");
+                assertNotEquals(200, status(client, base + "/search-semantic?q=Introduction", false),
+                        "/search-semantic page must be closed");
+            } finally {
+                http.stop(0);
+            }
+        }
+
+        @Test
+        @DisplayName("PortalServer (production): SSR /search and per-project static files stay open")
+        void portalServerProduction_searchAndStaticOpen() throws Exception {
+            Path proj = createProject("proj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), true);
+            Main.reindexAll(proj, true);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, true, null);
+            HttpServer http = ps.start();
+            try {
+                var client = HttpClient.newHttpClient();
+                String base = "http://localhost:" + http.getAddress().getPort();
+                assertEquals(200, status(client, base + "/search?q=Introduction", false),
+                        "SSR /search page must stay open in production");
+                assertEquals(200, status(client, base + "/proj/", false),
+                        "Per-project static file serving must stay open in production");
+            } finally {
+                http.stop(0);
+            }
+        }
+    }
 }

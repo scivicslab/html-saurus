@@ -274,6 +274,14 @@ public class ProductionModeE2E {
             check(!pathsJson.contains(".html"),
                 "Search result paths must not contain .html, got: " + pathsJson);
         });
+
+        withPage("D-5: search API response never leaks srcPath (production mode)", page -> {
+            page.navigate(url("/guides/top_page/"));
+            String json = (String) page.evaluate("() => fetch('/search?q=SLURM').then(r => r.text())");
+            check(json != null && !json.equals("[]"), "Need at least one result");
+            check(!json.contains("srcPath"),
+                "Production /search response must not include srcPath (local filesystem path)");
+        });
     }
 
     // -------------------------------------------------------------------------
