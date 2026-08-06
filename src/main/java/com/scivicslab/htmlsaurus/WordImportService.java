@@ -25,7 +25,10 @@ import java.util.regex.Pattern;
  * <p>Embedded pictures are written out as separate image files rather than dropped: dropping them
  * silently loses content the source document had. Each picture is placed immediately after the
  * paragraph its run belongs to (not necessarily at the exact mid-sentence position POI reports),
- * referenced with a plain Markdown {@code ![](images/<name>)} tag.
+ * referenced with a plain Markdown {@code ![](<name>)} tag. Per {@code HtmlSaurus_260806_oo01}'s
+ * file/directory naming convention, an image sits directly alongside the {@code .md} file it
+ * belongs to (no {@code images/} subdirectory) — matching every hand-authored image in this
+ * project's own docs (e.g. {@code POJO-actor/200_tutorial/010_introduction/Turing87.jpg}).
  */
 final class WordImportService {
 
@@ -63,7 +66,7 @@ final class WordImportService {
                         String ext = data.suggestFileExtension();
                         String imgName = "img" + imageCounter + (ext == null || ext.isBlank() ? "" : "." + ext);
                         images.put(imgName, data.getData());
-                        body.append("![](images/").append(imgName).append(")\n\n");
+                        body.append("![](").append(imgName).append(")\n\n");
                     }
                 }
             }

@@ -1174,7 +1174,7 @@ public class PortalServer {
               <section class="import-panel" id="import-panel-word" hidden>
                 <p class="hint">Give the path of a Word (.docx) document on this server. It is read directly
                   (no OCR) and written as one Markdown file under the chosen project's docs/. Embedded
-                  images are kept in an images/ subdirectory next to it.</p>
+                  images are kept alongside it, in the same directory.</p>
                 <div class="card">
                   <div class="field">
                     <span class="field-label">Project</span>
@@ -2335,9 +2335,11 @@ public class PortalServer {
      * {@code .docx} on this server's filesystem), {@code project}, {@code destPath} (directory
      * under that project's {@code docs/} to write into), {@code title} (optional, defaults to the
      * filename). No OCR — Word documents carry their own text layer. Writes {@code <stem>/<stem>.md}
-     * and, when the document has embedded images, {@code <stem>/images/} next to it — one directory
-     * per document, per {@code DocumentationStandard_260401_oo01} — so a second import into the same
-     * {@code destPath} cannot collide with this one's image filenames (see {@link WordImportService}).
+     * and, when the document has embedded images, {@code <stem>/img1.png} etc. directly alongside it
+     * (no {@code images/} subdirectory — matching every hand-authored image in this project's own
+     * docs) — one directory per document, per {@code HtmlSaurus_260806_oo01}'s file/directory naming
+     * convention, so a second import into the same {@code destPath} cannot collide with this one's
+     * image filenames (see {@link WordImportService}).
      */
     private void handleImportWord(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -2381,19 +2383,15 @@ public class PortalServer {
             return;
         }
 
-        // One document = one directory (DocumentationStandard_260401_oo01 / DocumentStructureAndStateMachine_260404_oo01):
-        // the .md file and its images/ live together under a directory named after the document,
-        // so a second import into the same destPath cannot collide with this one's image filenames.
+        // One document = one directory (HtmlSaurus_260806_oo01): the .md file and its images sit
+        // together, flat, under a directory named after the document, so a second import into the
+        // same destPath cannot collide with this one's image filenames.
         Path docDir = destDir.resolve(stem);
         Files.createDirectories(docDir);
         Path mdPath = docDir.resolve(stem + ".md");
         Files.writeString(mdPath, result.markdown(), StandardCharsets.UTF_8);
-        if (!result.images().isEmpty()) {
-            Path imagesDir = docDir.resolve("images");
-            Files.createDirectories(imagesDir);
-            for (var e : result.images().entrySet()) {
-                Files.write(imagesDir.resolve(e.getKey()), e.getValue());
-            }
+        for (var e : result.images().entrySet()) {
+            Files.write(docDir.resolve(e.getKey()), e.getValue());
         }
         try {
             runBuildStage(proj, "html");

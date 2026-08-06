@@ -63,8 +63,8 @@ class WordImportServiceTest {
         assertEquals(1, result.images().size(), "exactly one embedded picture");
         String imgName = result.images().keySet().iterator().next();
         assertTrue(imgName.startsWith("img1"), "image filenames are numbered from 1");
-        assertTrue(result.markdown().contains("![](images/" + imgName + ")"),
-                "Markdown must reference the extracted image by its images/ path");
+        assertTrue(result.markdown().contains("![](" + imgName + ")"),
+                "Markdown must reference the extracted image directly, no images/ subdirectory");
     }
 
     @Test
