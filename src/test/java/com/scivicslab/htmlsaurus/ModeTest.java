@@ -541,10 +541,10 @@ class ModeTest {
                         "/search-semantic page must be closed");
                 assertNotEquals(200, status(client, base + "/api/import/pdf/start", true),
                         "/api/import/pdf/start must be closed");
-                assertNotEquals(200, status(client, base + "/api/import/pdf/ocr-page", true),
-                        "/api/import/pdf/ocr-page must be closed");
-                assertNotEquals(200, status(client, base + "/api/import/pdf/write-batch", true),
-                        "/api/import/pdf/write-batch must be closed");
+                assertNotEquals(200, status(client, base + "/api/import/pdf/status?jobId=x", false),
+                        "/api/import/pdf/status must be closed");
+                assertNotEquals(200, status(client, base + "/api/import/pdf/stop", true),
+                        "/api/import/pdf/stop must be closed");
                 assertNotEquals(200, status(client, base + "/api/import/word", true),
                         "/api/import/word must be closed");
             } finally {

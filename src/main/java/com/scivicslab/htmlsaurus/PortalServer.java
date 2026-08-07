@@ -62,16 +62,13 @@ public class PortalServer {
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
 
-    /** One in-progress PDF import, keyed by a random id, between {@code /api/import/pdf/start} and
-     * its {@code /api/import/pdf/ocr-page} and {@code /api/import/pdf/write-batch} calls. Removed
-     * once the last batch is written. {@code pageMarkdown} and {@code pageImages} are filled in one
-     * entry at a time as the browser OCRs each page (index = 0-based page number, {@code null}
-     * until that page is done), so a page can be re-requested idempotently and {@code write-batch}
-     * only needs to join already-OCR'd entries rather than doing any OCR itself. */
-    private record ImportSession(byte[] pdfBytes, Project project, String destDir, String stem,
-                                  OcrClient ocr, int pagesPerFile, int totalPages, String title,
-                                  String[] pageMarkdown, List<Map<String, byte[]>> pageImages) {}
-    private final Map<String, ImportSession> importSessions = new java.util.concurrent.ConcurrentHashMap<>();
+    /** One in-progress PDF import job per id, running as a named child actor of
+     * {@link #searcherSystem} (see {@link PdfImportJobActor} — {@code Quarkus_260807_oo01}'s
+     * "no raw Thread, no shared mutable state outside the actor mailbox" lesson applies directly
+     * here). The job starts itself with {@code ref.tell(PdfImportJobActor::start)} right after
+     * {@code /api/import/pdf/start} registers it, and runs to completion on its own actor thread —
+     * independent of the browser connection that started it. */
+    private final Map<String, ActorRef<PdfImportJobActor>> importJobs = new java.util.concurrent.ConcurrentHashMap<>();
     /** OCR backends available to the Import tab, keyed by {@link OcrClient#backendId()}. */
     private final Map<String, OcrClient> ocrClients = Map.of(
         "yomitoku", new YomiTokuOcrClient(System.getenv("YOMITOKU_SERVER_URL")),
@@ -345,22 +342,23 @@ public class PortalServer {
             return;
         }
 
-        // Import tab: begin a PDF OCR import (non-production only). Multipart: file, project,
-        // destPath, backend, pagesPerFile, title (optional).
+        // Import tab: start a PDF OCR import as a background job (non-production only). Form
+        // fields: path, project, destPath, backend, pagesPerFile, title (optional). The job runs
+        // to completion server-side; the browser only polls status below.
         if (!production && path.equals("/api/import/pdf/start")) {
             handleImportPdfStart(ex);
             return;
         }
 
-        // Import tab: OCR a single page of an in-progress PDF import (non-production only).
-        if (!production && path.equals("/api/import/pdf/ocr-page")) {
-            handleImportPdfOcrPage(ex);
+        // Import tab: poll an in-progress PDF import job's status (non-production only).
+        if (!production && path.equals("/api/import/pdf/status")) {
+            handleImportPdfStatus(ex);
             return;
         }
 
-        // Import tab: write the Markdown file for a range of already-OCR'd pages (non-production only).
-        if (!production && path.equals("/api/import/pdf/write-batch")) {
-            handleImportPdfWriteBatch(ex);
+        // Import tab: request an in-progress PDF import job stop before its next page (non-production only).
+        if (!production && path.equals("/api/import/pdf/stop")) {
+            handleImportPdfStop(ex);
             return;
         }
 
@@ -978,7 +976,7 @@ public class PortalServer {
                   width: 100%%; padding: 0.4rem 0.6rem; border-radius: 6px;
                   border: 1px solid var(--border-color); background: var(--bg-primary);
                   color: var(--text-primary); font-size: 0.85rem; box-sizing: border-box; }
-                #tab-import .btn-row { margin-top: 0.6rem; }
+                #tab-import .btn-row { margin-top: 0.6rem; display: flex; gap: 0.5rem; }
                 .doc-pane { flex: 1 1 auto; position: relative; min-width: 0; }
                 #doc-frame { width: 100%%; height: 100%%; border: 0; display: block; background: #fff; }
                 #doc-placeholder { position: absolute; inset: 0; display: flex; align-items: center;
@@ -1175,7 +1173,10 @@ public class PortalServer {
                     <span class="field-label">PDF file path</span>
                     <input type="text" id="import-pdf-path" autocomplete="off" placeholder="/home/devteam/works/document.pdf">
                   </div>
-                  <div class="btn-row"><button class="btn" type="button" id="import-pdf-start">OCR &amp; save</button></div>
+                  <div class="btn-row">
+                    <button class="btn" type="button" id="import-pdf-start">OCR &amp; save</button>
+                    <button class="btn" type="button" id="import-pdf-stop" disabled>Stop</button>
+                  </div>
                 </div>
               </section>
 
@@ -1370,6 +1371,7 @@ public class PortalServer {
             async function startPdfImport() {
               const progress = document.getElementById('import-progress');
               const btn = document.getElementById('import-pdf-start');
+              const stopBtn = document.getElementById('import-pdf-stop');
               const path = importField('import-pdf-path');
               if (!path) { progress.textContent = 'Give a PDF file path first.'; return; }
               const body = new URLSearchParams();
@@ -1380,10 +1382,11 @@ public class PortalServer {
               body.set('pagesPerFile', importField('import-pdf-pages-per-file'));
               const title = importField('import-pdf-title');
               if (title) body.set('title', title);
-              const pagesPerFile = parseInt(importField('import-pdf-pages-per-file'), 10) || 10;
               btn.disabled = true;
-              progress.textContent = '';
+              progress.textContent = 'Starting...';
               try {
+                // The job runs entirely server-side once started (see PdfImportJobActor) — this
+                // page only polls for progress, so closing or reloading it does not stop the job.
                 const startResp = await fetch('/api/import/pdf/start', {
                   method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
                 const startJson = await startResp.json();
@@ -1392,50 +1395,52 @@ public class PortalServer {
                   btn.disabled = false;
                   return;
                 }
-                const importId = startJson.importId;
-                const totalPages = startJson.totalPages;
-                let batchStart = 0;
-                let totalImages = 0;
-                for (let page = 0; page < totalPages; page++) {
-                  // One OCR call per page (can take tens of seconds against a real backend), so
-                  // progress updates after every page instead of only after a whole multi-page batch.
-                  progress.textContent = 'OCR: page ' + (page + 1) + ' / ' + totalPages + '...';
-                  const r = await fetch('/api/import/pdf/ocr-page', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({importId: importId, page: page})
-                  });
-                  const j = await r.json();
-                  if (!r.ok) {
-                    progress.textContent = 'Error on page ' + (page + 1) + ': ' + (j.error || 'unknown');
-                    btn.disabled = false;
-                    return;
-                  }
-                  const lastPageOfBatch = (page - batchStart + 1) >= pagesPerFile || page === totalPages - 1;
-                  if (lastPageOfBatch) {
-                    const toPage = page + 1;
-                    progress.textContent = 'Writing pages ' + (batchStart + 1) + '-' + toPage + '...';
-                    const wr = await fetch('/api/import/pdf/write-batch', {
-                      method: 'POST',
-                      headers: {'Content-Type': 'application/json'},
-                      body: JSON.stringify({importId: importId, fromPage: batchStart, toPage: toPage})
-                    });
-                    const wj = await wr.json();
-                    if (!wr.ok) {
-                      progress.textContent = 'Error writing batch: ' + (wj.error || 'unknown');
-                      btn.disabled = false;
-                      return;
-                    }
-                    totalImages += wj.images;
-                    progress.textContent = 'Page ' + toPage + ' / ' + totalPages + ' — wrote ' + wj.file + ' (' + wj.images + ' image(s))';
-                    batchStart = toPage;
-                  }
-                }
-                progress.textContent = 'Done: ' + totalPages + ' page(s) OCR complete, ' + totalImages + ' image(s) extracted.';
+                if (stopBtn) { stopBtn.disabled = false; stopBtn.dataset.jobId = startJson.jobId; }
+                pollPdfImportStatus(startJson.jobId, progress, btn, stopBtn);
               } catch (e) {
                 progress.textContent = 'Error: ' + e.message;
+                btn.disabled = false;
               }
-              btn.disabled = false;
+            }
+            function pollPdfImportStatus(jobId, progress, btn, stopBtn) {
+              const finish = function(text) {
+                progress.textContent = text;
+                btn.disabled = false;
+                if (stopBtn) stopBtn.disabled = true;
+              };
+              const tick = async function() {
+                let s;
+                try {
+                  const r = await fetch('/api/import/pdf/status?jobId=' + encodeURIComponent(jobId));
+                  s = await r.json();
+                  if (!r.ok) { finish('Error: ' + (s.error || 'unknown')); return; }
+                } catch (e) {
+                  finish('Error: ' + e.message);
+                  return;
+                }
+                if (s.state === 'running') {
+                  progress.textContent = 'OCR: page ' + s.currentPage + ' / ' + s.totalPages
+                    + (s.lastFile ? ' — last wrote ' + s.lastFile : '') + '...';
+                  setTimeout(tick, 2000);
+                } else if (s.state === 'done') {
+                  finish('Done: ' + s.totalPages + ' page(s) OCR complete, ' + s.totalImages + ' image(s) extracted.');
+                } else if (s.state === 'stopped') {
+                  finish('Stopped at page ' + s.currentPage + ' / ' + s.totalPages + '. Already-written batches are kept.');
+                } else {
+                  finish('Error: ' + (s.error || 'unknown'));
+                }
+              };
+              tick();
+            }
+            async function stopPdfImport() {
+              const stopBtn = document.getElementById('import-pdf-stop');
+              const jobId = stopBtn ? stopBtn.dataset.jobId : null;
+              if (!jobId) return;
+              stopBtn.disabled = true;
+              await fetch('/api/import/pdf/stop', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({jobId: jobId})
+              });
             }
             async function startWordImport() {
               const progress = document.getElementById('import-progress');
@@ -1465,6 +1470,8 @@ public class PortalServer {
             (function () {
               var pdfBtn = document.getElementById('import-pdf-start');
               if (pdfBtn) pdfBtn.addEventListener('click', startPdfImport);
+              var pdfStopBtn = document.getElementById('import-pdf-stop');
+              if (pdfStopBtn) pdfStopBtn.addEventListener('click', stopPdfImport);
               var wordBtn = document.getElementById('import-word-start');
               if (wordBtn) wordBtn.addEventListener('click', startWordImport);
             })();
@@ -2224,10 +2231,10 @@ public class PortalServer {
      * {@code quarkus-english-drill}'s Import screen), {@code project}, {@code destPath} (directory
      * under that project's {@code docs/} to write into), {@code backend} ({@code yomitoku} or
      * {@code marker}), {@code pagesPerFile}, {@code title} (optional, defaults to the filename).
-     * Holds the PDF's bytes in memory under a new import id and returns the page count, so the
-     * browser can drive {@link #handleImportPdfOcrPage} once per page (showing progress after
-     * every page, not just after a whole multi-page batch) and {@link #handleImportPdfWriteBatch}
-     * once every {@code pagesPerFile} pages.
+     * Registers a {@link PdfImportJobActor} as a named child of {@link #searcherSystem} and starts
+     * it immediately ({@code ref.tell(PdfImportJobActor::start)}) — the job runs to completion on
+     * its own actor thread, independent of this request or the browser connection. Returns
+     * {@code {jobId, totalPages}} right away; the browser polls {@link #handleImportPdfStatus}.
      */
     private void handleImportPdfStart(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -2280,130 +2287,71 @@ public class PortalServer {
         }
         String stem = PageRenderer.stripExtension(srcPath.getFileName().toString());
         String title = form.get("title");
-        String importId = java.util.UUID.randomUUID().toString();
-        importSessions.put(importId, new ImportSession(pdfBytes, proj, destPath, stem, ocr,
-            pagesPerFile, totalPages, (title == null || title.isBlank()) ? stem : title,
-            new String[totalPages], new java.util.ArrayList<>(java.util.Collections.nCopies(totalPages, null))));
-
-        respond(ex, 200, "application/json",
-            "{\"importId\":" + jsonStr(importId) + ",\"totalPages\":" + totalPages + "}");
-    }
-
-    /**
-     * Handles {@code POST /api/import/pdf/ocr-page}. JSON body {@code {"importId":"...","page":N}}
-     * (0-based). OCRs page {@code N} of an import started by {@link #handleImportPdfStart} and
-     * stores its Markdown body and any extracted images in the session — idempotently: if the page
-     * was already OCR'd (e.g. the browser retried), this does not call the OCR backend again.
-     */
-    private void handleImportPdfOcrPage(HttpExchange ex) throws IOException {
-        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
-            respond(ex, 405, "text/plain", "Method Not Allowed");
-            return;
-        }
-        Map<String, Object> body = McpJsonParser.parseObject(
-            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-        String importId = body.get("importId") instanceof String s ? s : null;
-        int page = body.get("page") instanceof Number n ? n.intValue() : -1;
-        ImportSession session = importId == null ? null : importSessions.get(importId);
-        if (session == null) {
-            respond(ex, 404, "application/json", "{\"error\":\"unknown or expired importId\"}");
-            return;
-        }
-        if (page < 0 || page >= session.totalPages()) {
-            respond(ex, 400, "application/json", "{\"error\":\"page out of range\"}");
-            return;
-        }
-        if (session.pageMarkdown()[page] == null) {
+        String jobId = java.util.UUID.randomUUID().toString();
+        String fileDisplayPrefix = proj.name() + "/docs/" + destPath;
+        Runnable onDone = () -> {
             try {
-                PdfImportService.PageResult result = PdfImportService.ocrOnePage(session.pdfBytes(), session.ocr(), page);
-                session.pageMarkdown()[page] = result.markdown();
-                session.pageImages().set(page, result.images());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                respond(ex, 502, "application/json", "{\"error\":\"OCR call interrupted\"}");
-                return;
-            } catch (IOException e) {
-                System.err.println("PDF import OCR failed for " + importId + " page " + page + ": " + e.getMessage());
-                respond(ex, 502, "application/json", "{\"error\":\"OCR call failed\"}");
-                return;
-            }
-        }
-        respond(ex, 200, "application/json",
-            "{\"status\":\"ok\",\"page\":" + (page + 1) + ",\"totalPages\":" + session.totalPages() + "}");
-    }
-
-    /**
-     * Handles {@code POST /api/import/pdf/write-batch}. JSON body
-     * {@code {"importId":"...","fromPage":N,"toPage":M}} (0-based, exclusive end). Joins the
-     * already-OCR'd pages {@code [fromPage, toPage)} (via {@link #handleImportPdfOcrPage}) into one
-     * Markdown document and writes it, together with every image extracted from those pages, as
-     * {@code <batchStem>/<batchStem>.md} and {@code <batchStem>/<imageName>} — one directory per
-     * batch, per {@code HtmlSaurus_260806_oo01}'s file/directory naming convention. On the batch
-     * that reaches the last page, rebuilds the target project's HTML and full-text index, and
-     * removes the import session.
-     */
-    private void handleImportPdfWriteBatch(HttpExchange ex) throws IOException {
-        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
-            respond(ex, 405, "text/plain", "Method Not Allowed");
-            return;
-        }
-        Map<String, Object> body = McpJsonParser.parseObject(
-            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-        String importId = body.get("importId") instanceof String s ? s : null;
-        int fromPage = body.get("fromPage") instanceof Number n ? n.intValue() : -1;
-        int toPage = body.get("toPage") instanceof Number n ? n.intValue() : -1;
-        ImportSession session = importId == null ? null : importSessions.get(importId);
-        if (session == null) {
-            respond(ex, 404, "application/json", "{\"error\":\"unknown or expired importId\"}");
-            return;
-        }
-        if (fromPage < 0 || toPage <= fromPage || toPage > session.totalPages()) {
-            respond(ex, 400, "application/json", "{\"error\":\"page range out of bounds\"}");
-            return;
-        }
-        List<String> pageBodies = java.util.Arrays.asList(session.pageMarkdown());
-        for (int page = fromPage; page < toPage; page++) {
-            if (pageBodies.get(page) == null) {
-                respond(ex, 400, "application/json", "{\"error\":\"page " + (page + 1) + " has not been OCR'd yet\"}");
-                return;
-            }
-        }
-        String markdown = PdfImportService.assembleDocument(pageBodies, fromPage, toPage,
-            session.stem() + ".pdf", session.title(), session.ocr().backendId());
-        Map<String, byte[]> images = new java.util.LinkedHashMap<>();
-        for (int page = fromPage; page < toPage; page++) {
-            images.putAll(session.pageImages().get(page));
-        }
-
-        Path docsDir = session.project().projectDir().resolve("docs");
-        Path destDir = docsDir.resolve(session.destDir()).normalize();
-        String filename = PdfImportService.batchFilename(session.stem(), fromPage, toPage);
-        String batchStem = filename.substring(0, filename.length() - 3); // strip ".md"
-        // One document = one directory (HtmlSaurus_260806_oo01): each batch is its own document,
-        // so its images (if the OCR backend extracted any) sit alongside it, not in a subdirectory.
-        Path batchDocDir = destDir.resolve(batchStem);
-        Path mdPath = batchDocDir.resolve(filename);
-        Files.createDirectories(batchDocDir);
-        Files.writeString(mdPath, markdown, StandardCharsets.UTF_8);
-        for (var e : images.entrySet()) {
-            Files.write(batchDocDir.resolve(e.getKey()), e.getValue());
-        }
-
-        boolean done = toPage >= session.totalPages();
-        if (done) {
-            importSessions.remove(importId);
-            try {
-                runBuildStage(session.project(), "html");
-                runBuildStage(session.project(), "index");
+                runBuildStage(proj, "html");
+                runBuildStage(proj, "index");
             } catch (Exception e) {
-                System.err.println("Post-import rebuild failed for " + session.project().name() + ": " + e.getMessage());
+                System.err.println("Post-import rebuild failed for " + proj.name() + ": " + e.getMessage());
             }
-        }
+        };
+        PdfImportJobActor job = new PdfImportJobActor(pdfBytes, destDir, stem, ocr, pagesPerFile,
+            totalPages, (title == null || title.isBlank()) ? stem : title, fileDisplayPrefix, onDone);
+        ActorRef<PdfImportJobActor> ref = searcherSystem.actorOf("pdf-import-" + jobId, job);
+        importJobs.put(jobId, ref);
+        ref.tell(actor -> actor.setSelf(ref));
+        ref.tell(PdfImportJobActor::start);
+
         respond(ex, 200, "application/json",
-            "{\"status\":\"ok\",\"file\":" + jsonStr(session.project().name() + "/docs/" + session.destDir() + "/" + batchStem + "/" + filename)
-            + ",\"fromPage\":" + (fromPage + 1) + ",\"toPage\":" + toPage
-            + ",\"totalPages\":" + session.totalPages() + ",\"images\":" + images.size()
-            + ",\"done\":" + done + "}");
+            "{\"jobId\":" + jsonStr(jobId) + ",\"totalPages\":" + totalPages + "}");
+    }
+
+    /**
+     * Handles {@code GET /api/import/pdf/status?jobId=...}. Reads the job's progress via
+     * {@code ask(PdfImportJobActor::snapshot)} — a read serialized through the same actor mailbox
+     * as the job's own writes, so it never observes a half-updated state.
+     */
+    private void handleImportPdfStatus(HttpExchange ex) throws IOException {
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        String jobId = queryParam(ex, "jobId");
+        ActorRef<PdfImportJobActor> ref = importJobs.get(jobId);
+        if (ref == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"unknown or expired jobId\"}");
+            return;
+        }
+        PdfImportJobActor.Status status = ref.ask(PdfImportJobActor::snapshot).join();
+        respond(ex, 200, "application/json",
+            "{\"currentPage\":" + status.currentPage() + ",\"totalPages\":" + status.totalPages()
+            + ",\"lastFile\":" + jsonStr(status.lastFile()) + ",\"totalImages\":" + status.totalImages()
+            + ",\"state\":" + jsonStr(status.state())
+            + ",\"error\":" + (status.error() == null ? "null" : jsonStr(status.error())) + "}");
+    }
+
+    /**
+     * Handles {@code POST /api/import/pdf/stop}. JSON body {@code {"jobId":"..."}}. Requests the
+     * job stop before its next page starts ({@code ref.tell(PdfImportJobActor::requestStop)}) —
+     * batches already written are kept.
+     */
+    private void handleImportPdfStop(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, Object> body = McpJsonParser.parseObject(
+            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String jobId = body.get("jobId") instanceof String s ? s : null;
+        ActorRef<PdfImportJobActor> ref = jobId == null ? null : importJobs.get(jobId);
+        if (ref == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"unknown or expired jobId\"}");
+            return;
+        }
+        ref.tell(PdfImportJobActor::requestStop);
+        respond(ex, 200, "application/json", "{\"status\":\"ok\"}");
     }
 
     /**
