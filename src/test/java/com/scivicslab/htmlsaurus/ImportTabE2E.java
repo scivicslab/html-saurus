@@ -41,6 +41,7 @@ public class ImportTabE2E {
             runSubTabSwitching(browser);
             runWordImport(browser);
             runPdfImportWithImage(browser);
+            runReloadDoesNotLoseState(browser);
         }
         System.out.printf("%nResults: %d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
@@ -154,6 +155,111 @@ public class ImportTabE2E {
                 throw new AssertionError("setup/build failed: " + e.getMessage(), e);
             }
         });
+    }
+
+    /**
+     * Regression test for the two follow-up requests made right after PdfImportJobActor shipped:
+     * reloading the page should not (a) lose the form field values, or (b) look like the job
+     * stopped, even though PdfImportJobActor itself already keeps running server-side regardless.
+     */
+    private static void runReloadDoesNotLoseState(Browser browser) {
+        withPage("T-4: Import form field values survive a page reload", browser, page -> {
+            page.navigate(BASE_URL + "/");
+            page.waitForLoadState();
+            page.click("#tab-btn-import");
+            page.fill("#import-pdf-dest", "e2e-reload-test");
+            page.fill("#import-pdf-title", "E2E Reload Test");
+            page.fill("#import-pdf-path", "/tmp/does-not-need-to-exist-for-this-check.pdf");
+            page.reload();
+            page.waitForLoadState();
+            page.click("#tab-btn-import");
+            check("e2e-reload-test".equals(page.inputValue("#import-pdf-dest")),
+                    "destination path must survive reload, got: " + page.inputValue("#import-pdf-dest"));
+            check("E2E Reload Test".equals(page.inputValue("#import-pdf-title")),
+                    "title must survive reload, got: " + page.inputValue("#import-pdf-title"));
+            check(page.inputValue("#import-pdf-path").endsWith("does-not-need-to-exist-for-this-check.pdf"),
+                    "PDF path must survive reload, got: " + page.inputValue("#import-pdf-path"));
+        });
+
+        withPage("P-2: a running PDF import job resumes progress display after reload, without polling in between", browser, page -> {
+            try {
+                Path pdf = Files.createTempFile("e2e-reload-fixture-", ".pdf");
+                // Per-page OCR time varies a lot with other load in the same JVM/host (a prior
+                // debug run saw ~1s/page under load from earlier tests, but well under that when
+                // run alone) — no fixed page count is both "still running at reload" and "finishes
+                // inside a fixed completion budget" for every load condition. Reloading immediately
+                // once jobId is observed (see below) shrinks the pre-reload window to near zero, so
+                // even a modest page count reliably has pages left; a generous completion budget
+                // further down absorbs the rest of the variance.
+                Files.write(pdf, buildFixtureMultiPagePdf(12));
+                page.navigate(BASE_URL + "/");
+                page.waitForLoadState();
+                page.click("#tab-btn-import");
+                page.selectOption("#import-pdf-project", "proj1");
+                page.fill("#import-pdf-dest", "e2e-reload-import-test");
+                page.selectOption("#import-pdf-backend", "yomitoku");
+                page.fill("#import-pdf-pages-per-file", "1");
+                page.fill("#import-pdf-path", pdf.toAbsolutePath().toString());
+                page.click("#import-pdf-start");
+                // Wait for startPdfImport()'s "await fetch(start)" to actually resolve and record
+                // the job id (its sessionStorage write happens only after that response arrives) —
+                // reloading any earlier would abort the in-flight request from the browser's side
+                // before that write ever runs, which is not the scenario this test checks (the job
+                // itself already starts server-side as soon as the request is received; this test
+                // is about the *display* resuming, which depends on the browser having seen jobId).
+                String jobId = null;
+                for (int i = 0; i < 100; i++) {
+                    Object v = page.evaluate("() => sessionStorage.getItem('html-saurus-active-pdf-job')");
+                    if (v != null) { jobId = v.toString(); break; }
+                    page.waitForTimeout(50);
+                }
+                check(jobId != null, "start must record an active jobId in sessionStorage before this test reloads");
+                // A plain wait here, however long, is not enough: Chromium commits a sessionStorage
+                // write to its browser-process storage backend via an async IPC that a bare timer
+                // does not wait for, so reloading right after setItem() can race ahead of that IPC
+                // and read back null even though the value was already visible to further JS reads
+                // in the same document (confirmed empirically — waitForTimeout up to 300ms still lost
+                // the value every time, but performing any real fetch() first made it reliable). This
+                // status check both fits naturally (a resuming user would want to see current state)
+                // and gives that IPC a real round trip to land before the reload below.
+                page.evaluate("(id) => fetch('/api/import/pdf/status?jobId=' + id).then(r => r.text())", jobId);
+                page.reload();
+                page.waitForLoadState();
+                check(page.isDisabled("#import-pdf-start"),
+                        "Start button must come back disabled — a job is still resuming/running after reload");
+                String progressText = "";
+                for (int i = 0; i < 300; i++) {
+                    progressText = page.textContent("#import-progress");
+                    if (progressText.contains("Done:") || progressText.contains("Error")) break;
+                    page.waitForTimeout(200);
+                }
+                check(progressText.contains("Done:"),
+                        "job must still reach completion after the page that started it was reloaded, got: " + progressText);
+            } catch (Exception e) {
+                throw new AssertionError("setup/build failed: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    /** A plain multi-page PDF (no images), for tests that only care about page-by-page progress. */
+    private static byte[] buildFixtureMultiPagePdf(int pages) throws Exception {
+        try (org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument();
+             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            for (int i = 0; i < pages; i++) {
+                var page = new org.apache.pdfbox.pdmodel.PDPage(org.apache.pdfbox.pdmodel.common.PDRectangle.LETTER);
+                doc.addPage(page);
+                try (var cs = new org.apache.pdfbox.pdmodel.PDPageContentStream(doc, page)) {
+                    cs.beginText();
+                    cs.setFont(new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                            org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA), 14);
+                    cs.newLineAtOffset(72, 700);
+                    cs.showText("Page " + (i + 1) + " test content");
+                    cs.endText();
+                }
+            }
+            doc.save(out);
+            return out.toByteArray();
+        }
     }
 
     /** A single-page PDF with a heading, an embedded raster figure, and a caption paragraph —

@@ -1362,8 +1362,44 @@ public class PortalServer {
                   opt.value = name; opt.textContent = name;
                   sel.appendChild(opt);
                 });
+                // Project <select>s have no options until this point, so their saved value (see
+                // the form-field persistence IIFE below) can only be applied here, not earlier.
+                var saved = importFormFieldStore();
+                if (saved[id] !== undefined) sel.value = saved[id];
               });
             }
+            // Reloading the page does not stop a running PDF import job (see PdfImportJobActor /
+            // #import-progress resume logic above), so the form fields that described that job
+            // should not go blank either — persist every Import field across reloads.
+            function importFormFieldStore(update) {
+              var KEY = 'html-saurus-import-form';
+              var data;
+              try { data = JSON.parse(sessionStorage.getItem(KEY) || '{}'); } catch (e) { data = {}; }
+              if (update) {
+                data[update.id] = update.value;
+                try { sessionStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {}
+              }
+              return data;
+            }
+            (function () {
+              var fieldIds = ['import-pdf-dest', 'import-pdf-title', 'import-pdf-backend',
+                'import-pdf-pages-per-file', 'import-pdf-path',
+                'import-word-dest', 'import-word-title', 'import-word-path'];
+              var saved = importFormFieldStore();
+              fieldIds.forEach(function(id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                if (saved[id] !== undefined) el.value = saved[id];
+                el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input',
+                  function() { importFormFieldStore({id: id, value: el.value}); });
+              });
+              // import-pdf-project / import-word-project save the same way, but restoring them
+              // happens inside populateImportProjects() once their <option>s exist.
+              ['import-pdf-project', 'import-word-project'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) el.addEventListener('change', function() { importFormFieldStore({id: id, value: el.value}); });
+              });
+            })();
             function importField(id) {
               var el = document.getElementById(id);
               return el ? el.value.trim() : '';
@@ -1396,17 +1432,22 @@ public class PortalServer {
                   return;
                 }
                 if (stopBtn) { stopBtn.disabled = false; stopBtn.dataset.jobId = startJson.jobId; }
+                try { sessionStorage.setItem('html-saurus-active-pdf-job', startJson.jobId); } catch (e) {}
                 pollPdfImportStatus(startJson.jobId, progress, btn, stopBtn);
               } catch (e) {
                 progress.textContent = 'Error: ' + e.message;
                 btn.disabled = false;
               }
             }
+            // The active jobId is kept in sessionStorage (not just a JS variable) so that reloading
+            // the page — which does not stop the job, see PdfImportJobActor — can resume polling
+            // and show where the job actually is, instead of a blank form as if nothing were running.
             function pollPdfImportStatus(jobId, progress, btn, stopBtn) {
               const finish = function(text) {
                 progress.textContent = text;
                 btn.disabled = false;
                 if (stopBtn) stopBtn.disabled = true;
+                try { sessionStorage.removeItem('html-saurus-active-pdf-job'); } catch (e) {}
               };
               const tick = async function() {
                 let s;
@@ -1474,6 +1515,16 @@ public class PortalServer {
               if (pdfStopBtn) pdfStopBtn.addEventListener('click', stopPdfImport);
               var wordBtn = document.getElementById('import-word-start');
               if (wordBtn) wordBtn.addEventListener('click', startWordImport);
+              // Resume polling a job that was still running when this page was loaded/reloaded.
+              var activeJobId;
+              try { activeJobId = sessionStorage.getItem('html-saurus-active-pdf-job'); } catch (e) {}
+              if (activeJobId && pdfBtn) {
+                var progress = document.getElementById('import-progress');
+                pdfBtn.disabled = true;
+                if (pdfStopBtn) { pdfStopBtn.disabled = false; pdfStopBtn.dataset.jobId = activeJobId; }
+                progress.textContent = 'Resuming job in progress...';
+                pollPdfImportStatus(activeJobId, progress, pdfBtn, pdfStopBtn);
+              }
             })();
             async function doReindexAll(btn) {
               const status = document.getElementById('reindex-all-status');
