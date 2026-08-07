@@ -40,6 +40,7 @@ public class ImportTabE2E {
             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
             runSubTabSwitching(browser);
             runWordImport(browser);
+            runPdfImportWithImage(browser);
         }
         System.out.printf("%nResults: %d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
@@ -112,6 +113,84 @@ public class ImportTabE2E {
                 throw new AssertionError("setup/build failed: " + e.getMessage(), e);
             }
         });
+    }
+
+    /**
+     * Real regression test for the bug reported against html-saurus: a Marker-imported PDF's
+     * figures were referenced in the Markdown ({@code ![](...)}) but the image files were never
+     * written, because nothing extracted Marker's {@code images} response field. Drives the actual
+     * browser UI (not a raw HTTP call) end to end against the real Marker server, and asserts the
+     * completion message reports at least one extracted image — the same message a human reads.
+     * Requires the real Marker OCR server (see {@code MarkerOcrClient.DEFAULT_BASE_URL}, or
+     * {@code MARKER_SERVER_URL}) to be reachable from wherever this test runs.
+     */
+    private static void runPdfImportWithImage(Browser browser) {
+        withPage("P-1: importing a PDF with a figure via Marker extracts and reports the image", browser, page -> {
+            try {
+                Path pdf = Files.createTempFile("e2e-fixture-", ".pdf");
+                Files.write(pdf, buildFixturePdfWithImage());
+                page.navigate(BASE_URL + "/");
+                page.waitForLoadState();
+                page.click("#tab-btn-import");
+                // PDF is the type dropdown's default option — no need to select it explicitly.
+                page.selectOption("#import-pdf-project", "proj1");
+                page.fill("#import-pdf-dest", "e2e-import-test-pdf");
+                page.fill("#import-pdf-title", "E2E PDF Import Test");
+                page.selectOption("#import-pdf-backend", "marker");
+                page.fill("#import-pdf-pages-per-file", "1");
+                page.fill("#import-pdf-path", pdf.toAbsolutePath().toString());
+                page.click("#import-pdf-start");
+                String progressText = "";
+                for (int i = 0; i < 300; i++) {
+                    progressText = page.textContent("#import-progress");
+                    if (progressText.contains("Done:") || progressText.contains("Error")) break;
+                    page.waitForTimeout(500);
+                }
+                check(progressText.contains("Done:"), "progress must report success, got: " + progressText);
+                check(!progressText.contains("0 image(s) extracted"),
+                        "the fixture PDF has one figure — 0 images means Marker's images field is not "
+                        + "being extracted again, got: " + progressText);
+            } catch (Exception e) {
+                throw new AssertionError("setup/build failed: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    /** A single-page PDF with a heading, an embedded raster figure, and a caption paragraph —
+     *  enough visual structure for Marker to detect and return a "Picture"/"Figure" block. */
+    private static byte[] buildFixturePdfWithImage() throws Exception {
+        try (org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument();
+             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            var page = new org.apache.pdfbox.pdmodel.PDPage(org.apache.pdfbox.pdmodel.common.PDRectangle.LETTER);
+            doc.addPage(page);
+
+            var img = new java.awt.image.BufferedImage(300, 200, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            var g = img.createGraphics();
+            g.setColor(java.awt.Color.BLUE);
+            g.fillRect(0, 0, 300, 200);
+            g.setColor(java.awt.Color.YELLOW);
+            g.fillOval(50, 50, 200, 100);
+            g.dispose();
+            var pdImage = org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory.createFromImage(doc, img);
+
+            try (var cs = new org.apache.pdfbox.pdmodel.PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                        org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA_BOLD), 16);
+                cs.newLineAtOffset(72, 700);
+                cs.showText("Figure 1: Test chart caption");
+                cs.endText();
+                cs.drawImage(pdImage, 72, 450, 300, 200);
+                cs.beginText();
+                cs.setFont(new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                        org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA), 11);
+                cs.newLineAtOffset(72, 420);
+                cs.showText("Body text describing the figure above in a normal paragraph.");
+                cs.endText();
+            }
+            doc.save(out);
+            return out.toByteArray();
+        }
     }
 
     private static byte[] buildFixtureDocx() throws Exception {

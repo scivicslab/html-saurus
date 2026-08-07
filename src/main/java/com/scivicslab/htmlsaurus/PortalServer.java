@@ -1395,6 +1395,7 @@ public class PortalServer {
                 const importId = startJson.importId;
                 const totalPages = startJson.totalPages;
                 let batchStart = 0;
+                let totalImages = 0;
                 for (let page = 0; page < totalPages; page++) {
                   // One OCR call per page (can take tens of seconds against a real backend), so
                   // progress updates after every page instead of only after a whole multi-page batch.
@@ -1425,11 +1426,12 @@ public class PortalServer {
                       btn.disabled = false;
                       return;
                     }
+                    totalImages += wj.images;
                     progress.textContent = 'Page ' + toPage + ' / ' + totalPages + ' — wrote ' + wj.file + ' (' + wj.images + ' image(s))';
                     batchStart = toPage;
                   }
                 }
-                progress.textContent = 'Done: ' + totalPages + ' page(s) OCR complete.';
+                progress.textContent = 'Done: ' + totalPages + ' page(s) OCR complete, ' + totalImages + ' image(s) extracted.';
               } catch (e) {
                 progress.textContent = 'Error: ' + e.message;
               }
