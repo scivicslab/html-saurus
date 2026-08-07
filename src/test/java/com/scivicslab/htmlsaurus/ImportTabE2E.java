@@ -7,8 +7,8 @@ import java.nio.file.Path;
 
 /**
  * E2E test for the portal sidebar's Import tab (top-level tab, alongside Projects — Search lives
- * inside the Projects tab). Import has its own PDF / Word sub-tabs, styled after
- * quarkus-english-drill's Import screen: a server-side file path input, not a browser upload.
+ * inside the Projects tab). Import has a type dropdown (#import-type: PDF / Word, more types
+ * expected later) rather than sub-tabs, and a server-side file path input, not a browser upload.
  *
  * <p>Requires an already-running dev-mode portal with at least one project named {@code proj1}
  * that has a {@code docs/} directory:
@@ -64,13 +64,13 @@ public class ImportTabE2E {
             check(!page.isVisible("#import-panel-word"), "#import-panel-word must be hidden by default within Import");
         });
 
-        withPage("T-2: clicking Word sub-tab shows it and hides PDF", browser, page -> {
+        withPage("T-2: selecting Word in the type dropdown shows it and hides PDF", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
             page.click("#tab-btn-import");
-            page.click("#import-tab-word");
-            check(page.isVisible("#import-panel-word"), "#import-panel-word must be visible after click");
-            check(!page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be hidden after click");
+            page.selectOption("#import-type", "word");
+            check(page.isVisible("#import-panel-word"), "#import-panel-word must be visible after selecting Word");
+            check(!page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be hidden after selecting Word");
         });
 
         withPage("T-3: project dropdowns are populated from the project list", browser, page -> {
@@ -79,7 +79,7 @@ public class ImportTabE2E {
             page.click("#tab-btn-import");
             int pdfCount = ((Number) page.evalOnSelector("#import-pdf-project", "el => el.options.length")).intValue();
             check(pdfCount > 0, "#import-pdf-project must have at least one option");
-            page.click("#import-tab-word");
+            page.selectOption("#import-type", "word");
             int wordCount = ((Number) page.evalOnSelector("#import-word-project", "el => el.options.length")).intValue();
             check(wordCount > 0, "#import-word-project must have at least one option");
         });
@@ -93,7 +93,7 @@ public class ImportTabE2E {
                 page.navigate(BASE_URL + "/");
                 page.waitForLoadState();
                 page.click("#tab-btn-import");
-                page.click("#import-tab-word");
+                page.selectOption("#import-type", "word");
                 page.selectOption("#import-word-project", "proj1");
                 page.fill("#import-word-dest", "e2e-import-test");
                 page.fill("#import-word-title", "E2E Import Test");

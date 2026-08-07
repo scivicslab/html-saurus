@@ -2,11 +2,14 @@ package com.scivicslab.htmlsaurus;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
-/** Unit tests for {@link MarkerOcrClient#splitParagraphs}: pure text logic, no HTTP. */
+/** Unit tests for {@link MarkerOcrClient#splitParagraphs} and {@link MarkerOcrClient#parseImages}:
+ *  pure logic, no HTTP. */
 class MarkerOcrClientTest {
 
     @Test
@@ -34,5 +37,31 @@ class MarkerOcrClientTest {
     @Test
     void splitParagraphs_noBlankLines_isOneParagraph() {
         assertEquals(List.of("line one\nline two"), MarkerOcrClient.splitParagraphs("line one\nline two"));
+    }
+
+    @Test
+    void parseImages_decodesBase64Values() {
+        byte[] raw = {(byte) 0xFF, 0x00, 0x10, 0x20};
+        Map<String, Object> root = Map.of("images", Map.of(
+                "_page_0_Picture_0.jpeg", Base64.getEncoder().encodeToString(raw)));
+        Map<String, byte[]> images = MarkerOcrClient.parseImages(root);
+        assertEquals(1, images.size());
+        assertArrayEquals(raw, images.get("_page_0_Picture_0.jpeg"));
+    }
+
+    @Test
+    void parseImages_missingImagesField_returnsEmpty() {
+        assertTrue(MarkerOcrClient.parseImages(Map.of("output", "text")).isEmpty());
+    }
+
+    @Test
+    void parseImages_emptyImagesObject_returnsEmpty() {
+        assertTrue(MarkerOcrClient.parseImages(Map.of("images", Map.of())).isEmpty());
+    }
+
+    @Test
+    void parseImages_invalidBase64Value_isSkippedNotThrown() {
+        Map<String, Object> root = Map.of("images", Map.of("bad.jpeg", "not valid base64!!"));
+        assertTrue(MarkerOcrClient.parseImages(root).isEmpty());
     }
 }

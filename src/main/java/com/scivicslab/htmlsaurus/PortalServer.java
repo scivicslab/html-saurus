@@ -64,13 +64,13 @@ public class PortalServer {
 
     /** One in-progress PDF import, keyed by a random id, between {@code /api/import/pdf/start} and
      * its {@code /api/import/pdf/ocr-page} and {@code /api/import/pdf/write-batch} calls. Removed
-     * once the last batch is written. {@code pageMarkdown} is filled in one entry at a time as the
-     * browser OCRs each page (index = 0-based page number, {@code null} until that page is done),
-     * so a page can be re-requested idempotently and {@code write-batch} only needs to join
-     * already-OCR'd entries rather than doing any OCR itself. */
+     * once the last batch is written. {@code pageMarkdown} and {@code pageImages} are filled in one
+     * entry at a time as the browser OCRs each page (index = 0-based page number, {@code null}
+     * until that page is done), so a page can be re-requested idempotently and {@code write-batch}
+     * only needs to join already-OCR'd entries rather than doing any OCR itself. */
     private record ImportSession(byte[] pdfBytes, Project project, String destDir, String stem,
                                   OcrClient ocr, int pagesPerFile, int totalPages, String title,
-                                  String[] pageMarkdown) {}
+                                  String[] pageMarkdown, List<Map<String, byte[]>> pageImages) {}
     private final Map<String, ImportSession> importSessions = new java.util.concurrent.ConcurrentHashMap<>();
     /** OCR backends available to the Import tab, keyed by {@link OcrClient#backendId()}. */
     private final Map<String, OcrClient> ocrClients = Map.of(
@@ -963,28 +963,22 @@ public class PortalServer {
                 .tab-btn:hover { color: var(--text-primary); }
                 .tab-btn.active { color: var(--text-primary); border-bottom-color: var(--accent-green); }
                 .tab-panel[hidden] { display: none; }
-                /* Second-level sub-tabs inside the Import tab (PDF / Word), styled after
-                   quarkus-english-drill's ingest_form.html. */
-                .import-tab-bar { display: flex; gap: 0.25rem; margin: 0.6rem 0 0.75rem;
-                                   border-bottom: 1px solid var(--border-color); }
-                .import-tab { flex: 1 1 auto; padding: 0.4rem 0.4rem; border: none; background: none;
-                               color: var(--text-secondary); font-size: 0.82rem; cursor: pointer;
-                               border-bottom: 2px solid transparent; }
-                .import-tab:hover { color: var(--text-primary); }
-                .import-tab.active { color: var(--text-primary); border-bottom-color: var(--accent-green); }
+                /* Import tab: a type picker (dropdown, so adding more types later — web, video,
+                   arxiv, ... — doesn't mean adding more sub-tabs) followed by one panel per type,
+                   styled after quarkus-english-drill's ingest_form.html. */
                 .import-panel[hidden] { display: none; }
-                .import-panel .hint { font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 0.6rem; }
-                .import-panel .card { border: 1px solid var(--border-color); border-radius: 8px;
-                                       padding: 0.75rem 0.9rem; background: var(--bg-tertiary); }
-                .import-panel .field { margin-bottom: 0.5rem; }
-                .import-panel .field:last-child { margin-bottom: 0; }
-                .import-panel .field-label { display: block; font-size: 0.8rem;
-                                              color: var(--text-secondary); margin-bottom: 0.25rem; }
-                .import-panel .field input, .import-panel .field select {
+                #tab-import .hint { font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 0.6rem; }
+                #tab-import .card { border: 1px solid var(--border-color); border-radius: 8px;
+                                     padding: 0.75rem 0.9rem; background: var(--bg-tertiary); }
+                #tab-import .field { margin-bottom: 0.5rem; }
+                #tab-import .field:last-child { margin-bottom: 0; }
+                #tab-import .field-label { display: block; font-size: 0.8rem;
+                                            color: var(--text-secondary); margin-bottom: 0.25rem; }
+                #tab-import .field input, #tab-import .field select {
                   width: 100%%; padding: 0.4rem 0.6rem; border-radius: 6px;
                   border: 1px solid var(--border-color); background: var(--bg-primary);
                   color: var(--text-primary); font-size: 0.85rem; box-sizing: border-box; }
-                .import-panel .btn-row { margin-top: 0.6rem; }
+                #tab-import .btn-row { margin-top: 0.6rem; }
                 .doc-pane { flex: 1 1 auto; position: relative; min-width: 0; }
                 #doc-frame { width: 100%%; height: 100%%; border: 0; display: block; background: #fff; }
                 #doc-placeholder { position: absolute; inset: 0; display: flex; align-items: center;
@@ -1141,9 +1135,12 @@ public class PortalServer {
         if (!production) {
             sb.append("""
               <div class="tab-panel" id="tab-import" hidden>
-              <div class="import-tab-bar" role="tablist">
-                <button type="button" class="import-tab active" data-panel="pdf" id="import-tab-pdf">PDF</button>
-                <button type="button" class="import-tab" data-panel="word" id="import-tab-word">Word</button>
+              <div class="field">
+                <span class="field-label">Import type</span>
+                <select id="import-type">
+                  <option value="pdf">PDF</option>
+                  <option value="word">Word</option>
+                </select>
               </div>
 
               <section class="import-panel" id="import-panel-pdf">
@@ -1334,25 +1331,23 @@ public class PortalServer {
             }
             selectTab(localStorage.getItem('portal-active-tab') || 'projects');
             (function () {
-              // Second-level tabs inside Import (PDF / Word), same pattern as
-              // quarkus-english-drill's ingest_form.html.
-              var tabs = Array.prototype.slice.call(document.querySelectorAll('.import-tab'));
-              if (!tabs.length) return;
-              function selectImportTab(name) {
-                tabs.forEach(function (t) {
-                  var on = t.dataset.panel === name;
-                  t.classList.toggle('active', on);
-                  var panel = document.getElementById('import-panel-' + t.dataset.panel);
-                  if (panel) panel.hidden = !on;
+              // Import type picker: a dropdown rather than sub-tabs, since more types (web,
+              // video, arxiv, ...) are expected later — a dropdown scales, a row of tabs doesn't.
+              var picker = document.getElementById('import-type');
+              if (!picker) return;
+              function selectImportType(name) {
+                document.querySelectorAll('.import-panel').forEach(function (panel) {
+                  panel.hidden = (panel.id !== 'import-panel-' + name);
                 });
-                try { sessionStorage.setItem('importTab', name); } catch (e) {}
+                try { sessionStorage.setItem('importType', name); } catch (e) {}
               }
-              tabs.forEach(function (t) {
-                t.addEventListener('click', function () { selectImportTab(t.dataset.panel); });
-              });
+              picker.addEventListener('change', function () { selectImportType(picker.value); });
               var saved;
-              try { saved = sessionStorage.getItem('importTab'); } catch (e) {}
-              if (saved && document.getElementById('import-panel-' + saved)) selectImportTab(saved);
+              try { saved = sessionStorage.getItem('importType'); } catch (e) {}
+              if (saved && document.getElementById('import-panel-' + saved)) {
+                picker.value = saved;
+                selectImportType(saved);
+              }
               populateImportProjects();
             })();
             function populateImportProjects() {
@@ -1430,7 +1425,7 @@ public class PortalServer {
                       btn.disabled = false;
                       return;
                     }
-                    progress.textContent = 'Page ' + toPage + ' / ' + totalPages + ' — wrote ' + wj.file;
+                    progress.textContent = 'Page ' + toPage + ' / ' + totalPages + ' — wrote ' + wj.file + ' (' + wj.images + ' image(s))';
                     batchStart = toPage;
                   }
                 }
@@ -2286,7 +2281,7 @@ public class PortalServer {
         String importId = java.util.UUID.randomUUID().toString();
         importSessions.put(importId, new ImportSession(pdfBytes, proj, destPath, stem, ocr,
             pagesPerFile, totalPages, (title == null || title.isBlank()) ? stem : title,
-            new String[totalPages]));
+            new String[totalPages], new java.util.ArrayList<>(java.util.Collections.nCopies(totalPages, null))));
 
         respond(ex, 200, "application/json",
             "{\"importId\":" + jsonStr(importId) + ",\"totalPages\":" + totalPages + "}");
@@ -2295,8 +2290,8 @@ public class PortalServer {
     /**
      * Handles {@code POST /api/import/pdf/ocr-page}. JSON body {@code {"importId":"...","page":N}}
      * (0-based). OCRs page {@code N} of an import started by {@link #handleImportPdfStart} and
-     * stores its Markdown body in the session's {@code pageMarkdown} array — idempotently: if the
-     * page was already OCR'd (e.g. the browser retried), this does not call the OCR backend again.
+     * stores its Markdown body and any extracted images in the session — idempotently: if the page
+     * was already OCR'd (e.g. the browser retried), this does not call the OCR backend again.
      */
     private void handleImportPdfOcrPage(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -2318,7 +2313,9 @@ public class PortalServer {
         }
         if (session.pageMarkdown()[page] == null) {
             try {
-                session.pageMarkdown()[page] = PdfImportService.ocrOnePage(session.pdfBytes(), session.ocr(), page);
+                PdfImportService.PageResult result = PdfImportService.ocrOnePage(session.pdfBytes(), session.ocr(), page);
+                session.pageMarkdown()[page] = result.markdown();
+                session.pageImages().set(page, result.images());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 respond(ex, 502, "application/json", "{\"error\":\"OCR call interrupted\"}");
@@ -2337,10 +2334,11 @@ public class PortalServer {
      * Handles {@code POST /api/import/pdf/write-batch}. JSON body
      * {@code {"importId":"...","fromPage":N,"toPage":M}} (0-based, exclusive end). Joins the
      * already-OCR'd pages {@code [fromPage, toPage)} (via {@link #handleImportPdfOcrPage}) into one
-     * Markdown document and writes it as {@code <batchStem>/<batchStem>.md} — one directory per
-     * batch, per {@code HtmlSaurus_260806_oo01}'s file/directory naming convention, even though OCR
-     * output carries no images today. On the batch that reaches the last page, rebuilds the target
-     * project's HTML and full-text index, and removes the import session.
+     * Markdown document and writes it, together with every image extracted from those pages, as
+     * {@code <batchStem>/<batchStem>.md} and {@code <batchStem>/<imageName>} — one directory per
+     * batch, per {@code HtmlSaurus_260806_oo01}'s file/directory naming convention. On the batch
+     * that reaches the last page, rebuilds the target project's HTML and full-text index, and
+     * removes the import session.
      */
     private void handleImportPdfWriteBatch(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -2370,17 +2368,24 @@ public class PortalServer {
         }
         String markdown = PdfImportService.assembleDocument(pageBodies, fromPage, toPage,
             session.stem() + ".pdf", session.title(), session.ocr().backendId());
+        Map<String, byte[]> images = new java.util.LinkedHashMap<>();
+        for (int page = fromPage; page < toPage; page++) {
+            images.putAll(session.pageImages().get(page));
+        }
 
         Path docsDir = session.project().projectDir().resolve("docs");
         Path destDir = docsDir.resolve(session.destDir()).normalize();
         String filename = PdfImportService.batchFilename(session.stem(), fromPage, toPage);
         String batchStem = filename.substring(0, filename.length() - 3); // strip ".md"
         // One document = one directory (HtmlSaurus_260806_oo01): each batch is its own document,
-        // so it gets its own directory even though OCR output has no images today.
+        // so its images (if the OCR backend extracted any) sit alongside it, not in a subdirectory.
         Path batchDocDir = destDir.resolve(batchStem);
         Path mdPath = batchDocDir.resolve(filename);
         Files.createDirectories(batchDocDir);
         Files.writeString(mdPath, markdown, StandardCharsets.UTF_8);
+        for (var e : images.entrySet()) {
+            Files.write(batchDocDir.resolve(e.getKey()), e.getValue());
+        }
 
         boolean done = toPage >= session.totalPages();
         if (done) {
@@ -2395,7 +2400,8 @@ public class PortalServer {
         respond(ex, 200, "application/json",
             "{\"status\":\"ok\",\"file\":" + jsonStr(session.project().name() + "/docs/" + session.destDir() + "/" + batchStem + "/" + filename)
             + ",\"fromPage\":" + (fromPage + 1) + ",\"toPage\":" + toPage
-            + ",\"totalPages\":" + session.totalPages() + ",\"done\":" + done + "}");
+            + ",\"totalPages\":" + session.totalPages() + ",\"images\":" + images.size()
+            + ",\"done\":" + done + "}");
     }
 
     /**

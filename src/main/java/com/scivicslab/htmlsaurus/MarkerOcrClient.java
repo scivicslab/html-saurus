@@ -22,9 +22,12 @@ import java.util.logging.Logger;
  * <p>{@code POST {baseUrl}/marker/upload}, multipart fields {@code file} (single-page PDF bytes) +
  * {@code page_range} (always {@code "0"}, since the caller already extracted one page) +
  * {@code output_format=markdown}, response
- * {@code {"format":"markdown","output":"## ...","success":true,"images":{...}}}. This client does
- * not extract Marker's returned images — image handling for OCR imports is not yet implemented
- * (unlike the Word/.docx import path, which does extract embedded images directly).
+ * {@code {"format":"markdown","output":"## ...![](_page_0_Picture_0.jpeg)...","success":true,
+ * "images":{"_page_0_Picture_0.jpeg":"<base64>"}}}. Every image filename Marker returns is scoped
+ * to that single call (it always numbers from {@code _page_0_...} — each call is, from Marker's
+ * point of view, a fresh one-page document), so two different real pages can produce the exact
+ * same filename; the caller ({@link PdfImportService#ocrOnePage}) is responsible for making them
+ * unique across the whole document before writing them to disk.
  */
 class MarkerOcrClient implements OcrClient {
 
@@ -51,7 +54,7 @@ class MarkerOcrClient implements OcrClient {
     }
 
     @Override
-    public List<String> ocrPage(byte[] onePagePdfBytes) throws IOException, InterruptedException {
+    public Result ocrPage(byte[] onePagePdfBytes) throws IOException, InterruptedException {
         String boundary = "----htmlsaurus" + System.nanoTime();
         var fields = new LinkedHashMap<String, String>();
         fields.put("page_range", "0");
@@ -69,13 +72,29 @@ class MarkerOcrClient implements OcrClient {
             logger.log(Level.WARNING, "Marker status " + response.statusCode() + " from " + baseUrl);
             throw new IOException("Marker OCR failed with status " + response.statusCode());
         }
-        return splitParagraphs(parseMarkdown(response.body()));
+        Map<String, Object> root = McpJsonParser.parseObject(response.body());
+        String markdown = root.get("output") == null ? "" : root.get("output").toString();
+        return new Result(splitParagraphs(markdown), parseImages(root));
     }
 
-    private static String parseMarkdown(String responseBody) {
-        Map<String, Object> root = McpJsonParser.parseObject(responseBody);
-        Object output = root.get("output");
-        return output == null ? "" : output.toString();
+    /** Decodes the {@code images} object ({@code {filename: base64}}) into raw bytes. */
+    @SuppressWarnings("unchecked")
+    static Map<String, byte[]> parseImages(Map<String, Object> root) {
+        Object imagesField = root.get("images");
+        if (!(imagesField instanceof Map<?, ?> imagesMap) || imagesMap.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, byte[]> out = new LinkedHashMap<>();
+        for (var entry : imagesMap.entrySet()) {
+            if (entry.getValue() == null) continue;
+            try {
+                out.put(entry.getKey().toString(),
+                        java.util.Base64.getDecoder().decode(entry.getValue().toString()));
+            } catch (IllegalArgumentException e) {
+                logger.log(Level.WARNING, "Marker image '" + entry.getKey() + "' was not valid base64, skipped");
+            }
+        }
+        return out;
     }
 
     /** Splits Markdown on blank lines into paragraphs, keeping fenced code blocks intact. */

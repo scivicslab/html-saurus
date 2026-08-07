@@ -45,7 +45,7 @@ class YomiTokuOcrClient implements OcrClient {
     }
 
     @Override
-    public List<String> ocrPage(byte[] onePagePdfBytes) throws IOException, InterruptedException {
+    public Result ocrPage(byte[] onePagePdfBytes) throws IOException, InterruptedException {
         String boundary = "----htmlsaurus" + System.nanoTime();
         var fields = new LinkedHashMap<String, String>();
         fields.put("page", "0");
@@ -62,7 +62,8 @@ class YomiTokuOcrClient implements OcrClient {
             logger.log(Level.WARNING, "YomiToku status " + response.statusCode() + " from " + baseUrl);
             throw new IOException("YomiToku OCR failed with status " + response.statusCode());
         }
-        return parseParagraphs(response.body());
+        // YomiToku's response has no images field — it is a plain-text OCR engine.
+        return new Result(parseParagraphs(response.body()), Map.of());
     }
 
     @SuppressWarnings("unchecked")

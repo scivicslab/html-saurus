@@ -1,7 +1,9 @@
 package com.scivicslab.htmlsaurus;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Converts PDF pages to Markdown via OCR, one page at a time (see {@link OcrClient},
@@ -19,12 +21,33 @@ final class PdfImportService {
 
     private PdfImportService() {}
 
-    /** OCRs one 0-based {@code page} and returns its Markdown body (no frontmatter — that belongs
-     *  to the assembled document, not a single page; see {@link #assembleDocument}). */
-    static String ocrOnePage(byte[] pdfBytes, OcrClient ocr, int page) throws IOException, InterruptedException {
+    /** One page's OCR result: its Markdown body (no frontmatter — that belongs to the assembled
+     *  document, not a single page; see {@link #assembleDocument}) and any images the backend
+     *  extracted from it, keyed by a filename already made unique across the whole document. */
+    record PageResult(String markdown, Map<String, byte[]> images) {}
+
+    /**
+     * OCRs one 0-based {@code page}. An OCR backend that extracts images (see {@link OcrClient})
+     * names each one relative to that single call — every call restarts from the same names (e.g.
+     * Marker always starts at {@code _page_0_...}, since each call is, from its point of view, a
+     * fresh one-page document) — so two different real pages can return the identical filename.
+     * This renames each of this page's images by prefixing the real 1-based page number, and
+     * rewrites the matching {@code ![](<name>)} references in the returned Markdown to match.
+     */
+    static PageResult ocrOnePage(byte[] pdfBytes, OcrClient ocr, int page) throws IOException, InterruptedException {
         byte[] onePage = PdfPageSplitter.singlePage(pdfBytes, page);
-        List<String> paragraphs = ocr.ocrPage(onePage);
-        return String.join("\n\n", paragraphs);
+        OcrClient.Result result = ocr.ocrPage(onePage);
+        String markdown = String.join("\n\n", result.paragraphs());
+        if (result.images().isEmpty()) {
+            return new PageResult(markdown, Map.of());
+        }
+        Map<String, byte[]> renamed = new LinkedHashMap<>();
+        for (var entry : result.images().entrySet()) {
+            String uniqueName = "p" + (page + 1) + "_" + entry.getKey();
+            renamed.put(uniqueName, entry.getValue());
+            markdown = markdown.replace("(" + entry.getKey() + ")", "(" + uniqueName + ")");
+        }
+        return new PageResult(markdown, renamed);
     }
 
     /**
