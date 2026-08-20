@@ -80,6 +80,13 @@
             <version>3.5.0</version>
         </dependency>
 
+        <!-- gpu-broker-client: flow-controlled SDK for quarkus-gpu-broker's async job path -->
+        <dependency>
+            <groupId>com.scivicslab</groupId>
+            <artifactId>gpu-broker-client</artifactId>
+            <version>0.1.0</version>
+        </dependency>
+
         <!-- PDF text extraction -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>

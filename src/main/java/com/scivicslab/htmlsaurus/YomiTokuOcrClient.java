@@ -46,15 +46,12 @@ class YomiTokuOcrClient implements OcrClient {
 
     @Override
     public Result ocrPage(byte[] onePagePdfBytes) throws IOException, InterruptedException {
-        String boundary = "----htmlsaurus" + System.nanoTime();
-        var fields = new LinkedHashMap<String, String>();
-        fields.put("page", "0");
-        byte[] body = HttpUtils.buildMultipart(boundary, fields, "file", "page.pdf", onePagePdfBytes);
+        GpuBrokerOcrClient.MultipartRequest req = buildRequest(onePagePdfBytes);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/ocr"))
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                .header("Content-Type", req.contentType())
+                .POST(HttpRequest.BodyPublishers.ofByteArray(req.body()))
                 .timeout(Duration.ofSeconds(120))
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -62,12 +59,29 @@ class YomiTokuOcrClient implements OcrClient {
             logger.log(Level.WARNING, "YomiToku status " + response.statusCode() + " from " + baseUrl);
             throw new IOException("YomiToku OCR failed with status " + response.statusCode());
         }
-        // YomiToku's response has no images field — it is a plain-text OCR engine.
-        return new Result(parseParagraphs(response.body()), Map.of());
+        return parseResult(response.body());
+    }
+
+    /** Builds the same multipart body {@link #ocrPage} sends directly, for {@link GpuBrokerOcrClient}
+     *  to submit through {@code quarkus-gpu-broker} instead -- YomiToku's {@code /ocr} endpoint
+     *  requires this exact shape (fields {@code page}, file {@code file}), not a raw PDF body. */
+    static GpuBrokerOcrClient.MultipartRequest buildRequest(byte[] onePagePdfBytes) throws IOException {
+        String boundary = "----htmlsaurus" + System.nanoTime();
+        var fields = new LinkedHashMap<String, String>();
+        fields.put("page", "0");
+        byte[] body = HttpUtils.buildMultipart(boundary, fields, "file", "page.pdf", onePagePdfBytes);
+        return new GpuBrokerOcrClient.MultipartRequest(body, "multipart/form-data; boundary=" + boundary);
+    }
+
+    /** Parses a YomiToku {@code /ocr} response body, shared with {@link GpuBrokerOcrClient}
+     *  (whose job result carries the same body YomiToku itself returned). YomiToku has no
+     *  images field — it is a plain-text OCR engine. */
+    static Result parseResult(String responseBody) {
+        return new Result(parseParagraphs(responseBody), Map.of());
     }
 
     @SuppressWarnings("unchecked")
-    private static List<String> parseParagraphs(String responseBody) {
+    static List<String> parseParagraphs(String responseBody) {
         Map<String, Object> root = McpJsonParser.parseObject(responseBody);
         Object paragraphs = root.get("paragraphs");
         List<String> out = new ArrayList<>();

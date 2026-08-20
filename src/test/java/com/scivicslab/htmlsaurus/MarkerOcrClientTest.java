@@ -64,4 +64,23 @@ class MarkerOcrClientTest {
         Map<String, Object> root = Map.of("images", Map.of("bad.jpeg", "not valid base64!!"));
         assertTrue(MarkerOcrClient.parseImages(root).isEmpty());
     }
+
+    @Test
+    void parseResult_combinesOutputAndImages_fromARawJsonBody() {
+        byte[] raw = {0x01, 0x02};
+        String body = "{\"output\":\"First.\\n\\nSecond.\",\"images\":{\"a.jpeg\":\""
+                + Base64.getEncoder().encodeToString(raw) + "\"}}";
+
+        OcrClient.Result result = MarkerOcrClient.parseResult(body);
+
+        assertEquals(List.of("First.", "Second."), result.paragraphs());
+        assertArrayEquals(raw, result.images().get("a.jpeg"));
+    }
+
+    @Test
+    void parseResult_missingOutputField_isEmptyParagraphs() {
+        OcrClient.Result result = MarkerOcrClient.parseResult("{\"success\":true}");
+        assertEquals(List.of(), result.paragraphs());
+        assertTrue(result.images().isEmpty());
+    }
 }

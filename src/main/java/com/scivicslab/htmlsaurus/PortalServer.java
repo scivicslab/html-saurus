@@ -1,5 +1,6 @@
 package com.scivicslab.htmlsaurus;
 
+import com.scivicslab.gpubroker.client.GpuBrokerClient;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.pojoactor.core.ActorSystem;
 import com.sun.net.httpserver.HttpExchange;
@@ -69,11 +70,34 @@ public class PortalServer {
      * {@code /api/import/pdf/start} registers it, and runs to completion on its own actor thread —
      * independent of the browser connection that started it. */
     private final Map<String, ActorRef<PdfImportJobActor>> importJobs = new java.util.concurrent.ConcurrentHashMap<>();
-    /** OCR backends available to the Import tab, keyed by {@link OcrClient#backendId()}. */
-    private final Map<String, OcrClient> ocrClients = Map.of(
-        "yomitoku", new YomiTokuOcrClient(System.getenv("YOMITOKU_SERVER_URL")),
-        "marker", new MarkerOcrClient(System.getenv("MARKER_SERVER_URL"))
-    );
+    /** Number of not-yet-completed OCR pages {@link GpuBrokerOcrClient} allows in flight per
+     *  backend before {@code client.submit} blocks the calling {@code PdfImportJobActor}'s
+     *  thread -- generous relative to this codebase's actual concurrent-import-job count, since
+     *  quarkus-gpu-broker's own {@code maxConcurrency} per node is the real bottleneck either way. */
+    private static final int GPU_BROKER_TARGET_IN_FLIGHT = 10;
+
+    /** OCR backends available to the Import tab, keyed by {@link OcrClient#backendId()}. Whether
+     *  these call quarkus-gpu-broker or the fixed OCR nodes directly is decided once here, at
+     *  construction, by {@code GPU_BROKER_URL} -- never per request, never as a runtime fallback
+     *  from one to the other. See {@code GpuBrokerOcrIntegration_260820_oo01}. */
+    private final Map<String, OcrClient> ocrClients = buildOcrClients();
+
+    private static Map<String, OcrClient> buildOcrClients() {
+        String brokerUrl = System.getenv("GPU_BROKER_URL");
+        if (brokerUrl == null || brokerUrl.isBlank()) {
+            return Map.of(
+                "yomitoku", new YomiTokuOcrClient(System.getenv("YOMITOKU_SERVER_URL")),
+                "marker", new MarkerOcrClient(System.getenv("MARKER_SERVER_URL"))
+            );
+        }
+        GpuBrokerClient client = new GpuBrokerClient(brokerUrl, "html-saurus", GPU_BROKER_TARGET_IN_FLIGHT);
+        return Map.of(
+            "yomitoku", new GpuBrokerOcrClient(client, "yomitoku-ocr", "yomitoku",
+                    YomiTokuOcrClient::buildRequest, YomiTokuOcrClient::parseResult),
+            "marker", new GpuBrokerOcrClient(client, "marker-ocr", "marker",
+                    MarkerOcrClient::buildRequest, MarkerOcrClient::parseResult)
+        );
+    }
 
     /**
      * @param worksDir    root directory containing all Docusaurus projects (used for reload)
