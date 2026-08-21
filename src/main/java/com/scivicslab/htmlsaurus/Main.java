@@ -14,7 +14,12 @@ import java.util.*;
  *       under a root directory and serves them through a unified portal with cross-project search.</li>
  * </ul>
  *
- * <p>Usage: {@code java -jar html-saurus.jar [path] [--serve] [--portal-mode] [--port N] [--production]}
+ * <p>Usage: {@code java -jar html-saurus.jar [path] [--serve] [--portal-mode] [--port N] [--production] [--threads N]}
+ *
+ * <p>{@code --threads N} overrides {@link SiteBuilder}'s page-conversion parallelism (default 4 --
+ * see {@code BuildParallelization_260822_oo01}, doc_SCIVICS002/html-saurus/040_design). Deliberately
+ * not {@code Runtime.availableProcessors()} by default, so a shared machine is not saturated by a
+ * default no one chose.
  */
 public class Main {
 
@@ -30,6 +35,9 @@ public class Main {
         boolean portalMode = false;
         boolean production = false;
         int port = 8080;
+        // 0 = unspecified: SiteBuilder keeps its own default (4 -- see BuildParallelization_260822_oo01,
+        // deliberately not Runtime.availableProcessors() so a shared machine isn't saturated by default).
+        int threads = 0;
 
         // Independent build-step selectors. When any of these is given, html-saurus runs
         // ONLY the selected steps (in dependency order html -> index -> embedding) and exits,
@@ -43,6 +51,7 @@ public class Main {
 
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("--port") && i + 1 < args.length) port = Integer.parseInt(args[++i]);
+            else if (args[i].equals("--threads") && i + 1 < args.length) threads = Integer.parseInt(args[++i]);
             else if (args[i].equals("--serve")) serve = true;
             else if (args[i].equals("--portal-mode")) portalMode = true;
             else if (args[i].equals("--production")) production = true;
@@ -86,14 +95,14 @@ public class Main {
 
         // Explicit per-step build: run only the selected stages and exit (never serves).
         if (explicitSteps) {
-            runSteps(rootDir, portalMode, production, stepHtml, stepIndex, stepEmbedding);
+            runSteps(rootDir, portalMode, production, stepHtml, stepIndex, stepEmbedding, threads);
             return;
         }
 
         if (servePortal) {
-            runPortal(rootDir, port, serve, production);
+            runPortal(rootDir, port, serve, production, threads);
         } else {
-            runSingle(rootDir, port, serve, production);
+            runSingle(rootDir, port, serve, production, threads);
         }
 
         if (serve || production) {
@@ -124,7 +133,7 @@ public class Main {
      * @throws IOException if project discovery fails
      */
     static void runSteps(Path rootDir, boolean portalMode, boolean production,
-                         boolean doHtml, boolean doIndex, boolean doEmbedding) throws IOException {
+                         boolean doHtml, boolean doIndex, boolean doEmbedding, int threads) throws IOException {
         List<Path> projects = portalMode ? findProjects(rootDir) : List.of(rootDir);
         if (projects.isEmpty()) {
             System.err.println("No Docusaurus projects found under " + rootDir);
@@ -133,7 +142,7 @@ public class Main {
 
         if (doHtml) {
             for (Path p : projects) {
-                build(p.resolve("docs"), p.resolve("static-html"), production);
+                build(p.resolve("docs"), p.resolve("static-html"), production, threads);
             }
         }
         if (doIndex) {
@@ -185,13 +194,13 @@ public class Main {
      * @throws Exception if an I/O error occurs
      */
     private static void runSingle(Path projectDir, int port, boolean serve,
-                                   boolean production) throws Exception {
+                                   boolean production, int threads) throws Exception {
         Path docsDir  = projectDir.resolve("docs");
         Path outDir   = projectDir.resolve("static-html");
         Path indexDir = projectDir.resolve("search-index");
 
         System.out.println("project : " + projectDir);
-        build(docsDir, outDir, production);
+        build(docsDir, outDir, production, threads);
 
         if (serve) {
             // Build search index only when serving; build-only mode does not need it.
@@ -201,7 +210,7 @@ public class Main {
             // "Rebuild" regenerates everything: static HTML, the full-text index (all locales),
             // and the embedding vectors — matching the portal's "All" action.
             Runnable rebuild = () -> {
-                build(docsDir, outDir, false);
+                build(docsDir, outDir, false, threads);
                 reindexAll(projectDir, false);
                 ensureSemanticVectors(List.of(projectDir));
             };
@@ -220,7 +229,7 @@ public class Main {
      * @throws Exception if an I/O error occurs
      */
     private static void runPortal(Path worksDir, int port, boolean serve,
-                                   boolean production) throws Exception {
+                                   boolean production, int threads) throws Exception {
         List<Path> projects = findProjects(worksDir);
         if (projects.isEmpty()) {
             System.err.println("No Docusaurus projects found under " + worksDir);
@@ -239,7 +248,7 @@ public class Main {
             Path staticDir = p.resolve("static-html");
             Path indexDir  = p.resolve("search-index");
             if (!Files.isDirectory(staticDir)) {
-                build(p.resolve("docs"), staticDir, production);
+                build(p.resolve("docs"), staticDir, production, threads);
             }
             if (!Files.isDirectory(indexDir)) {
                 reindexAll(p, production);
@@ -256,7 +265,7 @@ public class Main {
             // vectors take effect on the next restart; after the first build they are cached, so
             // subsequent restarts bind and have semantic search ready quickly.
             SemanticIndex semanticIndex = SemanticIndex.load(projects, SEMANTIC_TOP_K);
-            new PortalServer(worksDir, projects, port, production, semanticIndex).start();
+            new PortalServer(worksDir, projects, port, production, semanticIndex, threads).start();
             System.out.println("Portal serving on http://0.0.0.0:" + port
                     + "  (full-text ready; refreshing semantic vectors, effective next restart...)");
             ensureSemanticVectors(projects);
@@ -316,14 +325,21 @@ public class Main {
         return result;
     }
 
+    /** Builds with {@link SiteBuilder}'s own default page-conversion parallelism. */
+    static void build(Path docsDir, Path outDir, boolean production) {
+        build(docsDir, outDir, production, 0);
+    }
+
     /**
      * Builds static HTML from Markdown files in the docs directory.
      *
      * @param docsDir    source directory containing Markdown files
      * @param outDir     target directory for generated HTML files
      * @param production whether to build in production mode
+     * @param threads    page-conversion parallelism (see {@link SiteBuilder#threads}); {@code <= 0}
+     *                   keeps {@link SiteBuilder}'s own default
      */
-    static void build(Path docsDir, Path outDir, boolean production) {
+    static void build(Path docsDir, Path outDir, boolean production, int threads) {
         try {
             Path projectDir = docsDir.getParent();
             String[] i18n = readI18nConfig(projectDir);
@@ -340,7 +356,9 @@ public class Main {
             List<String> localeList = List.copyOf(availableLocales);
 
             // Build default locale
-            new SiteBuilder(docsDir, outDir, production, defaultLocale, defaultLocale, localeList).build();
+            SiteBuilder defaultBuilder = new SiteBuilder(docsDir, outDir, production, defaultLocale, defaultLocale, localeList);
+            if (threads > 0) defaultBuilder.threads(threads);
+            defaultBuilder.build();
             System.out.println("  build done : " + docsDir);
 
             // Build each alternate locale
@@ -349,7 +367,9 @@ public class Main {
                 Path localeDocs = projectDir.resolve(
                     "i18n/" + locale + "/docusaurus-plugin-content-docs/current");
                 Path localeOut = outDir.resolve(locale);
-                new SiteBuilder(localeDocs, localeOut, production, locale, defaultLocale, localeList).build();
+                SiteBuilder localeBuilder = new SiteBuilder(localeDocs, localeOut, production, locale, defaultLocale, localeList);
+                if (threads > 0) localeBuilder.threads(threads);
+                localeBuilder.build();
                 System.out.println("  build done : " + localeDocs);
             }
         } catch (IOException e) {

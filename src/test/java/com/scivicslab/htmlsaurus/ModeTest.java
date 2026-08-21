@@ -245,7 +245,7 @@ class ModeTest {
                 };
                 """);
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
-            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null, 0);
             HttpServer http = ps.start();
             try {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
@@ -261,7 +261,7 @@ class ModeTest {
         void devPortalPage_hasBuildButton() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
-            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null, 0);
             HttpServer http = ps.start();
             try {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
@@ -277,7 +277,7 @@ class ModeTest {
         void devPortalPage_hasThemeAndScanWorksDir() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
-            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null, 0);
             HttpServer http = ps.start();
             try {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
@@ -298,7 +298,7 @@ class ModeTest {
             for (Path p : List.of(proj1, proj2)) {
                 Main.build(p.resolve("docs"), p.resolve("static-html"), false);
             }
-            PortalServer ps = new PortalServer(tempDir, List.of(proj1, proj2), 0, false, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj1, proj2), 0, false, null, 0);
             HttpServer http = ps.start();
             try {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
@@ -316,7 +316,7 @@ class ModeTest {
         void productionPortalPage_hidesDevControls() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), true);
-            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, true, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, true, null, 0);
             HttpServer http = ps.start();
             try {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
@@ -337,7 +337,7 @@ class ModeTest {
         void portalPage_projectLink_loadsInRightPane() throws Exception {
             Path proj = createProject("myproj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
-            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null, 0);
             HttpServer http = ps.start();
             try {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
@@ -364,7 +364,7 @@ class ModeTest {
         void portalPage_servedPages_allowSameOriginFraming() throws Exception {
             Path proj = createProject("myproj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
-            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null, 0);
             HttpServer http = ps.start();
             try {
                 int port = http.getAddress().getPort();
@@ -398,7 +398,7 @@ class ModeTest {
             Main.build(proj1.resolve("docs"), proj1.resolve("static-html"), false);
             Main.reindex(proj1.resolve("docs"), proj1.resolve("search-index"));
 
-            PortalServer ps = new PortalServer(tempDir, List.of(proj1), 0, false, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj1), 0, false, null, 0);
             HttpServer http = ps.start();
             int port = http.getAddress().getPort();
 
@@ -511,7 +511,7 @@ class ModeTest {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), true);
             Main.reindexAll(proj, true);
-            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, true, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, true, null, 0);
             HttpServer http = ps.start();
             try {
                 var client = HttpClient.newHttpClient();
@@ -558,7 +558,7 @@ class ModeTest {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), true);
             Main.reindexAll(proj, true);
-            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, true, null);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, true, null, 0);
             HttpServer http = ps.start();
             try {
                 var client = HttpClient.newHttpClient();

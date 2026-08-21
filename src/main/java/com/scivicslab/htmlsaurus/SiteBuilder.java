@@ -7,7 +7,11 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+
+import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.pojoactor.core.ActorSystem;
 
 /**
  * Converts a Docusaurus-compatible {@code docs/} directory into a static HTML site.
@@ -59,8 +63,21 @@ public class SiteBuilder {
 
     private final PageRenderer pageRenderer;
 
+    /** Default parallelism of {@link #build}'s page-conversion {@code ActorSystem}, overridable
+     *  via {@link #threads}/{@code --threads} -- deliberately not {@code Runtime.availableProcessors()}
+     *  (see {@code BuildParallelization_260822_oo01}: a shared machine should not be saturated by
+     *  a default no one chose). */
+    private static final int DEFAULT_BUILD_THREADS = 4;
+    private int buildThreads = DEFAULT_BUILD_THREADS;
+
     /** Holds metadata about each built page for feed and sitemap generation. */
     record PageInfo(String title, String absoluteUrl, String summary, String isoDate) {}
+
+    /** Overrides how many threads {@link #build}'s page-conversion {@code ActorSystem} uses (default {@value #DEFAULT_BUILD_THREADS}). */
+    public SiteBuilder threads(int n) {
+        this.buildThreads = n;
+        return this;
+    }
 
     /**
      * Creates a SiteBuilder using the parent directory name as the site name (development mode, no i18n).
@@ -240,14 +257,20 @@ public class SiteBuilder {
             }
         });
 
-        // Convert Markdown files in parallel; output directories already exist from above.
-        mdFiles.parallelStream().forEach(pair -> {
-            try {
-                convertPage(pair[0], pair[1], root, pageOrder);
-            } catch (IOException e) {
-                throw new java.io.UncheckedIOException(e);
+        // Convert Markdown files in parallel: one actor per file, bounded by buildThreads
+        // (ActorSystem's default ManagedThreadPool -- see BuildParallelization_260822_oo01).
+        ActorSystem buildSystem = new ActorSystem("site-builder", buildThreads);
+        try {
+            List<CompletableFuture<Void>> futures = new ArrayList<>(mdFiles.size());
+            for (Path[] pair : mdFiles) {
+                ActorRef<PageConverter> ref = buildSystem.actorOf(
+                        pair[1].toString(), new PageConverter(this, pair[0], pair[1], root, pageOrder));
+                futures.add(ref.tell(PageConverter::convert));
             }
-        });
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        } finally {
+            buildSystem.terminate();
+        }
 
         // In production mode, non-same-name MD files produce dir/file/index.html,
         // one level deeper than the source directory.  Copy sibling assets (images etc.)
@@ -331,6 +354,33 @@ public class SiteBuilder {
 
         if (!blogPosts.isEmpty()) {
             blogBuilder.buildBlog(blogPosts, blogByTag, root);
+        }
+    }
+
+    /** One Markdown file's conversion, run as its own actor so {@link #build}'s fan-out is bounded
+     *  by the {@code ActorSystem}'s {@link #buildThreads}-sized pool instead of a raw {@code parallelStream()}
+     *  riding the JVM-wide shared {@code ForkJoinPool.commonPool()} -- see {@code BuildParallelization_260822_oo01}. */
+    private static final class PageConverter {
+        private final SiteBuilder builder;
+        private final Path mdFile;
+        private final Path rel;
+        private final SiteNode root;
+        private final List<SiteNode> pageOrder;
+
+        PageConverter(SiteBuilder builder, Path mdFile, Path rel, SiteNode root, List<SiteNode> pageOrder) {
+            this.builder = builder;
+            this.mdFile = mdFile;
+            this.rel = rel;
+            this.root = root;
+            this.pageOrder = pageOrder;
+        }
+
+        void convert() {
+            try {
+                builder.convertPage(mdFile, rel, root, pageOrder);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
     }
 

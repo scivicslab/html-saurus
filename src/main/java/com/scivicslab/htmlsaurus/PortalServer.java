@@ -42,6 +42,9 @@ public class PortalServer {
     private final Map<String, String> searcherLocales = new LinkedHashMap<>();
     private final int port;
     private final boolean production;
+    /** Page-conversion parallelism passed to every {@link Main#build} call this server makes
+     *  (see {@code BuildParallelization_260822_oo01}); {@code <= 0} keeps {@link SiteBuilder}'s own default. */
+    private final int threads;
     private final Path worksDir;
     private McpHandler mcpHandler;
     /** Precomputed semantic (embedding-based) related docs: portalPath -> list of {path,title,summary}. */
@@ -104,12 +107,15 @@ public class PortalServer {
      * @param projectDirs list of Docusaurus project root directories to serve
      * @param port        HTTP port to listen on (0 for a system-assigned port)
      * @param production  {@code true} to disable the {@code /api/build-all} endpoint
+     * @param threads     page-conversion parallelism for every build this server triggers; {@code <= 0}
+     *                    keeps {@link SiteBuilder}'s own default
      */
     public PortalServer(Path worksDir, List<Path> projectDirs, int port, boolean production,
-                        SemanticIndex semanticIndex) {
+                        SemanticIndex semanticIndex, int threads) {
         this.worksDir = worksDir;
         this.port = port;
         this.production = production;
+        this.threads = threads;
         this.projects = new ArrayList<>();
         this.projectMap = new LinkedHashMap<>();
         for (Path p : projectDirs) {
@@ -518,7 +524,7 @@ public class PortalServer {
         for (Path p : found) {
             String name = p.getFileName().toString();
             if (!projectMap.containsKey(name)) {
-                Main.build(p.resolve("docs"), p.resolve("static-html"), production);
+                Main.build(p.resolve("docs"), p.resolve("static-html"), production, threads);
                 Main.reindex(p.resolve("docs"), p.resolve("search-index"));
                 String[] i18n = Main.readI18nConfig(p);
                 String defaultLocale = (i18n.length > 0 && !i18n[0].isBlank()) ? i18n[0] : "ja";
@@ -844,11 +850,11 @@ public class PortalServer {
      */
     private void runBuildStage(Project proj, String stage) throws Exception {
         switch (stage) {
-            case "html" -> Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
+            case "html" -> Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false, threads);
             case "index" -> Main.reindexAll(proj.projectDir(), false);
             case "embedding" -> Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
             case "all" -> {
-                Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false);
+                Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false, threads);
                 Main.reindexAll(proj.projectDir(), false);
                 Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
             }
