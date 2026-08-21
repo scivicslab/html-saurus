@@ -396,3 +396,9 @@ main details.inline-translation > summary .translation-controls button:hover { b
   min-width: 2rem; height: 2rem; padding: 0 0.6rem;
   color: var(--c-border); border: 1px solid var(--c-border);
   border-radius: 4px; font-size: 0.875rem; cursor: default; }
+
+/* nav.side is a flex item inside .content-wrap (display: flex); hiding it lets
+   main (flex: 1) expand into the freed width with no extra margin/width rule needed. */
+@media print {
+  nav.side { display: none; }
+}
