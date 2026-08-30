@@ -2235,8 +2235,6 @@ public class PortalServer {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
-        String lang = queryParam(ex, "lang");
-        if (lang.isBlank()) lang = "ja";
         String text = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8).strip();
 
         List<Map<String, String>> hits;
@@ -2246,24 +2244,9 @@ public class PortalServer {
             System.err.println("find-related error: " + e.getMessage());
             hits = List.of();
         }
-
-        var sb = new StringBuilder("[");
-        boolean first = true;
-        for (var hit : hits) {
-            if (!first) sb.append(",");
-            first = false;
-            sb.append("{")
-              .append("\"title\":").append(jsonStr(hit.get("title"))).append(",")
-              .append("\"path\":").append(jsonStr(hit.get("path"))).append(",")
-              .append("\"summary\":").append(jsonStr(hit.get("summary")))
-              .append("}");
-        }
-        sb.append("]");
-        byte[] body = sb.toString().getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.sendResponseHeaders(200, body.length);
-        try (var out = ex.getResponseBody()) { out.write(body); }
+        // The same writer /api/related and /api/search-semantic use, so all three routes answer
+        // with one hit shape.
+        RelatedDocsView.writeJson(ex, hits);
     }
 
     /**
@@ -2691,10 +2674,17 @@ public class PortalServer {
             String desc = doc.get("description");
             String snippet = (desc != null && !desc.isBlank()) ? desc
                 : (body.length() > 250 ? body.substring(0, 250) + "…" : body);
+            // Same key set as globalSearch's hits: a caller that reads one route's results must be
+            // able to read another's the same way — in particular "id" and "srcPath", without which
+            // a hit cannot be resolved or its source file opened.
             results.add(Map.of(
-                "title",   doc.get("title") != null ? doc.get("title") : "",
-                "path",    "/" + projectName + path,
-                "summary", snippet
+                "project",  projectName,
+                "id",       doc.get("doc_id")   != null ? doc.get("doc_id")   : "",
+                "title",    doc.get("title")    != null ? doc.get("title")    : "",
+                "pagePath", path,
+                "path",     "/" + projectName + path,
+                "srcPath",  doc.get("src_path") != null ? doc.get("src_path") : "",
+                "summary",  snippet
             ));
         }
         return results;
