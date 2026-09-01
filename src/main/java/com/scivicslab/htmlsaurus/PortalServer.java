@@ -391,6 +391,14 @@ public class PortalServer {
         }
 
         // Import tab: request an in-progress PDF import job stop before its next page (non-production only).
+        if (!production && path.equals("/api/import/pdf/jobs")) {
+            handleImportPdfJobs(ex);
+            return;
+        }
+        if (!production && path.equals("/api/import/pdf/clear")) {
+            handleImportPdfClear(ex);
+            return;
+        }
         if (!production && path.equals("/api/import/pdf/stop")) {
             handleImportPdfStop(ex);
             return;
@@ -999,6 +1007,12 @@ public class PortalServer {
                    arxiv, ... — doesn't mean adding more sub-tabs) followed by one panel per type,
                    styled after quarkus-english-drill's ingest_form.html. */
                 .import-panel[hidden] { display: none; }
+
+            .import-job { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0;
+                          border-top: 1px solid var(--border, #333); font-size: 0.8rem; }
+            .import-job-label { flex: 0 0 auto; font-weight: 600; max-width: 12rem;
+                                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .import-job-line { flex: 1 1 auto; color: var(--text-secondary, #aaa); }
                 #tab-import .hint { font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 0.6rem; }
                 #tab-import .card { border: 1px solid var(--border-color); border-radius: 8px;
                                      padding: 0.75rem 0.9rem; background: var(--bg-tertiary); }
@@ -1209,7 +1223,6 @@ public class PortalServer {
                   </div>
                   <div class="btn-row">
                     <button class="btn" type="button" id="import-pdf-start">OCR &amp; save</button>
-                    <button class="btn" type="button" id="import-pdf-stop" disabled>Stop</button>
                   </div>
                 </div>
               </section>
@@ -1240,6 +1253,7 @@ public class PortalServer {
               </section>
 
               <p class="hint" id="import-progress" style="white-space:pre-line;"></p>
+              <div id="import-jobs"></div>
               </div>
             """);
         }
@@ -1440,8 +1454,6 @@ public class PortalServer {
             }
             async function startPdfImport() {
               const progress = document.getElementById('import-progress');
-              const btn = document.getElementById('import-pdf-start');
-              const stopBtn = document.getElementById('import-pdf-stop');
               const path = importField('import-pdf-path');
               if (!path) { progress.textContent = 'Give a PDF file path first.'; return; }
               const body = new URLSearchParams();
@@ -1452,70 +1464,86 @@ public class PortalServer {
               body.set('pagesPerFile', importField('import-pdf-pages-per-file'));
               const title = importField('import-pdf-title');
               if (title) body.set('title', title);
-              btn.disabled = true;
               progress.textContent = 'Starting...';
               try {
-                // The job runs entirely server-side once started (see PdfImportJobActor) — this
-                // page only polls for progress, so closing or reloading it does not stop the job.
+                // The Start button is deliberately left enabled: one import runs on an actor of its
+                // own, so several can run at once and the point of starting one is to walk away and
+                // start the next.
                 const startResp = await fetch('/api/import/pdf/start', {
                   method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
                 const startJson = await startResp.json();
                 if (!startResp.ok) {
                   progress.textContent = 'Error: ' + (startJson.error || 'unknown');
-                  btn.disabled = false;
                   return;
                 }
-                if (stopBtn) { stopBtn.disabled = false; stopBtn.dataset.jobId = startJson.jobId; }
-                try { sessionStorage.setItem('html-saurus-active-pdf-job', startJson.jobId); } catch (e) {}
-                pollPdfImportStatus(startJson.jobId, progress, btn, stopBtn);
+                progress.textContent = 'Started ' + startJson.totalPages + ' page(s). Queue another whenever you like.';
+                const pathField = document.getElementById('import-pdf-path');
+                if (pathField) pathField.value = '';
+                refreshImportJobs();
               } catch (e) {
                 progress.textContent = 'Error: ' + e.message;
-                btn.disabled = false;
               }
             }
-            // The active jobId is kept in sessionStorage (not just a JS variable) so that reloading
-            // the page — which does not stop the job, see PdfImportJobActor — can resume polling
-            // and show where the job actually is, instead of a blank form as if nothing were running.
-            function pollPdfImportStatus(jobId, progress, btn, stopBtn) {
-              const finish = function(text) {
-                progress.textContent = text;
-                btn.disabled = false;
-                if (stopBtn) stopBtn.disabled = true;
-                try { sessionStorage.removeItem('html-saurus-active-pdf-job'); } catch (e) {}
-              };
-              const tick = async function() {
-                let s;
-                try {
-                  const r = await fetch('/api/import/pdf/status?jobId=' + encodeURIComponent(jobId));
-                  s = await r.json();
-                  if (!r.ok) { finish('Error: ' + (s.error || 'unknown')); return; }
-                } catch (e) {
-                  finish('Error: ' + e.message);
-                  return;
-                }
-                if (s.state === 'running') {
-                  progress.textContent = 'OCR: page ' + s.currentPage + ' / ' + s.totalPages
-                    + (s.lastFile ? ' — last wrote ' + s.lastFile : '') + '...';
-                  setTimeout(tick, 2000);
-                } else if (s.state === 'done') {
-                  finish('Done: ' + s.totalPages + ' page(s) OCR complete, ' + s.totalImages + ' image(s) extracted.');
-                } else if (s.state === 'stopped') {
-                  finish('Stopped at page ' + s.currentPage + ' / ' + s.totalPages + '. Already-written batches are kept.');
-                } else {
-                  finish('Error: ' + (s.error || 'unknown'));
-                }
-              };
-              tick();
+            function importJobLine(j) {
+              if (j.state === 'running') {
+                return 'OCR: page ' + j.currentPage + ' / ' + j.totalPages
+                  + (j.lastFile ? ' \u2014 last wrote ' + j.lastFile : '') + '...';
+              }
+              if (j.state === 'done') {
+                return 'Done: ' + j.totalPages + ' page(s), ' + j.totalImages + ' image(s).';
+              }
+              if (j.state === 'stopped') {
+                return 'Stopped at page ' + j.currentPage + ' / ' + j.totalPages
+                  + '. Already-written batches are kept.';
+              }
+              return 'Error: ' + (j.error || 'unknown');
             }
-            async function stopPdfImport() {
-              const stopBtn = document.getElementById('import-pdf-stop');
-              const jobId = stopBtn ? stopBtn.dataset.jobId : null;
-              if (!jobId) return;
-              stopBtn.disabled = true;
-              await fetch('/api/import/pdf/stop', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({jobId: jobId})
+            function renderImportJobs(jobs) {
+              const box = document.getElementById('import-jobs');
+              if (!box) return false;
+              box.innerHTML = '';
+              let anyRunning = false;
+              jobs.forEach(function (j) {
+                if (j.state === 'running') anyRunning = true;
+                const row = document.createElement('div');
+                row.className = 'import-job';
+                const name = document.createElement('span');
+                name.className = 'import-job-label';
+                name.textContent = j.label;
+                const line = document.createElement('span');
+                line.className = 'import-job-line';
+                line.textContent = importJobLine(j);
+                const btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.type = 'button';
+                btn.textContent = j.state === 'running' ? 'Stop' : 'Clear';
+                btn.addEventListener('click', function () {
+                  btn.disabled = true;
+                  const url = j.state === 'running' ? '/api/import/pdf/stop' : '/api/import/pdf/clear';
+                  fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                              body: JSON.stringify({jobId: j.jobId})})
+                    .then(refreshImportJobs).catch(refreshImportJobs);
+                });
+                row.appendChild(name);
+                row.appendChild(line);
+                row.appendChild(btn);
+                box.appendChild(row);
               });
+              return anyRunning;
+            }
+            var importJobsTimer = null;
+            async function refreshImportJobs() {
+              let jobs;
+              try {
+                const r = await fetch('/api/import/pdf/jobs');
+                jobs = await r.json();
+              } catch (e) {
+                return;   // the portal may be restarting; the next tick tries again
+              }
+              const anyRunning = renderImportJobs(jobs);
+              if (importJobsTimer) { clearTimeout(importJobsTimer); importJobsTimer = null; }
+              // Poll while something is running; otherwise stop, and let the next action refresh.
+              if (anyRunning) importJobsTimer = setTimeout(refreshImportJobs, 2000);
             }
             async function startWordImport() {
               const progress = document.getElementById('import-progress');
@@ -1545,20 +1573,11 @@ public class PortalServer {
             (function () {
               var pdfBtn = document.getElementById('import-pdf-start');
               if (pdfBtn) pdfBtn.addEventListener('click', startPdfImport);
-              var pdfStopBtn = document.getElementById('import-pdf-stop');
-              if (pdfStopBtn) pdfStopBtn.addEventListener('click', stopPdfImport);
               var wordBtn = document.getElementById('import-word-start');
               if (wordBtn) wordBtn.addEventListener('click', startWordImport);
-              // Resume polling a job that was still running when this page was loaded/reloaded.
-              var activeJobId;
-              try { activeJobId = sessionStorage.getItem('html-saurus-active-pdf-job'); } catch (e) {}
-              if (activeJobId && pdfBtn) {
-                var progress = document.getElementById('import-progress');
-                pdfBtn.disabled = true;
-                if (pdfStopBtn) { pdfStopBtn.disabled = false; pdfStopBtn.dataset.jobId = activeJobId; }
-                progress.textContent = 'Resuming job in progress...';
-                pollPdfImportStatus(activeJobId, progress, pdfBtn, pdfStopBtn);
-              }
+              // Nothing to resume: the jobs are the server's, so listing them is enough. A reload
+              // shows whatever is running, including imports this browser never started.
+              if (pdfBtn) refreshImportJobs();
             })();
             async function doReindexAll(btn) {
               const status = document.getElementById('reindex-all-status');
@@ -2390,6 +2409,52 @@ public class PortalServer {
             respond(ex, 404, "application/json", "{\"error\":\"unknown or expired jobId\"}");
             return;
         }
+        respond(ex, 200, "application/json", importJobJson(job));
+    }
+
+
+    /**
+     * Handles {@code GET /api/import/pdf/jobs}. Every import this process is holding, newest
+     * first, so the Import screen can show them all instead of one at a time — the point of
+     * starting a job being to walk away and start the next one.
+     */
+    private void handleImportPdfJobs(HttpExchange ex) throws IOException {
+        if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        for (com.scivicslab.jobregistry.Job<?> job : importJobs.recent()) {
+            if (!first) sb.append(",");
+            first = false;
+            sb.append(importJobJson(job));
+        }
+        sb.append("]");
+        respond(ex, 200, "application/json", sb.toString());
+    }
+
+    /**
+     * Handles {@code POST /api/import/pdf/clear}. JSON body {@code {"jobId":"..."}}. Forgets a
+     * finished job so it leaves the list; a running job is refused.
+     */
+    private void handleImportPdfClear(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, Object> body = McpJsonParser.parseObject(
+            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String jobId = body.get("jobId") instanceof String s ? s : null;
+        if (jobId == null || !importJobs.remove(jobId)) {
+            respond(ex, 409, "application/json", "{\"error\":\"still running, or no such job\"}");
+            return;
+        }
+        respond(ex, 200, "application/json", "{\"status\":\"ok\"}");
+    }
+
+    /** One import as the Import screen reads it. Shared by the list and the single-job status. */
+    private String importJobJson(com.scivicslab.jobregistry.Job<?> job) {
         PdfImportJob.Result r = job.result() instanceof PdfImportJob.Result got
                 ? got : new PdfImportJob.Result("", 0);
         // The browser's vocabulary predates the registry's: a cancelled job reads as "stopped", and
@@ -2400,12 +2465,13 @@ public class PortalServer {
             case ERROR -> "error";
             case CANCELLED -> "stopped";
         };
-        respond(ex, 200, "application/json",
-            "{\"currentPage\":" + job.done() + ",\"totalPages\":" + job.total()
+        return "{\"jobId\":" + jsonStr(job.id())
+            + ",\"label\":" + jsonStr(job.label())
+            + ",\"currentPage\":" + job.done() + ",\"totalPages\":" + job.total()
             + ",\"lastFile\":" + jsonStr(r.lastFile()) + ",\"totalImages\":" + r.totalImages()
             + ",\"state\":" + jsonStr(state)
             + ",\"error\":" + (job.state() == com.scivicslab.jobregistry.Job.State.ERROR
-                                 ? jsonStr(job.error()) : "null") + "}");
+                                 ? jsonStr(job.error()) : "null") + "}";
     }
 
     /**
