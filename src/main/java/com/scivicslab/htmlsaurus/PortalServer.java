@@ -1122,7 +1122,7 @@ public class PortalServer {
               <div class="tab-bar" role="tablist">
                 <button class="tab-btn active" id="tab-btn-projects" data-tab="projects" onclick="selectTab('projects')">Projects</button>
                 <button class="tab-btn" id="tab-btn-import" data-tab="import" onclick="selectTab('import')">Import</button>
-                <button class="tab-btn" id="tab-btn-activity" data-tab="activity" onclick="selectTab('activity')">Activity</button>
+                <button class="tab-btn" id="tab-btn-batch" data-tab="batch" onclick="selectTab('batch')">Batch Job</button>
               </div>
               <div class="tab-panel" id="tab-projects">
               <h2>Search</h2>
@@ -1269,13 +1269,13 @@ public class PortalServer {
               <p class="hint" id="import-progress" style="white-space:pre-line;"></p>
               </div>
 
-              <div class="tab-panel" id="tab-activity" hidden>
-              <h2>Activity</h2>
+              <div class="tab-panel" id="tab-batch" hidden>
+              <h2>Batch Job</h2>
               <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.6rem 0 0.75rem;">
                 Long-running work this server is doing, and what it did recently. Each one runs on
                 its own, so starting another does not wait for these.</p>
               <div id="import-jobs"></div>
-              <p class="hint" id="activity-empty">Nothing running.</p>
+              <p class="hint" id="batch-empty">Nothing running.</p>
               </div>
             """);
         }
@@ -1399,9 +1399,14 @@ public class PortalServer {
               document.querySelectorAll('.tab-panel').forEach(function(p) { p.hidden = (p.id !== 'tab-' + name); });
               document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === name); });
               localStorage.setItem('portal-active-tab', name);
-              if (name === 'activity' && typeof refreshImportJobs === 'function') refreshImportJobs();
+              if (name === 'batch' && typeof refreshImportJobs === 'function') refreshImportJobs();
             }
-            selectTab(localStorage.getItem('portal-active-tab') || 'projects');
+            // A name stored before a tab was renamed matches no panel, which would hide all of
+            // them and leave the sidebar blank.
+            (function () {
+              var stored = localStorage.getItem('portal-active-tab') || 'projects';
+              selectTab(document.getElementById('tab-' + stored) ? stored : 'projects');
+            })();
             (function () {
               // Import type picker: a dropdown rather than sub-tabs, since more types (web,
               // video, arxiv, ...) are expected later — a dropdown scales, a row of tabs doesn't.
@@ -1499,7 +1504,7 @@ public class PortalServer {
                   progress.textContent = 'Error: ' + (startJson.error || 'unknown');
                   return;
                 }
-                progress.textContent = 'Started ' + startJson.totalPages + ' page(s). It is listed under Activity; queue another whenever you like.';
+                progress.textContent = 'Started ' + startJson.totalPages + ' page(s). It is listed under Batch Job; queue another whenever you like.';
                 const pathField = document.getElementById('import-pdf-path');
                 if (pathField) pathField.value = '';
                 refreshImportJobs();
@@ -1526,7 +1531,7 @@ public class PortalServer {
               if (!box) return false;
               box.innerHTML = '';
               let anyRunning = false;
-              const empty = document.getElementById('activity-empty');
+              const empty = document.getElementById('batch-empty');
               if (empty) empty.hidden = jobs.length > 0;
               jobs.forEach(function (j) {
                 if (j.state === 'running') anyRunning = true;
@@ -1555,10 +1560,10 @@ public class PortalServer {
                 box.appendChild(row);
               });
               // The count on the tab is what makes a background import visible from any tab.
-              const tab = document.getElementById('tab-btn-activity');
+              const tab = document.getElementById('tab-btn-batch');
               if (tab) {
                 const running = jobs.filter(function (j) { return j.state === 'running'; }).length;
-                tab.textContent = running > 0 ? 'Activity (' + running + ')' : 'Activity';
+                tab.textContent = running > 0 ? 'Batch Job (' + running + ')' : 'Batch Job';
               }
               return anyRunning;
             }
