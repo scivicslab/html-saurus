@@ -193,11 +193,6 @@ class PageRenderer {
             // (about 2ms per document), while All also runs the Lucene index and re-sends every
             // document to the embedding server. Same shape as the portal's per-project row, so the
             // two screens are operated the same way (FastBuild_260901_oo01).
-            sb.append("  <select id=\"rebuild-stage\" title=\"What to rebuild\">\n");
-            sb.append("    <option value=\"html\">HTML</option>\n");
-            sb.append("    <option value=\"all\">All</option>\n");
-            sb.append("  </select>\n");
-            sb.append("  <button id=\"rebuild-btn\" title=\"Rebuild this project\">&#x21BB; Rebuild</button>\n");
             sb.append("  <select id=\"theme-sel\">\n");
             sb.append("    <option value=\"dark-catppuccin\">Dark Catppuccin</option>\n");
             sb.append("    <option value=\"dark-nord\">Dark Nord</option>\n");
@@ -241,16 +236,28 @@ class PageRenderer {
             }
             sb.append("    </div>\n  </div>\n");
         }
-        sb.append("  <div id=\"search-wrap\">\n");
-        sb.append("    <input id=\"search-input\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\">\n");
-        sb.append("    <div id=\"search-results\"></div>\n");
-        sb.append("  </div>\n");
         sb.append("</header>\n");
         sb.append("<div class=\"sidebar-overlay\" id=\"sidebar-overlay\"></div>\n");
 
         sb.append("<div class=\"content-wrap\">\n");
 
         sb.append("<nav class=\"side\" id=\"sidebar\">\n");
+        // The rebuild controls and the search box live here rather than in the top bar: the bar
+        // also carries one link per top-level section, so on a project with several of them these
+        // were pushed off the right edge and became unreachable.
+        if (!production) {
+            sb.append("  <div class=\"side-tools\">\n");
+            sb.append("    <select id=\"rebuild-stage\" title=\"What to rebuild\">\n");
+            sb.append("      <option value=\"html\">HTML</option>\n");
+            sb.append("      <option value=\"all\">All</option>\n");
+            sb.append("    </select>\n");
+            sb.append("    <button id=\"rebuild-btn\" title=\"Rebuild this project\">&#x21BB; Rebuild</button>\n");
+            sb.append("  </div>\n");
+        }
+        sb.append("  <div id=\"search-wrap\">\n");
+        sb.append("    <input id=\"search-input\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\">\n");
+        sb.append("    <div id=\"search-results\"></div>\n");
+        sb.append("  </div>\n");
         sb.append("  <div class=\"mobile-top-nav\">\n");
         for (SiteNode section : root.children()) {
             if (!section.isDir()) continue;

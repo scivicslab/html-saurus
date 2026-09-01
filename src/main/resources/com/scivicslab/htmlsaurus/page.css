@@ -58,13 +58,15 @@ header nav.top a { display: flex; align-items: center; padding: 0 1rem;
 header nav.top a:hover { color: #fff; }
 header nav.top a.active { color: #fff; border-bottom-color: var(--c-nav-accent); }
 /* ---- Theme switcher ---- */
-/* The auto margin sits on the stage select, not the button: the select comes first in the
-   markup, so putting it on the button would split the pair apart. */
-#rebuild-stage { margin-left: auto; background: transparent; color: #ccc;
+/* Both controls sit in .side-tools at the top of the sidebar, not in the top bar, so nothing
+   pushes them anywhere; the row itself is the layout. */
+.side-tools { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.5rem; }
+.side-tools #rebuild-btn { flex: 1 1 auto; }
+#rebuild-stage { background: transparent; color: #ccc;
                  border: 1px solid #666; border-radius: 4px; padding: 3px 6px;
                  font-size: 0.8rem; cursor: pointer; }
 #rebuild-stage option { background: #2c2c2c; color: #fff; }
-#rebuild-btn { margin-left: 0.35rem; background: transparent; border: 1px solid #555;
+#rebuild-btn { background: transparent; border: 1px solid #555;
                color: #ccc; border-radius: 4px; padding: 0.2rem 0.6rem;
                font-size: 0.8rem; cursor: pointer; white-space: nowrap; }
 #rebuild-btn:hover:not(:disabled) { background: rgba(255,255,255,0.1); color: #fff; }
@@ -104,12 +106,14 @@ header nav.top .nav-more-btn.active { color: #fff; border-bottom-color: var(--c-
 .nav-more-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
 .nav-more-item.active { color: var(--c-nav-accent, #25c2a0); font-weight: 600; }
 /* ---- Search ---- */
-#search-wrap { position: relative; margin-left: 1rem; }
+#search-wrap { position: relative; margin-bottom: 0.75rem; }
 #search-input { background: rgba(255,255,255,0.12); border: 1px solid #666; border-radius: 4px;
-                padding: 4px 10px; color: #fff; font-size: 0.875rem; width: 200px; outline: none; }
+                padding: 4px 10px; color: #fff; font-size: 0.875rem; width: 100%; outline: none; }
 #search-input::placeholder { color: #aaa; }
-#search-input:focus { background: rgba(255,255,255,0.22); border-color: #aaa; width: 260px; transition: width 0.2s; }
-#search-results { position: absolute; top: calc(100% + 6px); right: 0; width: 400px;
+#search-input:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
+/* Anchored to the left edge: the sidebar is 280px wide, so a right-anchored panel would
+   hang off the screen. Overlaying the document pane is what the z-index is for. */
+#search-results { position: absolute; top: calc(100% + 6px); left: 0; width: 400px;
                   background: var(--c-bg); border: 1px solid var(--c-border); border-radius: 6px;
                   box-shadow: 0 4px 20px rgba(0,0,0,0.18); z-index: 200;
                   display: none; max-height: 500px; overflow-y: auto; }
@@ -179,18 +183,13 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
 @media (max-width: 900px) {
   .menu-toggle { display: flex; }
   header nav.top { display: none; }
-  #rebuild-stage { display: none; }
-  #rebuild-btn { display: none; }
   #theme-sel { display: none; }
   .lang-dropdown { display: none; }
-  #search-wrap { margin-left: auto; }
   nav.side { position: fixed; left: -290px; top: 60px; width: 280px; height: calc(100vh - 60px);
              z-index: 200; overflow-y: auto; transition: left 0.25s ease;
              border-right: 1px solid var(--c-border); box-shadow: none; }
   nav.side.open { left: 0; box-shadow: 4px 0 20px rgba(0,0,0,0.2); }
   main { max-width: 100%; padding: 1.5rem; }
-  #search-input { width: 160px; }
-  #search-input:focus { width: 200px; }
   #search-results { width: 320px; }
   .mobile-top-nav { display: block; border-bottom: 1px solid var(--c-border);
                    padding: 0.5rem 0 0.75rem; margin-bottom: 0.5rem; }
@@ -210,10 +209,7 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
   header { padding: 0 0.75rem; gap: 0; }
   header .site-title { font-size: 0.95rem; margin-right: 0.5rem; }
   header nav.top { display: none; }
-  #search-wrap { margin-left: auto; }
-  #search-input { width: 110px; }
-  #search-input:focus { width: 150px; }
-  #search-results { width: min(90vw, 320px); right: -0.75rem; }
+  #search-results { width: min(90vw, 280px); }
   main { padding: 1rem 0.875rem; }
   main h1 { font-size: 1.5rem; }
   main h2 { font-size: 1.2rem; }
