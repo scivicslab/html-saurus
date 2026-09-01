@@ -62,14 +62,16 @@ header nav.top a.active { color: #fff; border-bottom-color: var(--c-nav-accent);
    pushes them anywhere; the row itself is the layout. */
 .side-tools { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.5rem; }
 .side-tools #rebuild-btn { flex: 1 1 auto; }
-#rebuild-stage { background: transparent; color: #ccc;
-                 border: 1px solid #666; border-radius: 4px; padding: 3px 6px;
+/* Theme variables, not the fixed light-on-dark of the top bar these used to sit in: the sidebar
+   follows the chosen theme, so a light theme would otherwise show pale grey on near-white. */
+#rebuild-stage { background: var(--c-bg); color: var(--c-text);
+                 border: 1px solid var(--c-border); border-radius: 4px; padding: 3px 6px;
                  font-size: 0.8rem; cursor: pointer; }
-#rebuild-stage option { background: #2c2c2c; color: #fff; }
-#rebuild-btn { background: transparent; border: 1px solid #555;
-               color: #ccc; border-radius: 4px; padding: 0.2rem 0.6rem;
+#rebuild-stage option { background: var(--c-bg); color: var(--c-text); }
+#rebuild-btn { background: var(--c-bg); border: 1px solid var(--c-border);
+               color: var(--c-text); border-radius: 4px; padding: 0.2rem 0.6rem;
                font-size: 0.8rem; cursor: pointer; white-space: nowrap; }
-#rebuild-btn:hover:not(:disabled) { background: rgba(255,255,255,0.1); color: #fff; }
+#rebuild-btn:hover:not(:disabled) { background: var(--c-hover); }
 #rebuild-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 #theme-sel { background: transparent; color: #ccc;
              border: 1px solid #666; border-radius: 4px; padding: 3px 6px;
@@ -107,10 +109,11 @@ header nav.top .nav-more-btn.active { color: #fff; border-bottom-color: var(--c-
 .nav-more-item.active { color: var(--c-nav-accent, #25c2a0); font-weight: 600; }
 /* ---- Search ---- */
 #search-wrap { position: relative; margin-bottom: 0.75rem; }
-#search-input { background: rgba(255,255,255,0.12); border: 1px solid #666; border-radius: 4px;
-                padding: 4px 10px; color: #fff; font-size: 0.875rem; width: 100%; outline: none; }
-#search-input::placeholder { color: #aaa; }
-#search-input:focus { background: rgba(255,255,255,0.22); border-color: #aaa; }
+#search-input { background: var(--c-bg); border: 1px solid var(--c-border); border-radius: 4px;
+                padding: 4px 10px; color: var(--c-text); font-size: 0.875rem; width: 100%;
+                outline: none; }
+#search-input::placeholder { color: var(--c-arrow); }
+#search-input:focus { border-color: var(--c-nav-accent); }
 /* Anchored to the left edge: the sidebar is 280px wide, so a right-anchored panel would
    hang off the screen. Overlaying the document pane is what the z-index is for. */
 #search-results { position: absolute; top: calc(100% + 6px); left: 0; width: 400px;
