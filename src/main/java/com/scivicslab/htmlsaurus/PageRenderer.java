@@ -172,7 +172,15 @@ class PageRenderer {
         }
         sb.append("  </nav>\n");
         if (!production) {
-            sb.append("  <button id=\"rebuild-btn\" title=\"Rebuild this project: HTML, search index, and embedding\">&#x21BB; Rebuild</button>\n");
+            // Two stages, not one: HTML alone is what an author presses repeatedly while editing
+            // (about 2ms per document), while All also runs the Lucene index and re-sends every
+            // document to the embedding server. Same shape as the portal's per-project row, so the
+            // two screens are operated the same way (FastBuild_260901_oo01).
+            sb.append("  <select id=\"rebuild-stage\" title=\"What to rebuild\">\n");
+            sb.append("    <option value=\"html\">HTML</option>\n");
+            sb.append("    <option value=\"all\">All</option>\n");
+            sb.append("  </select>\n");
+            sb.append("  <button id=\"rebuild-btn\" title=\"Rebuild this project\">&#x21BB; Rebuild</button>\n");
             sb.append("  <select id=\"theme-sel\">\n");
             sb.append("    <option value=\"dark-catppuccin\">Dark Catppuccin</option>\n");
             sb.append("    <option value=\"dark-nord\">Dark Nord</option>\n");
@@ -325,7 +333,7 @@ class PageRenderer {
         return sb.toString()
             .replace("YADOC_SEARCH_URL", escapeJs(siteRootPrefix + "search"
                 + (isNonDefaultLocale ? "?locale=" + currentLocale : "")))
-            .replace("YADOC_BUILD_URL", escapeJs("/api/build-all/" + siteName))
+            .replace("YADOC_BUILD_SITE", escapeJs(siteName))
             .replace("YADOC_PROJECT", escapeJs(siteName))
             .replace("YADOC_LANG", escapeHtml(langAttr))
             .replace("YADOC_FAVICON", faviconHref);

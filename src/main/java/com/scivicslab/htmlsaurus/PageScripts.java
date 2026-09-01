@@ -103,8 +103,10 @@ class PageScripts {
                 var btn = document.getElementById('rebuild-btn');
                 if (!btn) return;
                 btn.addEventListener('click', function() {
+                  var sel = document.getElementById('rebuild-stage');
+                  var stage = sel ? sel.value : 'html';
                   btn.disabled = true; btn.textContent = 'Building\\u2026';
-                  fetch('YADOC_BUILD_URL', {method: 'POST'})
+                  fetch('/api/build-' + stage + '/' + encodeURIComponent('YADOC_BUILD_SITE'), {method: 'POST'})
                     .then(function(r) { return r.json(); })
                     .then(function(j) {
                       btn.textContent = j.status === 'ok'

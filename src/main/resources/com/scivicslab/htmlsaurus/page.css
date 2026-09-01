@@ -58,7 +58,13 @@ header nav.top a { display: flex; align-items: center; padding: 0 1rem;
 header nav.top a:hover { color: #fff; }
 header nav.top a.active { color: #fff; border-bottom-color: var(--c-nav-accent); }
 /* ---- Theme switcher ---- */
-#rebuild-btn { margin-left: auto; background: transparent; border: 1px solid #555;
+/* The auto margin sits on the stage select, not the button: the select comes first in the
+   markup, so putting it on the button would split the pair apart. */
+#rebuild-stage { margin-left: auto; background: transparent; color: #ccc;
+                 border: 1px solid #666; border-radius: 4px; padding: 3px 6px;
+                 font-size: 0.8rem; cursor: pointer; }
+#rebuild-stage option { background: #2c2c2c; color: #fff; }
+#rebuild-btn { margin-left: 0.35rem; background: transparent; border: 1px solid #555;
                color: #ccc; border-radius: 4px; padding: 0.2rem 0.6rem;
                font-size: 0.8rem; cursor: pointer; white-space: nowrap; }
 #rebuild-btn:hover:not(:disabled) { background: rgba(255,255,255,0.1); color: #fff; }
@@ -173,6 +179,7 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
 @media (max-width: 900px) {
   .menu-toggle { display: flex; }
   header nav.top { display: none; }
+  #rebuild-stage { display: none; }
   #rebuild-btn { display: none; }
   #theme-sel { display: none; }
   .lang-dropdown { display: none; }

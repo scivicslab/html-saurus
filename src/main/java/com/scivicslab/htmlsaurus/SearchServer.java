@@ -41,6 +41,8 @@ public class SearchServer {
     private final TranslationClient translate;
     /** On-disk cache of past translations for this project. */
     private final TranslationCache translationCache;
+    /** Regenerates the static HTML only — what the page header's Rebuild does by default. */
+    private final Runnable rebuildHtml;
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
 
@@ -48,17 +50,30 @@ public class SearchServer {
      * @param staticDir     directory containing the generated static HTML files
      * @param indexDir      directory containing the Lucene search index
      * @param port          HTTP port to listen on
-     * @param rebuild       callback to trigger a full rebuild (build + reindex)
+     * @param rebuild       callback to trigger a full rebuild (build + reindex + embedding)
+     * @param rebuildHtml   callback to regenerate the static HTML only; may be {@code null},
+     *                      in which case {@code /api/build-html} falls back to {@code rebuild}
      * @param production    {@code true} to disable the {@code /api/build-all} endpoint
      * @param docsDir       source directory containing raw Markdown files (for MCP tools)
      * @param semanticIndex in-memory semantic neighbour index (may be {@code null})
      */
     public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild,
                         boolean production, Path docsDir, SemanticIndex semanticIndex) {
+        this(staticDir, indexDir, port, rebuild, null, production, docsDir, semanticIndex);
+    }
+
+    /**
+     * @param rebuildHtml callback that regenerates the static HTML only (the page header's
+     *                    default choice); {@code null} means "same as {@code rebuild}"
+     */
+    public SearchServer(Path staticDir, Path indexDir, int port, Runnable rebuild,
+                        Runnable rebuildHtml, boolean production, Path docsDir,
+                        SemanticIndex semanticIndex) {
         this.staticDir = staticDir;
         this.docsDir = docsDir;
         this.port = port;
         this.rebuild = rebuild;
+        this.rebuildHtml = rebuildHtml != null ? rebuildHtml : rebuild;
         this.production = production;
         // Single-project mode: served URLs have no project prefix, so the key is the bare path.
         this.semanticRelated = semanticIndex == null ? Map.of()
@@ -94,6 +109,9 @@ public class SearchServer {
         var server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         if (!production) {
             server.createContext("/api/build-all", this::handleBuild);
+            // The page header offers HTML and All; single-project mode must answer both, since
+            // the same header markup is served here and by the portal (FastBuild_260901_oo01).
+            server.createContext("/api/build-html", ex -> handleBuildStage(ex, rebuildHtml));
         }
         server.createContext("/search", this::handleSearch);
         if (!production) {
@@ -146,12 +164,17 @@ public class SearchServer {
      * the elapsed time in a JSON response. Non-POST requests receive a 405 response.
      */
     private void handleBuild(HttpExchange ex) throws IOException {
+        handleBuildStage(ex, rebuild);
+    }
+
+    /** Runs one build callback and answers with its elapsed time. */
+    private void handleBuildStage(HttpExchange ex, Runnable action) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
         long start = System.currentTimeMillis();
-        rebuild.run();
+        action.run();
         long ms = System.currentTimeMillis() - start;
         respond(ex, 200, "application/json", "{\"status\":\"ok\",\"ms\":" + ms + "}");
     }

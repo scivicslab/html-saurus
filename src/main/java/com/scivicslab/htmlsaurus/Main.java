@@ -214,7 +214,12 @@ public class Main {
                 reindexAll(projectDir, false);
                 ensureSemanticVectors(List.of(projectDir));
             };
-            new SearchServer(outDir, indexDir, port, rebuild, production, docsDir, semanticIndex).start();
+            // The page header's default choice. Leaving the index alone also leaves the embedding
+            // cache fresh, since SemanticIndexer decides staleness by comparing against
+            // search-index/ (FastBuild_260901_oo01).
+            Runnable rebuildHtml = () -> build(docsDir, outDir, false, threads);
+            new SearchServer(outDir, indexDir, port, rebuild, rebuildHtml, production, docsDir,
+                    semanticIndex).start();
         }
     }
 
