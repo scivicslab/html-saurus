@@ -76,10 +76,7 @@ public class PortalServer {
      *  ({@code WhereJobControlBelongs_260901_oo01}). Finished jobs stay readable for an hour so a
      *  browser that was away can still collect the outcome. */
     private final com.scivicslab.jobregistry.JobRegistry importJobs =
-            new com.scivicslab.jobregistry.JobRegistry(60 * 60 * 1000L);
-    /** One thread per import; a virtual thread, since a page loop spends its time waiting on OCR. */
-    private final java.util.concurrent.ExecutorService importExecutor =
-            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+            new com.scivicslab.jobregistry.JobRegistry(searcherSystem, 60 * 60 * 1000L);
     /** Number of not-yet-completed OCR pages {@link GpuBrokerOcrClient} allows in flight per
      *  backend before {@code client.submit} blocks the calling {@code PdfImportJobActor}'s
      *  thread -- generous relative to this codebase's actual concurrent-import-job count, since
@@ -2371,7 +2368,7 @@ public class PortalServer {
         PdfImportJob work = new PdfImportJob(pdfBytes, destDir, stem, ocr, pagesPerFile,
             totalPages, (title == null || title.isBlank()) ? stem : title, fileDisplayPrefix, onDone);
         var job = importJobs.submit("pdf", srcPath.getFileName().toString(),
-            work::run, importExecutor, System.currentTimeMillis());
+            work::run, System.currentTimeMillis());
 
         respond(ex, 200, "application/json",
             "{\"jobId\":" + jsonStr(job.id()) + ",\"totalPages\":" + totalPages + "}");

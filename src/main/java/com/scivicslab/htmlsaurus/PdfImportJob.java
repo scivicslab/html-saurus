@@ -14,11 +14,10 @@ import java.util.Map;
  * The work of one PDF import: OCR the pages one at a time, write a Markdown file every
  * {@code pagesPerFile} pages, and rebuild the project once at the end.
  *
- * <p>Runs as a {@code JobRegistry.Work} on a thread of its own, so it is independent of the browser
+ * <p>Runs as a {@code JobRegistry.Work} on an actor of its own, so it is independent of the browser
  * connection and of the HTTP request that started it — a reload, or closing the tab, does not stop
- * it. Progress is reported into the {@link Job} the registry hands in; a polling request thread
- * reads those fields while this thread writes them, which is safe because they are {@code volatile}
- * ({@code FastBuild_260901_oo01} is unrelated; see {@code WhereJobControlBelongs_260901_oo01}).</p>
+ * it. That actor's thread is the only writer of this import's progress; the polling request thread
+ * only reads ({@code WhereJobControlBelongs_260901_oo01}).</p>
  *
  * <p>Stopping is cooperative: {@code JobRegistry.stop} marks the job terminal and interrupts this
  * thread, and the page loop checks {@link Job#isTerminal()} before starting each page. Pages
