@@ -499,7 +499,7 @@ public class SiteBuilder {
         }
 
         String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath,
-                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated);
+                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated, fm[2]);
         Files.writeString(outFile, html);
         System.out.println("  " + outFile);
     }
@@ -570,7 +570,7 @@ public class SiteBuilder {
 
         String lastUpdated = gitLastModified(mdFile);
         String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath,
-                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated);
+                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated, fm[2]);
         Path outFile = outDir.resolve("index.html");
         Files.writeString(outFile, html);
         System.out.println("  " + outFile + " (root)");
@@ -601,8 +601,20 @@ public class SiteBuilder {
                       String prevHref, String prevLabel,
                       String nextHref, String nextLabel,
                       String lastUpdated) {
+        return renderPage(title, content, root, prefix, currentPath, topSection, rawRelPath,
+                          prevHref, prevLabel, nextHref, nextLabel, lastUpdated, "");
+    }
+
+    /** @param docId the document's frontmatter id, offered as its own button in the copy bar */
+    String renderPage(String title, String content, SiteNode root,
+                      String prefix, String currentPath, String topSection,
+                      String rawRelPath,
+                      String prevHref, String prevLabel,
+                      String nextHref, String nextLabel,
+                      String lastUpdated, String docId) {
         return pageRenderer.renderPage(title, content, root, prefix, currentPath, topSection,
-                                        rawRelPath, prevHref, prevLabel, nextHref, nextLabel, lastUpdated);
+                                        rawRelPath, prevHref, prevLabel, nextHref, nextLabel,
+                                        lastUpdated, docId);
     }
 
     /**

@@ -187,6 +187,14 @@ class PageScripts {
                 var md = htmlToMd(clone);
                 navigator.clipboard.writeText(md.trim()).then(function() { flash(btn); });
               });
+              // Doc id copy — absent on documents without a frontmatter id.
+              var idBtn = document.getElementById('copy-id-btn');
+              if (idBtn) {
+                idBtn.addEventListener('click', function() {
+                  var btn = this;
+                  navigator.clipboard.writeText(btn.dataset.docId).then(function() { flash(btn); });
+                });
+              }
               // Path copy
               document.getElementById('copy-path-btn').addEventListener('click', function() {
                 var btn = this;

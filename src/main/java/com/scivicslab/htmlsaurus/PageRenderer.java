@@ -77,6 +77,23 @@ class PageRenderer {
                       String prevHref, String prevLabel,
                       String nextHref, String nextLabel,
                       String lastUpdated) {
+        return renderPage(title, content, root, prefix, currentPath, topSection, rawRelPath,
+                          prevHref, prevLabel, nextHref, nextLabel, lastUpdated, "");
+    }
+
+    /**
+     * Renders a complete HTML page including header, sidebar, main content, right-side TOC,
+     * copy buttons, theme switcher, search bar, and all supporting CSS/JS.
+     *
+     * @param docId the document's frontmatter {@code id}, which the copy bar offers as its own
+     *              button; empty when the document has none, and the button is then left out
+     */
+    String renderPage(String title, String content, SiteNode root,
+                      String prefix, String currentPath, String topSection,
+                      String rawRelPath,
+                      String prevHref, String prevLabel,
+                      String nextHref, String nextLabel,
+                      String lastUpdated, String docId) {
         StringBuilder sb = new StringBuilder();
         sb.append("""
             <!DOCTYPE html>
@@ -283,6 +300,14 @@ class PageRenderer {
             sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
             sb.append("<button class=\"copy-btn\" id=\"copy-path-btn\" data-path=\"").append(escapeHtml(mdSourcePath))
               .append("\" title=\"").append(escapeHtml(mdSourcePath)).append("\">&#x1F4C2; Path</button>");
+            // Between Path and Translate: the id is the name every other document refers to this
+            // one by, so it is wanted in the same moment as the path. Left out when the document
+            // has no frontmatter id, rather than offering a button that copies nothing.
+            if (docId != null && !docId.isEmpty()) {
+                sb.append("<button class=\"copy-btn\" id=\"copy-id-btn\" data-doc-id=\"")
+                  .append(escapeHtml(docId)).append("\" title=\"").append(escapeHtml(docId))
+                  .append("\">&#x1F194; doc ID</button>");
+            }
             sb.append("<button class=\"copy-btn\" id=\"translate-btn\" ")
               .append("title=\"Translate paragraphs, headings, lists, and tables on demand\">")
               .append("&#x1F310; Translate</button>");
