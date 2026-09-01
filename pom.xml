@@ -16,6 +16,12 @@
     </properties>
 
     <dependencies>
+
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>job-registry</artifactId>
+      <version>0.1.0-SNAPSHOT</version>
+    </dependency>
         <!-- Lucene full-text search with Japanese (Kuromoji) analyzer -->
         <dependency>
             <groupId>org.apache.lucene</groupId>

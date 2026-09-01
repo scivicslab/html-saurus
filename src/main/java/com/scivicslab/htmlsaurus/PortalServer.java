@@ -72,7 +72,14 @@ public class PortalServer {
      * here). The job starts itself with {@code ref.tell(PdfImportJobActor::start)} right after
      * {@code /api/import/pdf/start} registers it, and runs to completion on its own actor thread —
      * independent of the browser connection that started it. */
-    private final Map<String, ActorRef<PdfImportJobActor>> importJobs = new java.util.concurrent.ConcurrentHashMap<>();
+    /** The PDF imports this process is running, and how far each has got
+     *  ({@code WhereJobControlBelongs_260901_oo01}). Finished jobs stay readable for an hour so a
+     *  browser that was away can still collect the outcome. */
+    private final com.scivicslab.jobregistry.JobRegistry importJobs =
+            new com.scivicslab.jobregistry.JobRegistry(60 * 60 * 1000L);
+    /** One thread per import; a virtual thread, since a page loop spends its time waiting on OCR. */
+    private final java.util.concurrent.ExecutorService importExecutor =
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
     /** Number of not-yet-completed OCR pages {@link GpuBrokerOcrClient} allows in flight per
      *  backend before {@code client.submit} blocks the calling {@code PdfImportJobActor}'s
      *  thread -- generous relative to this codebase's actual concurrent-import-job count, since
@@ -2361,15 +2368,13 @@ public class PortalServer {
                 System.err.println("Post-import rebuild failed for " + proj.name() + ": " + e.getMessage());
             }
         };
-        PdfImportJobActor job = new PdfImportJobActor(pdfBytes, destDir, stem, ocr, pagesPerFile,
+        PdfImportJob work = new PdfImportJob(pdfBytes, destDir, stem, ocr, pagesPerFile,
             totalPages, (title == null || title.isBlank()) ? stem : title, fileDisplayPrefix, onDone);
-        ActorRef<PdfImportJobActor> ref = searcherSystem.actorOf("pdf-import-" + jobId, job);
-        importJobs.put(jobId, ref);
-        ref.tell(actor -> actor.setSelf(ref));
-        ref.tell(PdfImportJobActor::start);
+        var job = importJobs.submit("pdf", srcPath.getFileName().toString(),
+            work::run, importExecutor, System.currentTimeMillis());
 
         respond(ex, 200, "application/json",
-            "{\"jobId\":" + jsonStr(jobId) + ",\"totalPages\":" + totalPages + "}");
+            "{\"jobId\":" + jsonStr(job.id()) + ",\"totalPages\":" + totalPages + "}");
     }
 
     /**
@@ -2383,17 +2388,27 @@ public class PortalServer {
             return;
         }
         String jobId = queryParam(ex, "jobId");
-        ActorRef<PdfImportJobActor> ref = importJobs.get(jobId);
-        if (ref == null) {
+        com.scivicslab.jobregistry.Job<?> job = importJobs.get(jobId);
+        if (job == null) {
             respond(ex, 404, "application/json", "{\"error\":\"unknown or expired jobId\"}");
             return;
         }
-        PdfImportJobActor.Status status = ref.ask(PdfImportJobActor::snapshot).join();
+        PdfImportJob.Result r = job.result() instanceof PdfImportJob.Result got
+                ? got : new PdfImportJob.Result("", 0);
+        // The browser's vocabulary predates the registry's: a cancelled job reads as "stopped", and
+        // only a genuine failure carries an error string.
+        String state = switch (job.state()) {
+            case RUNNING -> "running";
+            case DONE -> "done";
+            case ERROR -> "error";
+            case CANCELLED -> "stopped";
+        };
         respond(ex, 200, "application/json",
-            "{\"currentPage\":" + status.currentPage() + ",\"totalPages\":" + status.totalPages()
-            + ",\"lastFile\":" + jsonStr(status.lastFile()) + ",\"totalImages\":" + status.totalImages()
-            + ",\"state\":" + jsonStr(status.state())
-            + ",\"error\":" + (status.error() == null ? "null" : jsonStr(status.error())) + "}");
+            "{\"currentPage\":" + job.done() + ",\"totalPages\":" + job.total()
+            + ",\"lastFile\":" + jsonStr(r.lastFile()) + ",\"totalImages\":" + r.totalImages()
+            + ",\"state\":" + jsonStr(state)
+            + ",\"error\":" + (job.state() == com.scivicslab.jobregistry.Job.State.ERROR
+                                 ? jsonStr(job.error()) : "null") + "}");
     }
 
     /**
@@ -2409,12 +2424,11 @@ public class PortalServer {
         Map<String, Object> body = McpJsonParser.parseObject(
             new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         String jobId = body.get("jobId") instanceof String s ? s : null;
-        ActorRef<PdfImportJobActor> ref = jobId == null ? null : importJobs.get(jobId);
-        if (ref == null) {
+        if (jobId == null || importJobs.get(jobId) == null) {
             respond(ex, 404, "application/json", "{\"error\":\"unknown or expired jobId\"}");
             return;
         }
-        ref.tell(PdfImportJobActor::requestStop);
+        importJobs.stop(jobId);
         respond(ex, 200, "application/json", "{\"status\":\"ok\"}");
     }
 
