@@ -13,13 +13,15 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Verifies that clicking the project name link on a portal row loads the project
+ * Named {@code ...Test} so Surefire runs it: its default patterns do not match {@code *E2E}.
+ *
+ * <p>Verifies that clicking the project name link on a portal row loads the project
  * into the portal's right-pane iframe (staying in a single tab), rather than opening
  * a new browser tab. Right-click / Ctrl-click still open a real new tab because the
  * link stays a genuine anchor; that path is not exercised here.
  */
 @Tag("S3")
-class PortalOpenLinkE2E {
+class PortalOpenLinkE2ETest {
 
     @TempDir
     Path tempDir;
@@ -64,9 +66,13 @@ class PortalOpenLinkE2E {
             assertEquals(pagesBefore, context.pages().size(),
                     "Clicking a project link must not open a new browser tab");
 
-            // The portal (top window) must stay put.
-            assertEquals(portalUrl, portalPage.url(),
-                    "Portal page should remain open after clicking a project link");
+            // The portal (top window) must stay on the portal document. It does gain a hash —
+            // which project is open is part of the address, so the browser's Back button and a
+            // pasted link both work — but it never navigates away.
+            assertTrue(portalPage.url().startsWith(portalUrl),
+                    "Portal page should stay on the portal document, was: " + portalPage.url());
+            assertEquals("#/myproject/", portalPage.url().substring(portalUrl.length()),
+                    "Opening a project should be recorded in the address as a hash route");
 
             // The right-pane iframe must now point at the project.
             String frameSrc = portalPage.locator("#doc-frame").getAttribute("src");
