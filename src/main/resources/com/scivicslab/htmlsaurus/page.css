@@ -184,6 +184,10 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
   .menu-toggle { display: flex; }
   header nav.top { display: none; }
   #theme-sel { display: none; }
+  /* Rebuilding a project is an authoring action taken at a desk: hidden on a phone or tablet so
+     it cannot be triggered by a stray tap while reading. Search stays, since reading is what a
+     small screen is for. */
+  .side-tools { display: none; }
   .lang-dropdown { display: none; }
   nav.side { position: fixed; left: -290px; top: 60px; width: 280px; height: calc(100vh - 60px);
              z-index: 200; overflow-y: auto; transition: left 0.25s ease;
