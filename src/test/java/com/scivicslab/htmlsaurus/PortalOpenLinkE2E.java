@@ -13,15 +13,13 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Named {@code ...Test} so Surefire runs it: its default patterns do not match {@code *E2E}.
- *
  * <p>Verifies that clicking the project name link on a portal row loads the project
  * into the portal's right-pane iframe (staying in a single tab), rather than opening
  * a new browser tab. Right-click / Ctrl-click still open a real new tab because the
  * link stays a genuine anchor; that path is not exercised here.
  */
 @Tag("S3")
-class PortalOpenLinkE2ETest {
+class PortalOpenLinkE2E {
 
     @TempDir
     Path tempDir;
