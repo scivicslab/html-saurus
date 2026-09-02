@@ -34,19 +34,42 @@ class ConfigReader {
      */
     static ProjectConfig read(Path projectRoot, boolean production, String currentLocale,
                               String fallbackSiteName) {
+        return new ProjectConfig(
+                readDocusaurusSettings(projectRoot, currentLocale, fallbackSiteName),
+                readEmbeddedFiles(projectRoot, production, currentLocale),
+                readHtmlSaurusSettings(projectRoot));
+    }
+
+    /** Reads what the Docusaurus configuration states, plus the translated site name. */
+    private static ProjectConfig.DocusaurusSettings readDocusaurusSettings(
+            Path projectRoot, String currentLocale, String fallbackSiteName) {
         String configSiteName = readSiteNameFromConfig(projectRoot, currentLocale);
         String[] logoInfo = readLogoInfo(projectRoot);
-        return new ProjectConfig(
+        return new ProjectConfig.DocusaurusSettings(
                 configSiteName != null ? configSiteName : fallbackSiteName,
-                production ? readLocalized(projectRoot, "html-saurus.css", currentLocale) : null,
-                production ? readLocalized(projectRoot, "html-saurus-header.html", currentLocale) : null,
-                production ? readLocalized(projectRoot, "html-saurus-footer.html", currentLocale) : null,
-                production ? readLocalized(projectRoot, "html-saurus-toc-footer.html", currentLocale) : null,
-                readFaviconDataUrl(projectRoot),
                 logoInfo[0],
                 logoInfo[1],
-                readSiteUrl(projectRoot),
-                readNavPrimaryItems(projectRoot));
+                readFaviconDataUrl(projectRoot),
+                readSiteUrl(projectRoot));
+    }
+
+    /**
+     * Reads the files whose whole content is the value. Production mode only: in portal mode the
+     * project's own styling would fight the portal's own, so every component comes back null.
+     */
+    private static ProjectConfig.EmbeddedFiles readEmbeddedFiles(
+            Path projectRoot, boolean production, String currentLocale) {
+        if (!production) return new ProjectConfig.EmbeddedFiles(null, null, null, null);
+        return new ProjectConfig.EmbeddedFiles(
+                readLocalized(projectRoot, "html-saurus.css", currentLocale),
+                readLocalized(projectRoot, "html-saurus-header.html", currentLocale),
+                readLocalized(projectRoot, "html-saurus-footer.html", currentLocale),
+                readLocalized(projectRoot, "html-saurus-toc-footer.html", currentLocale));
+    }
+
+    /** Reads what {@code html-saurus.properties} states. */
+    private static ProjectConfig.HtmlSaurusSettings readHtmlSaurusSettings(Path projectRoot) {
+        return new ProjectConfig.HtmlSaurusSettings(readNavPrimaryItems(projectRoot));
     }
 
     /**

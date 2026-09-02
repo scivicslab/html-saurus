@@ -99,9 +99,9 @@ class PageRenderer {
             sb.append("<style data-hs-theme>\n").append(HttpUtils.themeVariables())
               .append(HttpUtils.docThemeMapping()).append("</style>\n");
         }
-        if (config.customCss() != null) {
+        if (config.files().customCss() != null) {
             sb.append("<style id=\"html-saurus-custom\">\n")
-              .append(config.customCss())
+              .append(config.files().customCss())
               .append("\n</style>\n");
         }
         sb.append("""
@@ -113,16 +113,16 @@ class PageRenderer {
             <body>
             """);
 
-        if (config.customHeader() != null) sb.append(config.customHeader()).append("\n");
+        if (config.files().customHeader() != null) sb.append(config.files().customHeader()).append("\n");
 
         // Top navbar
         sb.append("<header>\n");
         sb.append("  <a class=\"site-title\" href=\"").append(prefix).append("\">");
-        if (config.logoDataUrl() != null) {
-            sb.append("<img src=\"").append(config.logoDataUrl()).append("\" alt=\"")
-              .append(escapeHtml(config.logoAlt())).append("\" class=\"site-logo\">");
+        if (config.docusaurus().logoDataUrl() != null) {
+            sb.append("<img src=\"").append(config.docusaurus().logoDataUrl()).append("\" alt=\"")
+              .append(escapeHtml(config.docusaurus().logoAlt())).append("\" class=\"site-logo\">");
         }
-        sb.append(escapeHtml(config.siteName())).append("</a>\n");
+        sb.append(escapeHtml(config.docusaurus().siteName())).append("</a>\n");
         sb.append("  <button class=\"menu-toggle\" id=\"menu-toggle\" aria-label=\"Toggle navigation\" aria-expanded=\"false\">\n");
         sb.append("    <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\">\n");
         sb.append("      <line x1=\"3\" y1=\"6\" x2=\"21\" y2=\"6\"/><line x1=\"3\" y1=\"12\" x2=\"21\" y2=\"12\"/><line x1=\"3\" y1=\"18\" x2=\"21\" y2=\"18\"/>\n");
@@ -133,8 +133,8 @@ class PageRenderer {
         for (SiteNode section : root.children()) {
             if (section.isDir()) dirSections.add(section);
         }
-        int inlineCount = config.navPrimaryItems() > 0
-                ? Math.min(config.navPrimaryItems(), dirSections.size())
+        int inlineCount = config.properties().navPrimaryItems() > 0
+                ? Math.min(config.properties().navPrimaryItems(), dirSections.size())
                 : dirSections.size();
         for (int i = 0; i < inlineCount; i++) {
             SiteNode section = dirSections.get(i);
@@ -282,7 +282,7 @@ class PageRenderer {
 
         sb.append("<main>\n<h1>").append(escapeHtml(title)).append("</h1>\n");
         if (!production) {
-            String mdSourcePath = config.siteName() + "/docs/" + rawRelPath;
+            String mdSourcePath = config.docusaurus().siteName() + "/docs/" + rawRelPath;
             sb.append("<div class=\"copy-bar\">");
             sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
             sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
@@ -335,19 +335,19 @@ class PageRenderer {
 
         sb.append(PageScripts.render());
 
-        if (config.customFooter() != null) sb.append(config.customFooter()).append("\n");
+        if (config.files().customFooter() != null) sb.append(config.files().customFooter()).append("\n");
 
         sb.append("</body></html>\n");
 
         String langAttr = (currentLocale != null) ? currentLocale
                         : (defaultLocale != null)  ? defaultLocale
                         : "ja";
-        String faviconHref = config.faviconDataUrl() != null ? config.faviconDataUrl() : "data:,";
+        String faviconHref = config.docusaurus().faviconDataUrl() != null ? config.docusaurus().faviconDataUrl() : "data:,";
         return sb.toString()
             .replace("YADOC_SEARCH_URL", escapeJs(siteRootPrefix + "search"
                 + (isNonDefaultLocale ? "?locale=" + currentLocale : "")))
-            .replace("YADOC_BUILD_SITE", escapeJs(config.siteName()))
-            .replace("YADOC_PROJECT", escapeJs(config.siteName()))
+            .replace("YADOC_BUILD_SITE", escapeJs(config.docusaurus().siteName()))
+            .replace("YADOC_PROJECT", escapeJs(config.docusaurus().siteName()))
             .replace("YADOC_LANG", escapeHtml(langAttr))
             .replace("YADOC_FAVICON", faviconHref);
     }
@@ -418,11 +418,11 @@ class PageRenderer {
 
     /**
      * Builds the HTML to inject at the bottom of the right-side TOC aside.
-     * Uses custom toc footer if configured, otherwise auto-generates feed links if config.siteUrl() is set.
+     * Uses custom toc footer if configured, otherwise auto-generates feed links if config.docusaurus().siteUrl() is set.
      */
     String buildTocFooter(String prefix) {
-        if (config.customTocFooter() != null) return config.customTocFooter();
-        if (config.siteUrl() != null) {
+        if (config.files().customTocFooter() != null) return config.files().customTocFooter();
+        if (config.docusaurus().siteUrl() != null) {
             return "<div class=\"toc-feed-links\">\n"
                 + "  <a href=\"" + prefix + "rss.xml\" class=\"feed-link rss-link\" title=\"RSS Feed\">"
                 + RSS_ICON + " RSS</a>\n"

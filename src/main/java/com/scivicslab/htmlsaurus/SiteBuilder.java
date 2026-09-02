@@ -145,8 +145,7 @@ public class SiteBuilder {
         cleanOutputDirectory();
 
         SiteNode root = navBuilder.build();
-        BlogBuilder blogBuilder = new BlogBuilder(outDir, converter, currentLocale, defaultLocale,
-                production, config, this);
+        BlogBuilder blogBuilder = new BlogBuilder(outDir, converter, currentLocale, defaultLocale, this);
         BlogContent blog = collectBlogPosts(blogBuilder, root);
 
         List<SiteNode> pageOrder = flattenOrder(root.children());
@@ -357,8 +356,8 @@ public class SiteBuilder {
 
     /** Writes sitemap, RSS and JSON feeds, which need the site's own URL to state absolute links. */
     private void writeFeeds() throws IOException {
-        if (config.siteUrl() == null || builtPages.isEmpty()) return;
-        FeedGenerator feedGenerator = new FeedGenerator(outDir, config.siteUrl(), config.siteName(),
+        if (config.docusaurus().siteUrl() == null || builtPages.isEmpty()) return;
+        FeedGenerator feedGenerator = new FeedGenerator(outDir, config.docusaurus().siteUrl(), config.docusaurus().siteName(),
                 currentLocale, defaultLocale, builtPages);
         feedGenerator.generateSitemap();
         feedGenerator.generateRssFeed();
@@ -500,9 +499,9 @@ public class SiteBuilder {
         String lastUpdated = gitLastModified(mdFile);
 
         // Collect page info for feeds/sitemap
-        if (config.siteUrl() != null) {
+        if (config.docusaurus().siteUrl() != null) {
             boolean isNonDefaultLocale = currentLocale != null && !currentLocale.equals(defaultLocale);
-            String absUrl = config.siteUrl() + (isNonDefaultLocale ? "/" + currentLocale : "") + currentPath;
+            String absUrl = config.docusaurus().siteUrl() + (isNonDefaultLocale ? "/" + currentLocale : "") + currentPath;
             builtPages.add(new PageInfo(title, absUrl, FeedGenerator.plainText(body, 100), FeedGenerator.gitLastModifiedIso(mdFile)));
         }
 

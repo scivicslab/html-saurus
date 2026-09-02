@@ -26,22 +26,16 @@ class BlogBuilder {
     private final MarkdownConverter converter;
     private final String currentLocale;
     private final String defaultLocale;
-    private final boolean production;
-    /** What the project's own files say about rendering it. */
-    private final ProjectConfig config;
     /** Callback to SiteBuilder.renderPage (will move to PageRenderer later). */
     private final SiteBuilder siteBuilder;
 
     BlogBuilder(Path outDir, MarkdownConverter converter,
                 String currentLocale, String defaultLocale,
-                boolean production, ProjectConfig config,
                 SiteBuilder siteBuilder) {
         this.outDir = outDir;
         this.converter = converter;
         this.currentLocale = currentLocale;
         this.defaultLocale = defaultLocale;
-        this.production = production;
-        this.config = config;
         this.siteBuilder = siteBuilder;
     }
 
