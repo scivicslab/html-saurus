@@ -239,6 +239,66 @@ class SearchIndexerTest {
         }
     }
 
+    // ---- Plain text extraction ------------------------------------------
+
+    @Nested
+    @DisplayName("plain text extraction: what reaches the index")
+    class PlainTextExtraction {
+
+        @Test
+        @DisplayName("text inside a code fence is kept, the fence lines are not")
+        void fencedCode_contentKept() {
+            String s = SearchIndexer.stripMarkdown("Install it:\n\n```bash\nmodule load java/11.0.3\n```\n");
+
+            assertTrue(s.contains("module load java/11.0.3"),
+                    "A command shown in a code fence must be searchable; got: " + s);
+            assertFalse(s.contains("```"), "Fence lines must not reach the index; got: " + s);
+            assertFalse(s.contains("bash"), "The fence info string must not reach the index; got: " + s);
+        }
+
+        @Test
+        @DisplayName("text inside an inline code span is kept, the backticks are not")
+        void inlineCode_contentKept() {
+            String s = SearchIndexer.stripMarkdown("Run `mvn install` first.");
+
+            assertEquals("Run mvn install first.", s);
+        }
+
+        @Test
+        @DisplayName("HTML tags are removed and the text between them is kept")
+        void htmlTags_removedTextKept() {
+            String s = SearchIndexer.stripMarkdown(
+                    "<table>\n<tr>\n<th width=\"300\">名称</th>\n<td>R</td>\n</tr>\n</table>\n");
+
+            assertEquals("名称 R", s);
+        }
+
+        @Test
+        @DisplayName("HTML comments are removed with their content")
+        void htmlComment_removed() {
+            String s = SearchIndexer.stripMarkdown("before <!-- hidden note --> after");
+
+            assertEquals("before after", s);
+        }
+
+        @Test
+        @DisplayName("a term written only inside a code fence is stored in the body field")
+        void fencedCode_reachesIndexedBody() throws IOException {
+            Path docsDir = createDocsDir("docs");
+            writeDoc(docsDir, "gcc.md", "gcc", "```\nmodule load java/11.0.3\n```\n");
+            Path indexDir = tempDir.resolve("index");
+
+            new SearchIndexer(docsDir, indexDir, "ja", true).index();
+
+            try (var dir = new NIOFSDirectory(indexDir);
+                 var reader = DirectoryReader.open(dir)) {
+                var doc = reader.storedFields().document(0);
+                assertTrue(doc.get("body").contains("module load java/11.0.3"),
+                        "body field must carry the command text; got: " + doc.get("body"));
+            }
+        }
+    }
+
     // ---- cleanRelPath utility -------------------------------------------
 
     @Nested

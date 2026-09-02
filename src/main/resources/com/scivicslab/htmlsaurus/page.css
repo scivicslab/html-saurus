@@ -195,7 +195,11 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
 .search-hit:hover { background: var(--c-hover); }
 .search-hit-title { font-weight: 600; font-size: 1.02rem; margin-bottom: 0.2rem; }
 .search-hit-path { font-size: 0.78rem; color: var(--c-arrow); margin-bottom: 0.35rem; }
-.search-hit-summary { font-size: 0.88rem; line-height: 1.6; }
+.search-hit-summary { font-size: 0.88rem; line-height: 1.6;
+                      /* A passage taken from a command listing has no sentence breaks, so the
+                         highlighter returns a very long run of text. Show its first four lines. */
+                      display: -webkit-box; -webkit-box-orient: vertical;
+                      -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
 .search-hit-summary b { color: var(--c-act-text); }
 
 /* ---- Mobile top-nav panel (hidden on desktop, shown inside sidebar on mobile) ---- */

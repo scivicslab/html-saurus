@@ -260,12 +260,25 @@ public class SearchIndexer {
         writer.addDocument(doc);
     }
 
-    /** Strips Markdown formatting (code blocks, links, emphasis, headings, etc.) to produce plain text for indexing. */
-    private String stripMarkdown(String md) {
+    /**
+     * Strips Markdown notation (fence lines, links, emphasis, headings, etc.) and raw HTML tags,
+     * keeping the text they contain, to produce the plain text that is both indexed and quoted in
+     * search result summaries.
+     *
+     * <p>The text inside code fences and inline code spans is kept: many pages name a piece of
+     * software only in a command line or a package list (for example {@code module load
+     * java/11.0.3}), and dropping it made those pages unfindable by that name. HTML tags written
+     * directly in the Markdown are removed with their attributes but not their text, so a table
+     * written as {@code <table>} markup is indexed and quoted as its cell text rather than as
+     * markup.
+     */
+    static String stripMarkdown(String md) {
         String s = md;
-        s = s.replaceAll("(?s)```.*?```", " ");                    // fenced code blocks
+        s = s.replaceAll("(?m)^\\s*```.*$", " ");                  // code fence lines (content kept)
         s = s.replaceAll("(?s):::\\w+.*?:::", " ");                // admonitions
-        s = s.replaceAll("`[^`]+`", " ");                          // inline code
+        s = s.replaceAll("`([^`]+)`", "$1");                       // inline code (content kept)
+        s = s.replaceAll("(?s)<!--.*?-->", " ");                   // HTML comments
+        s = s.replaceAll("</?[A-Za-z][^<>]*>", " ");               // HTML tags (text kept)
         s = s.replaceAll("!?\\[([^\\]]*)\\]\\([^)]*\\)", "$1");   // links / images
         s = s.replaceAll("[*_]{1,3}([^*_\n]+)[*_]{1,3}", "$1");   // bold / italic
         s = s.replaceAll("(?m)^#{1,6}\\s+", "");                  // headings
