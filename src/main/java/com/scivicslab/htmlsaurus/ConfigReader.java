@@ -159,25 +159,6 @@ class ConfigReader {
     }
 
     /**
-     * Returns true if {@code docusaurus.config.ts/js} contains a navbar item with {@code to: '/blog'}.
-     * Used to decide whether to render the Blog navbar section rather than auto-adding it.
-     */
-    static boolean hasBlogNavbarEntry(Path projectRoot) {
-        for (String name : new String[]{"docusaurus.config.ts", "docusaurus.config.js"}) {
-            Path cfg = projectRoot.resolve(name);
-            if (!Files.exists(cfg)) continue;
-            try {
-                String content = Files.readString(cfg);
-                // Match: to: '/blog' or to: "/blog"
-                if (java.util.regex.Pattern
-                        .compile("to:\\s*['\"]/?blog/?['\"]")
-                        .matcher(content).find()) return true;
-            } catch (IOException ignored) {}
-        }
-        return false;
-    }
-
-    /**
      * Walks up from {@code docsDir} to find the Docusaurus project root — the nearest ancestor
      * that contains a {@code docs/} subdirectory. This correctly handles alternate-locale builds
      * where {@code docsDir} is deep inside {@code i18n/<locale>/docusaurus-plugin-content-docs/current}.

@@ -11,10 +11,17 @@ import java.util.function.Consumer;
 /**
  * Production-mode E2E test runner.
  *
- * <p>Builds nigsc_homepage2 in production mode, starts a local HttpServer,
- * then drives Chromium via Playwright to verify browser behaviour.
+ * <p>Drives Chromium via Playwright against a site served in production mode.
  *
- * <p>Run with:
+ * <p>With {@code PRODUCTION_URL} set, it checks that already-running site and builds nothing:
+ * <pre>
+ *   PRODUCTION_URL=http://192.168.5.21:31086 mvn test-compile exec:java \
+ *     -Dexec.mainClass=com.scivicslab.htmlsaurus.ProductionModeE2E \
+ *     -Dexec.classpathScope=test
+ * </pre>
+ *
+ * <p>Without it, it builds nigsc_homepage2 in production mode into a temporary directory and
+ * serves it from a local HttpServer:
  * <pre>
  *   mvn test-compile exec:java \
  *     -Dexec.mainClass=com.scivicslab.htmlsaurus.ProductionModeE2E \
@@ -26,6 +33,9 @@ public class ProductionModeE2E {
     private static final Path NIGSC_DOCS = Path.of("/home/devteam/works/nigsc_homepage2/docs");
     private static final Path NIGSC_EN_DOCS = Path.of(
         "/home/devteam/works/nigsc_homepage2/i18n/en/docusaurus-plugin-content-docs/current");
+
+    /** When set, check this already-running site instead of building and serving one. */
+    private static final String EXTERNAL_URL = System.getenv("PRODUCTION_URL");
 
     private static HttpServer server;
     private static int port;
@@ -40,7 +50,7 @@ public class ProductionModeE2E {
     // -------------------------------------------------------------------------
 
     public static void main(String[] args) throws Exception {
-        if (!Files.isDirectory(NIGSC_DOCS)) {
+        if (EXTERNAL_URL == null && !Files.isDirectory(NIGSC_DOCS)) {
             System.out.println("SKIP: nigsc_homepage2/docs not found");
             return;
         }
@@ -75,6 +85,13 @@ public class ProductionModeE2E {
     // -------------------------------------------------------------------------
 
     private static void setup() throws Exception {
+        if (EXTERNAL_URL != null) {
+            System.out.println("Checking the running site at " + EXTERNAL_URL);
+            playwright = Playwright.create();
+            browser = playwright.chromium().launch();
+            return;
+        }
+
         Path outDir = Files.createTempDirectory("html-saurus-e2e-prod-");
 
         Main.build(NIGSC_DOCS, outDir, true);
@@ -100,6 +117,7 @@ public class ProductionModeE2E {
     }
 
     private static String url(String path) {
+        if (EXTERNAL_URL != null) return EXTERNAL_URL.replaceAll("/+$", "") + path;
         return "http://localhost:" + port + path;
     }
 
