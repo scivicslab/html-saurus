@@ -46,8 +46,26 @@ class PageRenderer {
         this.allLocales = allLocales != null ? allLocales : List.of();
     }
 
-    /** Writes the search box. The same markup serves both modes; only its parent differs. */
-    private static void appendSearchBox(StringBuilder sb) {
+    /**
+     * Writes the search box.
+     *
+     * <p>In production mode it is a form: typing does nothing and pressing Enter goes to the
+     * results page, which is what Docusaurus does. A dropdown hung under the box can only show a
+     * line or two per hit, and the box sits on the top bar where there is no room for more.
+     *
+     * <p>In portal mode it keeps the dropdown, which reads the search endpoint as the reader types.
+     * There the box is in the sidebar, and the reader is moving between projects rather than
+     * reading one page, so a list that appears without leaving the page is worth its narrowness.
+     */
+    private void appendSearchBox(StringBuilder sb, String searchHref) {
+        if (production) {
+            sb.append("  <form id=\"search-wrap\" action=\"").append(searchHref)
+              .append("\" method=\"get\" role=\"search\">\n");
+            sb.append("    <input id=\"search-input\" name=\"q\" type=\"search\" placeholder=\"Search...\"")
+              .append(" autocomplete=\"off\" value=\"\">\n");
+            sb.append("  </form>\n");
+            return;
+        }
         sb.append("  <div id=\"search-wrap\">\n");
         sb.append("    <input id=\"search-input\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\">\n");
         sb.append("    <div id=\"search-results\"></div>\n");
@@ -180,7 +198,7 @@ class PageRenderer {
         // Docusaurus carries its search box on the top bar, and a published site should look like
         // the site it replaces. In portal mode the bar also carries the rebuild controls and one
         // link per project section, so the box lives in the sidebar there instead.
-        if (production) appendSearchBox(sb);
+        if (production) appendSearchBox(sb, prefix + "search");
         if (!production) {
             // Two stages, not one: HTML alone is what an author presses repeatedly while editing
             // (about 2ms per document), while All also runs the Lucene index and re-sends every
@@ -248,7 +266,7 @@ class PageRenderer {
             sb.append("  </div>\n");
         }
         // Production mode puts the search box on the top bar instead, where Docusaurus has it.
-        if (!production) appendSearchBox(sb);
+        if (!production) appendSearchBox(sb, prefix + "search");
         sb.append("  <div class=\"mobile-top-nav\">\n");
         for (SiteNode section : root.children()) {
             if (!section.isDir()) continue;

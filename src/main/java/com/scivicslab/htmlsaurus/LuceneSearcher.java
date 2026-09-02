@@ -96,10 +96,17 @@ class LuceneSearcher implements Closeable {
         var stored = searcher.storedFields();
 
         var uh = new UnifiedHighlighter(searcher, analyzer);
-        uh.setMaxLength(400);
+        // Look well into the body, not just its opening: a term that first appears halfway down a
+        // page would otherwise produce no passage at all, and the result would fall back to the
+        // page's first 250 characters, which say nothing about why the page matched.
+        uh.setMaxLength(20000);
         String[] snippets = null;
         try {
-            snippets = uh.highlight("body", q, hits);
+            // Three passages rather than one. A single passage is a sentence, which reads as a
+            // fragment torn out of the page; three give enough of the surrounding text to judge
+            // whether the page is the one wanted, and match the length of the summaries the portal
+            // shows for the same documents.
+            snippets = uh.highlight("body", q, hits, 3);
         } catch (Exception e) {
             logger.warning("Highlight failed: " + e.getMessage());
         }

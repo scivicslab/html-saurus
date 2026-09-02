@@ -115,12 +115,10 @@ header nav.top .nav-more-btn.active { color: #fff; border-bottom-color: var(--c-
 #search-input::placeholder { color: var(--c-arrow); }
 #search-input:focus { border-color: var(--c-nav-accent); }
 /* On the top bar the box sits at the right end, after the section links, which is where
-   Docusaurus puts it. It keeps a fixed width so the links keep theirs. */
+   Docusaurus puts it. It keeps a fixed width so the links keep theirs. Only the layout is set
+   here: the colours stay with the theme variables, because a project may repaint the bar. The
+   DDBJ theme makes it white, so light-on-dark values written here would vanish into it. */
 header #search-wrap { margin: 0 0 0 auto; flex: 0 0 auto; width: 240px; }
-header #search-input { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.25);
-                       color: #fff; }
-header #search-input::placeholder { color: #bbb; }
-header #search-input:focus { background: rgba(255,255,255,0.16); }
 /* The panel hangs below the bar, aligned to the box's right edge so it stays on screen. */
 header #search-results { left: auto; right: 0; }
 /* Anchored to the left edge: the sidebar is 280px wide, so a right-anchored panel would
@@ -189,6 +187,17 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
 .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45);
                    z-index: 150; }
 .sidebar-overlay.open { display: block; }
+/* ---- Search results page (production mode) ---- */
+.search-count { color: var(--c-arrow); font-size: 0.9rem; margin: 0 0 1rem; }
+.search-none, .search-hint { color: var(--c-arrow); }
+.search-hit { display: block; padding: 0.9rem 1rem; margin-bottom: 0.6rem; border-radius: 6px;
+              border: 1px solid var(--c-border); text-decoration: none; color: var(--c-text); }
+.search-hit:hover { background: var(--c-hover); }
+.search-hit-title { font-weight: 600; font-size: 1.02rem; margin-bottom: 0.2rem; }
+.search-hit-path { font-size: 0.78rem; color: var(--c-arrow); margin-bottom: 0.35rem; }
+.search-hit-summary { font-size: 0.88rem; line-height: 1.6; }
+.search-hit-summary b { color: var(--c-act-text); }
+
 /* ---- Mobile top-nav panel (hidden on desktop, shown inside sidebar on mobile) ---- */
 .mobile-top-nav { display: none; }
 /* ---- Tablet (≤900px): sidebar becomes a slide-in drawer ---- */

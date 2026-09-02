@@ -85,6 +85,9 @@ class PageScripts {
             (function() {
               var input = document.getElementById('search-input');
               var results = document.getElementById('search-results');
+              // Production mode has no dropdown: the box is a form that submits to the results
+              // page, so there is nothing here to bind.
+              if (!input || !results) return;
               var timer = null;
               input.addEventListener('input', function() {
                 clearTimeout(timer);
@@ -135,7 +138,7 @@ class PageScripts {
                         a.className = 'sr-item'; a.href = item.path;
                         a.innerHTML = '<div class="sr-title">' + esc(item.title) + '</div>' +
                                       '<div class="sr-breadcrumb">' + esc(breadcrumb(item.pagePath || item.path)) + '</div>' +
-                                      '<div class="sr-summary">' + esc(item.summary) + '</div>';
+                                      '<div class="sr-summary">' + hl(item.summary) + '</div>';
                         results.appendChild(a);
                       });
                     }
@@ -147,6 +150,11 @@ class PageScripts {
                   });
               }
               function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+              // The summary marks the matched words with <b>. Everything is escaped first, then
+              // those two tags alone are put back, so the page's own markup can never come through.
+              function hl(s) {
+                return esc(s).replace(/&lt;b&gt;/g, '<b>').replace(/&lt;\\/b&gt;/g, '</b>');
+              }
               function breadcrumb(path) {
                 var segs = (path||'').replace(/^\\//, '').split('/');
                 return segs.slice(0, -1).map(function(seg) {

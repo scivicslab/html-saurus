@@ -605,49 +605,56 @@ public class ProductionModeE2E {
     // -------------------------------------------------------------------------
 
     private static void runK_searchUiInteraction() {
-        withPage("K-1: typing in search box triggers results dropdown", page -> {
+        withPage("K-1: typing in the search box does nothing on its own", page -> {
             page.navigate(url("/guides/top_page/"));
             page.fill("#search-input", "slurm");
-            ElementHandle results = page.waitForSelector("#search-results.open");
-            check(results != null, "#search-results must acquire class 'open'");
+            page.waitForTimeout(500);
+            check(page.querySelector("#search-results") == null,
+                "production mode has no dropdown: #search-results must not exist");
+            check(page.url().contains("/guides/top_page"),
+                "typing must not navigate anywhere, went to: " + page.url());
         });
 
-        withPage("K-2: search results have expected structure", page -> {
+        withPage("K-2: Enter goes to the results page for what was typed", page -> {
             page.navigate(url("/guides/top_page/"));
             page.fill("#search-input", "slurm");
-            page.waitForSelector("#search-results.open");
-            check(page.querySelector(".sr-item") != null, "Results must contain .sr-item");
-            check(page.querySelector(".sr-title") != null, "Results must contain .sr-title");
-            check(page.querySelector(".sr-breadcrumb") != null, "Results must contain .sr-breadcrumb");
-            check(page.querySelector(".sr-summary") != null, "Results must contain .sr-summary");
+            page.keyboard().press("Enter");
+            page.waitForURL("**/search?q=slurm");
+            check(page.url().contains("/search?q=slurm"),
+                "Enter must go to /search?q=slurm, went to: " + page.url());
         });
 
-        withPage("K-3: Escape closes results dropdown", page -> {
-            page.navigate(url("/guides/top_page/"));
-            page.fill("#search-input", "slurm");
-            page.waitForSelector("#search-results.open");
-            page.keyboard().press("Escape");
-            page.waitForFunction("() => !document.querySelector('#search-results').classList.contains('open')");
-            check(page.querySelector("#search-results.open") == null,
-                "#search-results must lose class 'open' after Escape");
+        withPage("K-3: the results page wears the site's own chrome", page -> {
+            page.navigate(url("/search?q=slurm"));
+            check(page.querySelector("header nav.top") != null,
+                "the results page must carry the site's navbar");
+            check(page.querySelector("nav.side") != null,
+                "the results page must carry the site's sidebar");
+            check(page.querySelector("#search-input") != null,
+                "the results page must carry the search box");
+            String value = page.inputValue("#search-input");
+            check("slurm".equals(value),
+                "the search box must hold the query that produced the page, held: " + value);
         });
 
-        withPage("K-4: search result links use clean URL hrefs", page -> {
-            page.navigate(url("/guides/top_page/"));
-            page.fill("#search-input", "slurm");
-            page.waitForSelector("#search-results.open");
-            ElementHandle first = page.querySelector(".sr-item");
-            check(first != null, "At least one .sr-item must be present");
+        withPage("K-4: the results page lists hits, each linking to a clean URL", page -> {
+            page.navigate(url("/search?q=slurm"));
+            check(page.querySelector(".search-count") != null, "the page must state how many hits");
+            ElementHandle first = page.querySelector("a.search-hit");
+            check(first != null, "at least one hit must be listed");
+            check(page.querySelector(".search-hit-title") != null, "a hit must show its title");
+            check(page.querySelector(".search-hit-summary") != null, "a hit must show its summary");
             String href = first.getAttribute("href");
-            check(href != null && href.startsWith("/"), ".sr-item href must start with '/', got: " + href);
-            check(!href.contains(".html"), ".sr-item href must not contain .html, got: " + href);
+            check(href != null && href.startsWith("/"), "a hit's href must start with '/', got: " + href);
+            check(!href.contains(".html"), "a hit's href must not contain .html, got: " + href);
         });
 
-        withPage("K-5: empty search input does not open dropdown", page -> {
-            page.navigate(url("/guides/top_page/"));
-            page.waitForLoadState();
-            check(page.querySelector("#search-results.open") == null,
-                "#search-results must not be open on fresh page load");
+        withPage("K-5: the results page for an empty query lists nothing", page -> {
+            page.navigate(url("/search"));
+            check(page.querySelector("a.search-hit") == null,
+                "an empty query must list no hits");
+            check(page.querySelector(".search-hint") != null,
+                "an empty query must say what to do instead");
         });
     }
 

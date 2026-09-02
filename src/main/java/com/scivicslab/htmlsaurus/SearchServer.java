@@ -243,7 +243,81 @@ public class SearchServer {
         String locale = HttpUtils.queryParam(ex, "locale");
         ActorRef<LuceneSearcher> sRef = (!locale.isEmpty() && localeSearchers.containsKey(locale))
             ? localeSearchers.get(locale) : searcher;
+
+        // A browser states that it wants a page; a program asking for the same address states
+        // nothing, or asks for JSON, and keeps getting JSON. The address is the one Docusaurus
+        // uses for its results page, so a reader who lands on it sees results rather than data.
+        String accept = ex.getRequestHeaders().getFirst("Accept");
+        if (accept != null && accept.contains("text/html")) {
+            String page = searchResultsPage(q, sRef);
+            if (page != null) {
+                HttpUtils.respond(ex, 200, "text/html; charset=UTF-8", page);
+                return;
+            }
+        }
         HttpUtils.respond(ex, 200, "application/json; charset=UTF-8", search(q, sRef));
+    }
+
+    /**
+     * Renders the search results into the page {@code SiteBuilder} built for them, so the results
+     * arrive wearing the site's navbar, sidebar and colours. Returns null when that page is absent,
+     * which is every build made before this page existed; the caller then answers with JSON as it
+     * always did.
+     */
+    private String searchResultsPage(String q, ActorRef<LuceneSearcher> sRef) {
+        Path page = staticDir.resolve("search").resolve("index.html");
+        if (!Files.isRegularFile(page)) return null;
+        String html;
+        try {
+            html = Files.readString(page);
+        } catch (IOException e) {
+            return null;
+        }
+        return html
+            .replace(SiteBuilder.SEARCH_RESULTS_MARKER, searchResultsHtml(q, sRef))
+            .replace("id=\"search-input\" name=\"q\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\" value=\"\"",
+                     "id=\"search-input\" name=\"q\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\" value=\""
+                     + HttpUtils.escapeHtml(q) + "\"");
+    }
+
+    /** The results themselves: a count, then one block per hit with its title, path and summary. */
+    private String searchResultsHtml(String q, ActorRef<LuceneSearcher> sRef) {
+        if (q == null || q.isBlank()) {
+            return "<p class=\"search-hint\">Type a query in the box above.</p>";
+        }
+        List<LuceneSearcher.Hit> hits;
+        try {
+            hits = sRef.ask(s -> { try { return s.search(q, 50,
+                new String[]{"title_idx", "doc_id_idx", "path_tokens", "meta", "body"},
+                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f));
+            } catch (Exception e) { throw new RuntimeException(e); } }).join();
+        } catch (Exception e) {
+            System.err.println("Search error: " + e.getMessage());
+            hits = List.of();
+        }
+        var sb = new StringBuilder();
+        sb.append("<p class=\"search-count\"><strong>").append(hits.size())
+          .append("</strong> result(s) for &quot;").append(HttpUtils.escapeHtml(q)).append("&quot;</p>\n");
+        if (hits.isEmpty()) {
+            sb.append("<p class=\"search-none\">No results.</p>\n");
+            return sb.toString();
+        }
+        for (var hit : hits) {
+            sb.append("<a class=\"search-hit\" href=\"").append(HttpUtils.escapeHtml(hit.path())).append("\">\n");
+            sb.append("  <div class=\"search-hit-title\">").append(HttpUtils.escapeHtml(hit.title())).append("</div>\n");
+            sb.append("  <div class=\"search-hit-path\">").append(HttpUtils.escapeHtml(hit.path())).append("</div>\n");
+            // The summary marks the matched words with <b>; everything else is escaped.
+            sb.append("  <div class=\"search-hit-summary\">").append(escapeKeepingBold(hit.summary())).append("</div>\n");
+            sb.append("</a>\n");
+        }
+        return sb.toString();
+    }
+
+    /** Escapes the text, then restores the {@code <b>} pairs the highlighter put around matches. */
+    private static String escapeKeepingBold(String s) {
+        return HttpUtils.escapeHtml(s == null ? "" : s)
+            .replace("&lt;b&gt;", "<b>")
+            .replace("&lt;/b&gt;", "</b>");
     }
 
     /**

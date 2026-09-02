@@ -153,6 +153,7 @@ public class SiteBuilder {
 
         convertMarkdownFiles(mdFiles, root, pageOrder);
         if (production) copySiblingAssetsIntoPageDirectories(mdFiles);
+        if (production) writeSearchPage(root);
         writeRootIndex(mdFiles, root, pageOrder);
         writeFeeds();
 
@@ -352,6 +353,28 @@ public class SiteBuilder {
             + "<p>Redirecting to <a href=\"" + targetEsc + "\">" + targetEsc + "</a>...</p>"
             + "</body></html>\n";
         Files.writeString(outDir.resolve("index.html"), indexHtml);
+    }
+
+    /** Marks where {@code SearchServer} writes the rendered results into the search page. */
+    static final String SEARCH_RESULTS_MARKER = "<!--html-saurus:search-results-->";
+
+    /**
+     * Writes {@code search/index.html}: the site's own page, carrying its navbar, sidebar, colours
+     * and footer, with {@link #SEARCH_RESULTS_MARKER} where the results belong.
+     *
+     * <p>The page is built here rather than assembled when the request arrives because the server
+     * holds only the built site, not the machinery that renders a page. It answers a search by
+     * reading this file and putting the results in place of the marker, so a reader who searches
+     * stays on a page that looks like the site around it.
+     */
+    private void writeSearchPage(SiteNode root) throws IOException {
+        String content = "<h1>Search</h1>\n" + SEARCH_RESULTS_MARKER + "\n";
+        String html = renderPage("Search", content, root, "../", "/search/", null, "",
+                                 null, null, null, null, "");
+        Path outFile = outDir.resolve("search").resolve("index.html");
+        Files.createDirectories(outFile.getParent());
+        Files.writeString(outFile, html);
+        System.out.println("  " + outFile);
     }
 
     /** Writes sitemap, RSS and JSON feeds, which need the site's own URL to state absolute links. */
