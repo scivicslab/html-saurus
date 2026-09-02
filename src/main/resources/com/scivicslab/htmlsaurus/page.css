@@ -114,6 +114,15 @@ header nav.top .nav-more-btn.active { color: #fff; border-bottom-color: var(--c-
                 outline: none; }
 #search-input::placeholder { color: var(--c-arrow); }
 #search-input:focus { border-color: var(--c-nav-accent); }
+/* On the top bar the box sits at the right end, after the section links, which is where
+   Docusaurus puts it. It keeps a fixed width so the links keep theirs. */
+header #search-wrap { margin: 0 0 0 auto; flex: 0 0 auto; width: 240px; }
+header #search-input { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.25);
+                       color: #fff; }
+header #search-input::placeholder { color: #bbb; }
+header #search-input:focus { background: rgba(255,255,255,0.16); }
+/* The panel hangs below the bar, aligned to the box's right edge so it stays on screen. */
+header #search-results { left: auto; right: 0; }
 /* Anchored to the left edge: the sidebar is 280px wide, so a right-anchored panel would
    hang off the screen. Overlaying the document pane is what the z-index is for. */
 #search-results { position: absolute; top: calc(100% + 6px); left: 0; width: 400px;
@@ -216,6 +225,7 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
   header { padding: 0 0.75rem; gap: 0; }
   header .site-title { font-size: 0.95rem; margin-right: 0.5rem; }
   header nav.top { display: none; }
+  header #search-wrap { width: 150px; }
   #search-results { width: min(90vw, 280px); }
   main { padding: 1rem 0.875rem; }
   main h1 { font-size: 1.5rem; }

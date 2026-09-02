@@ -46,6 +46,14 @@ class PageRenderer {
         this.allLocales = allLocales != null ? allLocales : List.of();
     }
 
+    /** Writes the search box. The same markup serves both modes; only its parent differs. */
+    private static void appendSearchBox(StringBuilder sb) {
+        sb.append("  <div id=\"search-wrap\">\n");
+        sb.append("    <input id=\"search-input\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\">\n");
+        sb.append("    <div id=\"search-results\"></div>\n");
+        sb.append("  </div>\n");
+    }
+
     /**
      * Renders a complete HTML page including header, sidebar, main content, right-side TOC,
      * copy buttons, theme switcher, search bar, and all supporting CSS/JS.
@@ -169,6 +177,10 @@ class PageRenderer {
             sb.append("    </div>\n");
         }
         sb.append("  </nav>\n");
+        // Docusaurus carries its search box on the top bar, and a published site should look like
+        // the site it replaces. In portal mode the bar also carries the rebuild controls and one
+        // link per project section, so the box lives in the sidebar there instead.
+        if (production) appendSearchBox(sb);
         if (!production) {
             // Two stages, not one: HTML alone is what an author presses repeatedly while editing
             // (about 2ms per document), while All also runs the Lucene index and re-sends every
@@ -235,10 +247,8 @@ class PageRenderer {
             sb.append("    <button id=\"rebuild-btn\" title=\"Rebuild this project\">&#x21BB; Rebuild</button>\n");
             sb.append("  </div>\n");
         }
-        sb.append("  <div id=\"search-wrap\">\n");
-        sb.append("    <input id=\"search-input\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\">\n");
-        sb.append("    <div id=\"search-results\"></div>\n");
-        sb.append("  </div>\n");
+        // Production mode puts the search box on the top bar instead, where Docusaurus has it.
+        if (!production) appendSearchBox(sb);
         sb.append("  <div class=\"mobile-top-nav\">\n");
         for (SiteNode section : root.children()) {
             if (!section.isDir()) continue;
