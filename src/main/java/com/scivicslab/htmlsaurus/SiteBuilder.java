@@ -190,7 +190,10 @@ public class SiteBuilder {
 
         SiteNode root = navBuilder.build();
 
-        // Parse blog posts before building docs so "Blog" appears in the navbar for all pages.
+        // Parse blog posts before building docs so the navbar entry, when the config declares one,
+        // is present on every page. Page generation itself only needs the blog source directory:
+        // whether the navbar links to the blog decides what is shown, not whether /blog/ exists.
+        // Documents link to posts directly, so those links must resolve either way.
         List<BlogBuilder.BlogPost> blogPosts = new ArrayList<>();
         Map<String, List<BlogBuilder.BlogPost>> blogByTag = new LinkedHashMap<>();
         Path projectRoot = ConfigReader.findProjectRoot(docsDir);
@@ -201,7 +204,7 @@ public class SiteBuilder {
         BlogBuilder blogBuilder = new BlogBuilder(outDir, converter, currentLocale, defaultLocale,
                 production, siteName, customCss, customHeader, customFooter, this);
         boolean blogInNav = ConfigReader.hasBlogNavbarEntry(projectRoot);
-        if (Files.exists(blogSrcDir) && Files.isDirectory(blogSrcDir) && blogInNav) {
+        if (Files.exists(blogSrcDir) && Files.isDirectory(blogSrcDir)) {
             try (var topStream = Files.list(blogSrcDir)) {
                 topStream.forEach(entry -> {
                     try {
@@ -229,7 +232,9 @@ public class SiteBuilder {
             for (BlogBuilder.BlogPost p : blogPosts) {
                 for (String t : p.tags()) blogByTag.computeIfAbsent(t, k -> new ArrayList<>()).add(p);
             }
-            root.children().add(blogBuilder.buildBlogNavNode(blogPosts, blogByTag));
+            if (blogInNav) {
+                root.children().add(blogBuilder.buildBlogNavNode(blogPosts, blogByTag));
+            }
         }
 
         List<SiteNode> pageOrder = flattenOrder(root.children());
