@@ -141,16 +141,24 @@ public class ImportTabE2E {
                 page.fill("#import-pdf-pages-per-file", "1");
                 page.fill("#import-pdf-path", pdf.toAbsolutePath().toString());
                 page.click("#import-pdf-start");
-                String progressText = "";
+                // Where an import reports itself moved out of the form: it now has a row of its
+                // own under Batch Job, so several can run at once and the form is free
+                // immediately (WhereJobControlBelongs_260901_oo01).
+                page.click("#tab-btn-batch");
+                // This job's own row, found by the file name it is labelled with: the list holds
+                // every import this server has run, so reading the whole panel would let another
+                // job's outcome answer for this one.
+                String fileName = pdf.getFileName().toString();
+                String row = "";
                 for (int i = 0; i < 300; i++) {
-                    progressText = page.textContent("#import-progress");
-                    if (progressText.contains("Done:") || progressText.contains("Error")) break;
+                    row = rowFor(page, fileName);
+                    if (row.contains("Done:") || row.contains("Error")) break;
                     page.waitForTimeout(500);
                 }
-                check(progressText.contains("Done:"), "progress must report success, got: " + progressText);
-                check(!progressText.contains("0 image(s) extracted"),
+                check(row.contains("Done:"), "the job's own row must report success, got: " + row);
+                check(!row.contains("0 image(s)"),
                         "the fixture PDF has one figure — 0 images means Marker's images field is not "
-                        + "being extracted again, got: " + progressText);
+                        + "being extracted again, got: " + row);
             } catch (Exception e) {
                 throw new AssertionError("setup/build failed: " + e.getMessage(), e);
             }
@@ -181,7 +189,7 @@ public class ImportTabE2E {
                     "PDF path must survive reload, got: " + page.inputValue("#import-pdf-path"));
         });
 
-        withPage("P-2: a running PDF import job resumes progress display after reload, without polling in between", browser, page -> {
+        withPage("P-2: a running PDF import is still listed, and still finishes, after a reload", browser, page -> {
             try {
                 Path pdf = Files.createTempFile("e2e-reload-fixture-", ".pdf");
                 // Per-page OCR time varies a lot with other load in the same JVM/host (a prior
@@ -207,38 +215,49 @@ public class ImportTabE2E {
                 // before that write ever runs, which is not the scenario this test checks (the job
                 // itself already starts server-side as soon as the request is received; this test
                 // is about the *display* resuming, which depends on the browser having seen jobId).
-                String jobId = null;
-                for (int i = 0; i < 100; i++) {
-                    Object v = page.evaluate("() => sessionStorage.getItem('html-saurus-active-pdf-job')");
-                    if (v != null) { jobId = v.toString(); break; }
-                    page.waitForTimeout(50);
-                }
-                check(jobId != null, "start must record an active jobId in sessionStorage before this test reloads");
-                // A plain wait here, however long, is not enough: Chromium commits a sessionStorage
-                // write to its browser-process storage backend via an async IPC that a bare timer
-                // does not wait for, so reloading right after setItem() can race ahead of that IPC
-                // and read back null even though the value was already visible to further JS reads
-                // in the same document (confirmed empirically — waitForTimeout up to 300ms still lost
-                // the value every time, but performing any real fetch() first made it reliable). This
-                // status check both fits naturally (a resuming user would want to see current state)
-                // and gives that IPC a real round trip to land before the reload below.
-                page.evaluate("(id) => fetch('/api/import/pdf/status?jobId=' + id).then(r => r.text())", jobId);
+                // What survives a reload is no longer anything this browser remembered: the job
+                // is the server's, so the page asks for the list. That is a stronger property —
+                // an import started from another browser shows up here too
+                // (WhereJobControlBelongs_260901_oo01).
                 page.reload();
                 page.waitForLoadState();
-                check(page.isDisabled("#import-pdf-start"),
-                        "Start button must come back disabled — a job is still resuming/running after reload");
-                String progressText = "";
+                page.click("#tab-btn-batch");
+                check(!page.isDisabled("#import-pdf-start"),
+                        "Start must stay enabled — one import no longer blocks the next");
+                String fileName = pdf.getFileName().toString();
+                String row = "";
                 for (int i = 0; i < 300; i++) {
-                    progressText = page.textContent("#import-progress");
-                    if (progressText.contains("Done:") || progressText.contains("Error")) break;
+                    row = rowFor(page, fileName);
+                    if (row.contains("Done:") || row.contains("Error")) break;
                     page.waitForTimeout(200);
                 }
-                check(progressText.contains("Done:"),
-                        "job must still reach completion after the page that started it was reloaded, got: " + progressText);
+                check(row.contains("Done:"),
+                        "the job must still reach completion, and be listed, after the page that "
+                        + "started it was reloaded, got: " + row);
             } catch (Exception e) {
                 throw new AssertionError("setup/build failed: " + e.getMessage(), e);
             }
         });
+    }
+
+    /**
+     * The Batch Job row belonging to one import, by the file name it is labelled with.
+     *
+     * @param page     the portal page, with the Batch Job tab open
+     * @param fileName the imported file's name, as the row's label shows it
+     * @return that row's text, or the empty string while it has not appeared
+     */
+    private static String rowFor(Page page, String fileName) {
+        Object text = page.evaluate(
+                "(name) => {"
+              + "  const rows = Array.from(document.querySelectorAll('.import-job'));"
+              + "  const row = rows.find(r => {"
+              + "    const label = r.querySelector('.import-job-label');"
+              + "    return label && label.textContent.trim() === name;"
+              + "  });"
+              + "  return row ? row.textContent : '';"
+              + "}", fileName);
+        return String.valueOf(text);
     }
 
     /** A plain multi-page PDF (no images), for tests that only care about page-by-page progress. */
