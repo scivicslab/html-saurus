@@ -31,22 +31,9 @@ public class SiteBuilder {
     private final MarkdownConverter converter;
     private final NavTreeBuilder navBuilder;
 
-    private final String siteName;
+    /** Everything the project's own files say about rendering; read once in the constructor. */
+    private final ProjectConfig config;
     private final boolean production;
-    /** Custom CSS loaded from {@code html-saurus.css} in the project root; null if absent. */
-    private final String customCss;
-    /** Custom header HTML injected at the top of {@code <body>}; null if absent. */
-    private final String customHeader;
-    /** Custom footer HTML injected before {@code </body>}; null if absent. */
-    private final String customFooter;
-    /** Custom TOC footer HTML injected at the bottom of the right-side TOC aside; null if absent. */
-    private final String customTocFooter;
-    /** Data URL for the favicon, read from the project's static directory; null if not found. */
-    private final String faviconDataUrl;
-    /** Data URL for the navbar logo image; null if not configured. */
-    private final String logoDataUrl;
-    /** Alt text for the navbar logo image. */
-    private final String logoAlt;
     /**
      * Locale code of this build (e.g., "ja", "en"), or null if i18n is not configured.
      * When equal to defaultLocale (or null), this is the default-language build served at the root path.
@@ -56,8 +43,6 @@ public class SiteBuilder {
     private final String defaultLocale;
     /** All available locale codes in display order (including currentLocale); empty if i18n is not configured. */
     private final List<String> allLocales;
-    /** Site URL (e.g. "https://example.com") read from docusaurus.config; null if not found. Used for feeds/sitemap. */
-    private final String siteUrl;
     /** Pages collected during build for feed and sitemap generation. Thread-safe for parallelStream. */
     private final List<PageInfo> builtPages = new CopyOnWriteArrayList<>();
 
@@ -136,18 +121,7 @@ public class SiteBuilder {
         this.defaultLocale = defaultLocale;
         this.allLocales = allLocales != null ? allLocales : List.of();
         Path projectRoot = ConfigReader.findProjectRoot(docsDir);
-        // Read site name from i18n navbar.json or docusaurus.config; fall back to passed-in name
-        String configSiteName = ConfigReader.readSiteNameFromConfig(projectRoot, currentLocale);
-        this.siteName = configSiteName != null ? configSiteName : siteName;
-        this.customCss       = production ? ConfigReader.readLocalized(projectRoot, "html-saurus.css",              currentLocale) : null;
-        this.customHeader    = production ? ConfigReader.readLocalized(projectRoot, "html-saurus-header.html",    currentLocale) : null;
-        this.customFooter    = production ? ConfigReader.readLocalized(projectRoot, "html-saurus-footer.html",    currentLocale) : null;
-        this.customTocFooter = production ? ConfigReader.readLocalized(projectRoot, "html-saurus-toc-footer.html", currentLocale) : null;
-        this.faviconDataUrl = ConfigReader.readFaviconDataUrl(projectRoot);
-        String[] logoInfo = ConfigReader.readLogoInfo(projectRoot);
-        this.logoDataUrl = logoInfo[0];
-        this.logoAlt     = logoInfo[1];
-        this.siteUrl     = ConfigReader.readSiteUrl(projectRoot);
+        this.config = ConfigReader.read(projectRoot, production, currentLocale, siteName);
         this.converter = new MarkdownConverter();
         // For alternate locales, use the default-locale docs dir as fallback so untranslated
         // pages still appear in the sidebar (Docusaurus standard behaviour).
@@ -157,10 +131,7 @@ public class SiteBuilder {
             if (Files.isDirectory(defaultDocs)) fallbackDocsDir = defaultDocs;
         }
         this.navBuilder = new NavTreeBuilder(docsDir, production, converter, currentLocale, defaultLocale, fallbackDocsDir);
-        this.pageRenderer = new PageRenderer(production, this.siteName,
-                customCss, customHeader, customFooter, customTocFooter,
-                faviconDataUrl, logoDataUrl, logoAlt,
-                currentLocale, defaultLocale, this.allLocales, siteUrl);
+        this.pageRenderer = new PageRenderer(production, config, currentLocale, defaultLocale, this.allLocales);
     }
 
     /**
@@ -171,7 +142,32 @@ public class SiteBuilder {
      * @throws IOException if file I/O fails
      */
     public void build() throws IOException {
-        // Clean output directory before building, like Docusaurus yarn build does.
+        cleanOutputDirectory();
+
+        SiteNode root = navBuilder.build();
+        BlogBuilder blogBuilder = new BlogBuilder(outDir, converter, currentLocale, defaultLocale,
+                production, config, this);
+        BlogContent blog = collectBlogPosts(blogBuilder, root);
+
+        List<SiteNode> pageOrder = flattenOrder(root.children());
+        List<Path[]> mdFiles = collectSourceFilesAndCopyAssets();
+
+        convertMarkdownFiles(mdFiles, root, pageOrder);
+        if (production) copySiblingAssetsIntoPageDirectories(mdFiles);
+        writeRootIndex(mdFiles, root, pageOrder);
+        writeFeeds();
+
+        if (!blog.posts().isEmpty()) {
+            blogBuilder.buildBlog(blog.posts(), blog.byTag(), root);
+        }
+    }
+
+    /** The blog posts of one project, in display order, and the same posts grouped by tag. */
+    private record BlogContent(List<BlogBuilder.BlogPost> posts,
+                               Map<String, List<BlogBuilder.BlogPost>> byTag) {}
+
+    /** Empties the output directory, as {@code yarn build} does, and recreates it. */
+    private void cleanOutputDirectory() throws IOException {
         if (Files.exists(outDir)) {
             Files.walkFileTree(outDir, new SimpleFileVisitor<>() {
                 @Override
@@ -187,10 +183,14 @@ public class SiteBuilder {
             });
         }
         Files.createDirectories(outDir);
+    }
 
-        SiteNode root = navBuilder.build();
-
-        // Parse blog posts before building docs so "Blog" appears in the navbar for all pages.
+    /**
+     * Reads the project's blog posts and adds a Blog section to {@code root}, so that every page
+     * built afterwards carries it in the navbar. Returns empty content when the project has no
+     * blog directory.
+     */
+    private BlogContent collectBlogPosts(BlogBuilder blogBuilder, SiteNode root) throws IOException {
         List<BlogBuilder.BlogPost> blogPosts = new ArrayList<>();
         Map<String, List<BlogBuilder.BlogPost>> blogByTag = new LinkedHashMap<>();
         Path projectRoot = ConfigReader.findProjectRoot(docsDir);
@@ -198,43 +198,48 @@ public class SiteBuilder {
         Path blogSrcDir = isNonDefaultLocale
                 ? projectRoot.resolve("i18n/" + currentLocale + "/docusaurus-plugin-content-blog")
                 : projectRoot.resolve("blog");
-        BlogBuilder blogBuilder = new BlogBuilder(outDir, converter, currentLocale, defaultLocale,
-                production, siteName, customCss, customHeader, customFooter, this);
-        if (Files.exists(blogSrcDir) && Files.isDirectory(blogSrcDir)) {
-            try (var topStream = Files.list(blogSrcDir)) {
-                topStream.forEach(entry -> {
-                    try {
-                        if (!Files.isDirectory(entry) && entry.toString().endsWith(".md")) {
-                            blogPosts.add(blogBuilder.parseBlogPost(entry));
-                        } else if (Files.isDirectory(entry)) {
-                            Path idx = entry.resolve("index.md");
-                            if (Files.exists(idx)) {
-                                blogPosts.add(blogBuilder.parseBlogPost(idx));
-                            } else {
-                                try (var inner = Files.list(entry)) {
-                                    inner.filter(p -> !Files.isDirectory(p) && p.toString().endsWith(".md"))
-                                         .findFirst().ifPresent(p -> {
-                                             try { blogPosts.add(blogBuilder.parseBlogPost(p)); }
-                                             catch (IOException e) { System.err.println("WARN: blog parse error: " + p); }
-                                         });
-                                }
-                            }
-                        }
-                    } catch (IOException e) { System.err.println("WARN: blog scan error: " + entry); }
-                });
-            }
-            blogPosts.sort(Comparator.<BlogBuilder.BlogPost, LocalDate>comparing(
-                    p -> p.date() != null ? p.date() : LocalDate.EPOCH).reversed());
-            for (BlogBuilder.BlogPost p : blogPosts) {
-                for (String t : p.tags()) blogByTag.computeIfAbsent(t, k -> new ArrayList<>()).add(p);
-            }
-            root.children().add(blogBuilder.buildBlogNavNode(blogPosts, blogByTag));
+        if (!Files.exists(blogSrcDir) || !Files.isDirectory(blogSrcDir)) {
+            return new BlogContent(blogPosts, blogByTag);
         }
 
-        List<SiteNode> pageOrder = flattenOrder(root.children());
+        try (var topStream = Files.list(blogSrcDir)) {
+            topStream.forEach(entry -> {
+                try {
+                    if (!Files.isDirectory(entry) && entry.toString().endsWith(".md")) {
+                        blogPosts.add(blogBuilder.parseBlogPost(entry));
+                    } else if (Files.isDirectory(entry)) {
+                        Path idx = entry.resolve("index.md");
+                        if (Files.exists(idx)) {
+                            blogPosts.add(blogBuilder.parseBlogPost(idx));
+                        } else {
+                            try (var inner = Files.list(entry)) {
+                                inner.filter(p -> !Files.isDirectory(p) && p.toString().endsWith(".md"))
+                                     .findFirst().ifPresent(p -> {
+                                         try { blogPosts.add(blogBuilder.parseBlogPost(p)); }
+                                         catch (IOException e) { System.err.println("WARN: blog parse error: " + p); }
+                                     });
+                            }
+                        }
+                    }
+                } catch (IOException e) { System.err.println("WARN: blog scan error: " + entry); }
+            });
+        }
+        blogPosts.sort(Comparator.<BlogBuilder.BlogPost, LocalDate>comparing(
+                p -> p.date() != null ? p.date() : LocalDate.EPOCH).reversed());
+        for (BlogBuilder.BlogPost p : blogPosts) {
+            for (String t : p.tags()) blogByTag.computeIfAbsent(t, k -> new ArrayList<>()).add(p);
+        }
+        root.children().add(blogBuilder.buildBlogNavNode(blogPosts, blogByTag));
+        return new BlogContent(blogPosts, blogByTag);
+    }
 
-        // Collect all source files; copy non-Markdown assets and create directories immediately.
-        List<Path[]> mdFiles = new ArrayList<>(); // [mdFile, rel]
+    /**
+     * Walks the docs directory once. Non-Markdown files are copied to the output directory and the
+     * directory tree is created immediately; Markdown files are returned as {@code [file, rel]}
+     * pairs for conversion.
+     */
+    private List<Path[]> collectSourceFilesAndCopyAssets() throws IOException {
+        List<Path[]> mdFiles = new ArrayList<>();
         Files.walkFileTree(docsDir, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
@@ -255,9 +260,15 @@ public class SiteBuilder {
                 return FileVisitResult.CONTINUE;
             }
         });
+        return mdFiles;
+    }
 
-        // Convert Markdown files in parallel: one actor per file, bounded by buildThreads
-        // (ActorSystem's default ManagedThreadPool -- see BuildParallelization_260822_oo01).
+    /**
+     * Converts every Markdown file, one actor per file, bounded by {@code buildThreads}
+     * (the {@code ActorSystem}'s default {@code ManagedThreadPool} -- see
+     * {@code BuildParallelization_260822_oo01}).
+     */
+    private void convertMarkdownFiles(List<Path[]> mdFiles, SiteNode root, List<SiteNode> pageOrder) {
         ActorSystem buildSystem = new ActorSystem("site-builder", buildThreads);
         try {
             List<CompletableFuture<Void>> futures = new ArrayList<>(mdFiles.size());
@@ -270,90 +281,88 @@ public class SiteBuilder {
         } finally {
             buildSystem.terminate();
         }
+    }
 
-        // In production mode, non-same-name MD files produce dir/file/index.html,
-        // one level deeper than the source directory.  Copy sibling assets (images etc.)
-        // into each page's output directory so that relative src="./img.png" still works.
-        if (production) {
-            for (Path[] pair : mdFiles) {
-                Path rel = pair[1];
-                // Skip same-name pattern files (their output dir matches the source dir)
-                boolean isSameName = false;
-                if (rel.getNameCount() >= 2) {
-                    String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
-                    String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
-                    if (fileBase.equals(parentBase)) isSameName = true;
-                }
-                if (isSameName) continue;
+    /**
+     * In production mode a page that does not follow the same-name pattern lands in
+     * {@code dir/file/index.html}, one level deeper than its source directory. Copies each page's
+     * sibling assets into that directory so a relative {@code src="./img.png"} still resolves.
+     */
+    private void copySiblingAssetsIntoPageDirectories(List<Path[]> mdFiles) throws IOException {
+        for (Path[] pair : mdFiles) {
+            Path rel = pair[1];
+            // Same-name pattern files already land in the source directory itself.
+            boolean isSameName = false;
+            if (rel.getNameCount() >= 2) {
+                String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
+                String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
+                if (fileBase.equals(parentBase)) isSameName = true;
+            }
+            if (isSameName) continue;
 
-                // Determine the output directory for this page's index.html
-                String[] fm = converter.parseFrontmatter(Files.readString(pair[0]));
-                String fmId = fm[2];
-                String cleanBase;
-                if (!fmId.isEmpty()) {
-                    String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
-                    cleanBase = parentPath.isEmpty() ? fmId : cleanRelPath(parentPath) + "/" + fmId;
-                } else {
-                    cleanBase = cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
-                }
-                Path pageOutDir = outDir.resolve(cleanBase);
+            String[] fm = converter.parseFrontmatter(Files.readString(pair[0]));
+            String fmId = fm[2];
+            String cleanBase;
+            if (!fmId.isEmpty()) {
+                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
+                cleanBase = parentPath.isEmpty() ? fmId : cleanRelPath(parentPath) + "/" + fmId;
+            } else {
+                cleanBase = cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
+            }
+            Path pageOutDir = outDir.resolve(cleanBase);
 
-                // Copy non-MD siblings from the source directory into the page output directory
-                Path srcDir = pair[0].getParent();
-                try (var siblings = Files.list(srcDir)) {
-                    siblings.filter(f -> !Files.isDirectory(f) && !f.toString().endsWith(".md"))
-                            .forEach(asset -> {
-                                try {
-                                    Path dest = pageOutDir.resolve(asset.getFileName().toString());
-                                    if (!Files.exists(dest)) {
-                                        Files.createDirectories(dest.getParent());
-                                        Files.copy(asset, dest);
-                                    }
-                                } catch (IOException ignored) {}
-                            });
-                }
+            Path srcDir = pair[0].getParent();
+            try (var siblings = Files.list(srcDir)) {
+                siblings.filter(f -> !Files.isDirectory(f) && !f.toString().endsWith(".md"))
+                        .forEach(asset -> {
+                            try {
+                                Path dest = pageOutDir.resolve(asset.getFileName().toString());
+                                if (!Files.exists(dest)) {
+                                    Files.createDirectories(dest.getParent());
+                                    Files.copy(asset, dest);
+                                }
+                            } catch (IOException ignored) {}
+                        });
             }
         }
+    }
 
-        // Generate root index.html for the homepage.
-        // A doc with "slug: /" in its frontmatter is the Docusaurus homepage.
-        // Render it directly as root index.html (no redirect) to avoid browser blocking.
-        boolean rootPageGenerated = false;
+    /**
+     * Writes the site's root {@code index.html}. A document carrying {@code slug: /} is the
+     * homepage and is rendered there directly, because a browser may block a meta refresh.
+     * With no such document, writes a redirect to the first page of the nav tree.
+     */
+    private void writeRootIndex(List<Path[]> mdFiles, SiteNode root, List<SiteNode> pageOrder)
+            throws IOException {
         for (Path[] pair : mdFiles) {
             try {
                 if (hasRootSlug(Files.readString(pair[0]))) {
                     convertPageAsRoot(pair[0], pair[1], root, pageOrder);
-                    rootPageGenerated = true;
-                    break;
+                    return;
                 }
             } catch (IOException ignored) {}
         }
-        if (!rootPageGenerated) {
-            // Fallback: redirect to the first page in the nav tree
-            String h = root.href();
-            String homeTarget = h != null ? (h.startsWith("/") ? h.substring(1) : h) : null;
-            if (homeTarget != null && !homeTarget.toLowerCase().startsWith("javascript:")) {
-                String targetEsc = escapeHtml(homeTarget);
-                String indexHtml = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
-                    + "<meta http-equiv=\"refresh\" content=\"0;url=" + targetEsc + "\">"
-                    + "<title>Redirecting...</title></head><body>"
-                    + "<p>Redirecting to <a href=\"" + targetEsc + "\">" + targetEsc + "</a>...</p>"
-                    + "</body></html>\n";
-                Files.writeString(outDir.resolve("index.html"), indexHtml);
-            }
-        }
 
-        if (siteUrl != null && !builtPages.isEmpty()) {
-            FeedGenerator feedGenerator = new FeedGenerator(outDir, siteUrl, siteName,
-                    currentLocale, defaultLocale, builtPages);
-            feedGenerator.generateSitemap();
-            feedGenerator.generateRssFeed();
-            feedGenerator.generateJsonFeed();
-        }
+        String h = root.href();
+        String homeTarget = h != null ? (h.startsWith("/") ? h.substring(1) : h) : null;
+        if (homeTarget == null || homeTarget.toLowerCase().startsWith("javascript:")) return;
+        String targetEsc = escapeHtml(homeTarget);
+        String indexHtml = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+            + "<meta http-equiv=\"refresh\" content=\"0;url=" + targetEsc + "\">"
+            + "<title>Redirecting...</title></head><body>"
+            + "<p>Redirecting to <a href=\"" + targetEsc + "\">" + targetEsc + "</a>...</p>"
+            + "</body></html>\n";
+        Files.writeString(outDir.resolve("index.html"), indexHtml);
+    }
 
-        if (!blogPosts.isEmpty()) {
-            blogBuilder.buildBlog(blogPosts, blogByTag, root);
-        }
+    /** Writes sitemap, RSS and JSON feeds, which need the site's own URL to state absolute links. */
+    private void writeFeeds() throws IOException {
+        if (config.siteUrl() == null || builtPages.isEmpty()) return;
+        FeedGenerator feedGenerator = new FeedGenerator(outDir, config.siteUrl(), config.siteName(),
+                currentLocale, defaultLocale, builtPages);
+        feedGenerator.generateSitemap();
+        feedGenerator.generateRssFeed();
+        feedGenerator.generateJsonFeed();
     }
 
     /** One Markdown file's conversion, run as its own actor so {@link #build}'s fan-out is bounded
@@ -491,9 +500,9 @@ public class SiteBuilder {
         String lastUpdated = gitLastModified(mdFile);
 
         // Collect page info for feeds/sitemap
-        if (siteUrl != null) {
+        if (config.siteUrl() != null) {
             boolean isNonDefaultLocale = currentLocale != null && !currentLocale.equals(defaultLocale);
-            String absUrl = siteUrl + (isNonDefaultLocale ? "/" + currentLocale : "") + currentPath;
+            String absUrl = config.siteUrl() + (isNonDefaultLocale ? "/" + currentLocale : "") + currentPath;
             builtPages.add(new PageInfo(title, absUrl, FeedGenerator.plainText(body, 100), FeedGenerator.gitLastModifiedIso(mdFile)));
         }
 

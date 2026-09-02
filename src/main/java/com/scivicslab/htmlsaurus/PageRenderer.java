@@ -15,9 +15,6 @@ class PageRenderer {
 
     private static final String PAGE_CSS = loadResource("page.css");
 
-    // Top navbar: show this many primary sections inline; the rest collapse into a "More" dropdown.
-    private static final int NAV_PRIMARY_ITEMS = 5;
-
     private static final Pattern NUM_PREFIX = Pattern.compile("^(\\d+)_(.*)$");
 
     private static final Pattern HEADING_PATTERN = Pattern.compile(
@@ -34,37 +31,19 @@ class PageRenderer {
         "<span style=\"font-family:monospace;font-size:0.85em;letter-spacing:-0.05em;font-weight:900\">{}</span>";
 
     private final boolean production;
-    private final String siteName;
-    private final String customCss;
-    private final String customHeader;
-    private final String customFooter;
-    private final String customTocFooter;
-    private final String faviconDataUrl;
-    private final String logoDataUrl;
-    private final String logoAlt;
+    /** What the project's own files say about rendering it. */
+    private final ProjectConfig config;
     private final String currentLocale;
     private final String defaultLocale;
     private final List<String> allLocales;
-    private final String siteUrl;
 
-    PageRenderer(boolean production, String siteName,
-                 String customCss, String customHeader, String customFooter, String customTocFooter,
-                 String faviconDataUrl, String logoDataUrl, String logoAlt,
-                 String currentLocale, String defaultLocale, List<String> allLocales,
-                 String siteUrl) {
+    PageRenderer(boolean production, ProjectConfig config,
+                 String currentLocale, String defaultLocale, List<String> allLocales) {
         this.production = production;
-        this.siteName = siteName;
-        this.customCss = customCss;
-        this.customHeader = customHeader;
-        this.customFooter = customFooter;
-        this.customTocFooter = customTocFooter;
-        this.faviconDataUrl = faviconDataUrl;
-        this.logoDataUrl = logoDataUrl;
-        this.logoAlt = logoAlt;
+        this.config = config;
         this.currentLocale = currentLocale;
         this.defaultLocale = defaultLocale;
         this.allLocales = allLocales != null ? allLocales : List.of();
-        this.siteUrl = siteUrl;
     }
 
     /**
@@ -120,9 +99,9 @@ class PageRenderer {
             sb.append("<style data-hs-theme>\n").append(HttpUtils.themeVariables())
               .append(HttpUtils.docThemeMapping()).append("</style>\n");
         }
-        if (customCss != null) {
+        if (config.customCss() != null) {
             sb.append("<style id=\"html-saurus-custom\">\n")
-              .append(customCss)
+              .append(config.customCss())
               .append("\n</style>\n");
         }
         sb.append("""
@@ -134,16 +113,16 @@ class PageRenderer {
             <body>
             """);
 
-        if (customHeader != null) sb.append(customHeader).append("\n");
+        if (config.customHeader() != null) sb.append(config.customHeader()).append("\n");
 
         // Top navbar
         sb.append("<header>\n");
         sb.append("  <a class=\"site-title\" href=\"").append(prefix).append("\">");
-        if (logoDataUrl != null) {
-            sb.append("<img src=\"").append(logoDataUrl).append("\" alt=\"")
-              .append(escapeHtml(logoAlt)).append("\" class=\"site-logo\">");
+        if (config.logoDataUrl() != null) {
+            sb.append("<img src=\"").append(config.logoDataUrl()).append("\" alt=\"")
+              .append(escapeHtml(config.logoAlt())).append("\" class=\"site-logo\">");
         }
-        sb.append(escapeHtml(siteName)).append("</a>\n");
+        sb.append(escapeHtml(config.siteName())).append("</a>\n");
         sb.append("  <button class=\"menu-toggle\" id=\"menu-toggle\" aria-label=\"Toggle navigation\" aria-expanded=\"false\">\n");
         sb.append("    <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\">\n");
         sb.append("      <line x1=\"3\" y1=\"6\" x2=\"21\" y2=\"6\"/><line x1=\"3\" y1=\"12\" x2=\"21\" y2=\"12\"/><line x1=\"3\" y1=\"18\" x2=\"21\" y2=\"18\"/>\n");
@@ -154,7 +133,9 @@ class PageRenderer {
         for (SiteNode section : root.children()) {
             if (section.isDir()) dirSections.add(section);
         }
-        int inlineCount = Math.min(NAV_PRIMARY_ITEMS, dirSections.size());
+        int inlineCount = config.navPrimaryItems() > 0
+                ? Math.min(config.navPrimaryItems(), dirSections.size())
+                : dirSections.size();
         for (int i = 0; i < inlineCount; i++) {
             SiteNode section = dirSections.get(i);
             boolean active = topSection != null &&
@@ -301,7 +282,7 @@ class PageRenderer {
 
         sb.append("<main>\n<h1>").append(escapeHtml(title)).append("</h1>\n");
         if (!production) {
-            String mdSourcePath = siteName + "/docs/" + rawRelPath;
+            String mdSourcePath = config.siteName() + "/docs/" + rawRelPath;
             sb.append("<div class=\"copy-bar\">");
             sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
             sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
@@ -354,19 +335,19 @@ class PageRenderer {
 
         sb.append(PageScripts.render());
 
-        if (customFooter != null) sb.append(customFooter).append("\n");
+        if (config.customFooter() != null) sb.append(config.customFooter()).append("\n");
 
         sb.append("</body></html>\n");
 
         String langAttr = (currentLocale != null) ? currentLocale
                         : (defaultLocale != null)  ? defaultLocale
                         : "ja";
-        String faviconHref = faviconDataUrl != null ? faviconDataUrl : "data:,";
+        String faviconHref = config.faviconDataUrl() != null ? config.faviconDataUrl() : "data:,";
         return sb.toString()
             .replace("YADOC_SEARCH_URL", escapeJs(siteRootPrefix + "search"
                 + (isNonDefaultLocale ? "?locale=" + currentLocale : "")))
-            .replace("YADOC_BUILD_SITE", escapeJs(siteName))
-            .replace("YADOC_PROJECT", escapeJs(siteName))
+            .replace("YADOC_BUILD_SITE", escapeJs(config.siteName()))
+            .replace("YADOC_PROJECT", escapeJs(config.siteName()))
             .replace("YADOC_LANG", escapeHtml(langAttr))
             .replace("YADOC_FAVICON", faviconHref);
     }
@@ -437,11 +418,11 @@ class PageRenderer {
 
     /**
      * Builds the HTML to inject at the bottom of the right-side TOC aside.
-     * Uses custom toc footer if configured, otherwise auto-generates feed links if siteUrl is set.
+     * Uses custom toc footer if configured, otherwise auto-generates feed links if config.siteUrl() is set.
      */
     String buildTocFooter(String prefix) {
-        if (customTocFooter != null) return customTocFooter;
-        if (siteUrl != null) {
+        if (config.customTocFooter() != null) return config.customTocFooter();
+        if (config.siteUrl() != null) {
             return "<div class=\"toc-feed-links\">\n"
                 + "  <a href=\"" + prefix + "rss.xml\" class=\"feed-link rss-link\" title=\"RSS Feed\">"
                 + RSS_ICON + " RSS</a>\n"

@@ -27,27 +27,21 @@ class BlogBuilder {
     private final String currentLocale;
     private final String defaultLocale;
     private final boolean production;
-    private final String siteName;
-    private final String customCss;
-    private final String customHeader;
-    private final String customFooter;
+    /** What the project's own files say about rendering it. */
+    private final ProjectConfig config;
     /** Callback to SiteBuilder.renderPage (will move to PageRenderer later). */
     private final SiteBuilder siteBuilder;
 
     BlogBuilder(Path outDir, MarkdownConverter converter,
                 String currentLocale, String defaultLocale,
-                boolean production, String siteName,
-                String customCss, String customHeader, String customFooter,
+                boolean production, ProjectConfig config,
                 SiteBuilder siteBuilder) {
         this.outDir = outDir;
         this.converter = converter;
         this.currentLocale = currentLocale;
         this.defaultLocale = defaultLocale;
         this.production = production;
-        this.siteName = siteName;
-        this.customCss = customCss;
-        this.customHeader = customHeader;
-        this.customFooter = customFooter;
+        this.config = config;
         this.siteBuilder = siteBuilder;
     }
 

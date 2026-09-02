@@ -13,6 +13,43 @@ class ConfigReader {
     private ConfigReader() {}
 
     /**
+     * Reads every project-level setting from {@code projectRoot}, in this order:
+     *
+     * <ol>
+     *   <li>site name — {@code title.message} in
+     *       {@code i18n/<locale>/docusaurus-theme-classic/navbar.json}, else {@code navbar.title}
+     *       in {@code docusaurus.config.ts/js}, else {@code fallbackSiteName};</li>
+     *   <li>{@code html-saurus.css} — production mode only;</li>
+     *   <li>{@code html-saurus-header.html} — production mode only;</li>
+     *   <li>{@code html-saurus-footer.html} — production mode only;</li>
+     *   <li>{@code html-saurus-toc-footer.html} — production mode only;</li>
+     *   <li>favicon — the file {@code favicon:} names, read from {@code static/};</li>
+     *   <li>logo — {@code navbar.logo}'s {@code src} and {@code alt};</li>
+     *   <li>site URL — {@code url};</li>
+     *   <li>{@code navbar.primaryItems} in {@code html-saurus.properties}.</li>
+     * </ol>
+     *
+     * Items 2 to 5 also honour a locale-specific variant, e.g. {@code html-saurus-footer.en.html}.
+     * A project that states none of this still builds: every value has a default or is null.
+     */
+    static ProjectConfig read(Path projectRoot, boolean production, String currentLocale,
+                              String fallbackSiteName) {
+        String configSiteName = readSiteNameFromConfig(projectRoot, currentLocale);
+        String[] logoInfo = readLogoInfo(projectRoot);
+        return new ProjectConfig(
+                configSiteName != null ? configSiteName : fallbackSiteName,
+                production ? readLocalized(projectRoot, "html-saurus.css", currentLocale) : null,
+                production ? readLocalized(projectRoot, "html-saurus-header.html", currentLocale) : null,
+                production ? readLocalized(projectRoot, "html-saurus-footer.html", currentLocale) : null,
+                production ? readLocalized(projectRoot, "html-saurus-toc-footer.html", currentLocale) : null,
+                readFaviconDataUrl(projectRoot),
+                logoInfo[0],
+                logoInfo[1],
+                readSiteUrl(projectRoot),
+                readNavPrimaryItems(projectRoot));
+    }
+
+    /**
      * Reads the site name to display in the navbar.
      * Priority: (1) {@code "title"} in {@code i18n/<locale>/docusaurus-theme-classic/navbar.json},
      * (2) {@code navbar.title} in {@code docusaurus.config.ts/js}, (3) returns {@code null}.
@@ -156,6 +193,32 @@ class ConfigReader {
         if (!Files.exists(p)) return null;
         try { return Files.readString(p); }
         catch (IOException e) { System.err.println("Warning: could not read " + p + ": " + e.getMessage()); return null; }
+    }
+
+    /** Default number of navbar sections shown inline when the project does not say. */
+    static final int DEFAULT_NAV_PRIMARY_ITEMS = 4;
+
+    /**
+     * Reads {@code navbar.primaryItems} from {@code html-saurus.properties} at the project root:
+     * how many top-level sections the navbar shows inline before the rest collapse into "More".
+     * A value of {@code 0} or less shows every section and renders no "More" button, which is what
+     * Docusaurus does. Returns {@link #DEFAULT_NAV_PRIMARY_ITEMS} when the file, the key, or a
+     * readable integer is absent.
+     */
+    static int readNavPrimaryItems(Path projectRoot) {
+        Path props = projectRoot.resolve("html-saurus.properties");
+        if (!Files.exists(props)) return DEFAULT_NAV_PRIMARY_ITEMS;
+        try (var in = Files.newInputStream(props)) {
+            var p = new java.util.Properties();
+            p.load(in);
+            String v = p.getProperty("navbar.primaryItems");
+            if (v == null) return DEFAULT_NAV_PRIMARY_ITEMS;
+            return Integer.parseInt(v.trim());
+        } catch (IOException | NumberFormatException e) {
+            System.err.println("Warning: could not read navbar.primaryItems from " + props
+                               + ": " + e.getMessage());
+            return DEFAULT_NAV_PRIMARY_ITEMS;
+        }
     }
 
     /**
