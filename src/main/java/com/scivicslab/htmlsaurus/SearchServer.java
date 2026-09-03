@@ -119,6 +119,12 @@ public class SearchServer {
             server.createContext("/api/build-html", ex -> handleBuildStage(ex, rebuildHtml));
         }
         server.createContext("/search", this::handleSearch);
+        // An English page's search box submits to /en/search, the results page that sits beside
+        // the English pages. Without a handler there the request reached the static file, whose
+        // results marker nothing had replaced, so the page listed nothing whatever was asked.
+        for (String loc : localeSearchers.keySet()) {
+            server.createContext("/" + loc + "/search", this::handleSearch);
+        }
         if (!production) {
             server.createContext("/api/related", this::handleRelated);
             server.createContext("/api/find-related", this::handleFindRelated);
@@ -240,12 +246,21 @@ public class SearchServer {
      * handler instead of 404ing, exposing search results under a path meant to be closed.
      */
     private void handleSearch(HttpExchange ex) throws IOException {
-        if (!"/search".equals(ex.getRequestURI().getPath())) {
-            respond(ex, 404, "text/plain", "Not Found");
-            return;
+        String path = ex.getRequestURI().getPath();
+        String pathLocale = "";
+        if (!"/search".equals(path)) {
+            String[] seg = path.split("/");   // "", locale, "search"
+            if (seg.length == 3 && "search".equals(seg[2]) && localeSearchers.containsKey(seg[1])) {
+                pathLocale = seg[1];
+            } else {
+                respond(ex, 404, "text/plain", "Not Found");
+                return;
+            }
         }
         String q = HttpUtils.queryParam(ex, "q");
-        String locale = HttpUtils.queryParam(ex, "locale");
+        // The address states the locale twice over: in the path, for a reader who followed the
+        // English pages, and in the locale parameter, for the script that asks for JSON.
+        String locale = !pathLocale.isEmpty() ? pathLocale : HttpUtils.queryParam(ex, "locale");
         ActorRef<LuceneSearcher> sRef = (!locale.isEmpty() && localeSearchers.containsKey(locale))
             ? localeSearchers.get(locale) : searcher;
 
@@ -270,7 +285,9 @@ public class SearchServer {
      * always did.
      */
     private String searchResultsPage(String q, String locale, int pageNo, ActorRef<LuceneSearcher> sRef) {
-        Path page = staticDir.resolve("search").resolve("index.html");
+        Path page = (locale != null && !locale.isBlank() && localeSearchers.containsKey(locale))
+            ? staticDir.resolve(locale).resolve("search").resolve("index.html")
+            : staticDir.resolve("search").resolve("index.html");
         if (!Files.isRegularFile(page)) return null;
         String html;
         try {

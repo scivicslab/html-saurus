@@ -813,6 +813,30 @@ public class ProductionModeE2E {
             check(jaJson != null && !jaJson.equals("[]"),
                 "Japanese search for 'スーパーコンピュータ' must return results");
         });
+
+        withPage("N-6: the search box on an English page leads to English results", page -> {
+            page.navigate(url("/en/guides/software/"));
+            page.fill("#search-input", "slurm");
+            page.press("#search-input", "Enter");
+            page.waitForURL("**/search?q=slurm");
+            check(page.url().contains("/en/search"),
+                "the English search box must lead to /en/search, went to: " + page.url());
+            ElementHandle first = page.querySelector("a.search-hit");
+            check(first != null, "the English results page must list hits");
+            String href = first.getAttribute("href");
+            check(href.startsWith("/en/"),
+                "an English hit must live under /en/, got: " + href);
+        });
+
+        withPage("N-7: an English results page is a page, not the marker", page -> {
+            page.navigate(url("/en/search?q=slurm"));
+            check(page.querySelector(".search-count") != null,
+                "the English results page must state how many hits");
+            check(!page.content().contains("html-saurus:search-results"),
+                "the results marker must be replaced by the results");
+            check(page.inputValue("#search-input").equals("slurm"),
+                "the search box must hold the query on the English results page");
+        });
     }
 
     // -------------------------------------------------------------------------
