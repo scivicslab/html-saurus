@@ -435,22 +435,21 @@ class PageRenderer {
               <li><code>slurm^5 gcc</code><span>^ の後の数だけその語を重く見る</span></li>
             </ul>
             <h2>欄を指定する</h2>
-            <p><code>欄名:語</code> と書くと、その欄だけを見ます。欄は6つあります。</p>
+            <p><code>欄名:語</code> と書くと、その欄だけを見ます。欄は5つあります。</p>
             <ul>
               <li><code>title_idx</code><span>ページの題名</span></li>
               <li><code>body</code><span>ページの本文</span></li>
-              <li><code>path_tokens</code><span>アドレスを / で区切った各語</span></li>
+              <li><code>path_tokens</code><span>アドレスを / で区切った各語。ブログの記事は <code>blog</code> で始まる</span></li>
               <li><code>doc_id_idx</code><span>文書id</span></li>
               <li><code>meta</code><span>著者・年・雑誌名、ブログの日付とタグ</span></li>
-              <li><code>kind</code><span>種類。<code>docs</code> か <code>blog</code></span></li>
             </ul>
             <h3>欄を使った例</h3>
             <ul>
               <li><code>title_idx:slurm</code><span>題名に slurm を含むページ</span></li>
               <li><code>path_tokens:software slurm</code><span>アドレスに software を含むページの中から slurm を探す</span></li>
               <li><code>NOT path_tokens:old_docs AND slurm</code><span>古い文書を除いて slurm を探す</span></li>
-              <li><code>kind:blog メンテナンス</code><span>ブログの記事だけから探す</span></li>
-              <li><code>NOT kind:blog AND slurm</code><span>ブログを除いて探す</span></li>
+              <li><code>path_tokens:blog メンテナンス</code><span>ブログの記事だけから探す</span></li>
+              <li><code>NOT path_tokens:blog AND slurm</code><span>ブログを除いて探す</span></li>
             </ul>
           </div>
         """;
@@ -469,22 +468,21 @@ class PageRenderer {
               <li><code>slurm^5 gcc</code><span>the number after ^ weighs that word</span></li>
             </ul>
             <h2>Naming a field</h2>
-            <p><code>field:word</code> looks in that field alone. There are six fields.</p>
+            <p><code>field:word</code> looks in that field alone. There are five fields.</p>
             <ul>
               <li><code>title_idx</code><span>the page's title</span></li>
               <li><code>body</code><span>the page's text</span></li>
-              <li><code>path_tokens</code><span>each word of the address, split on /</span></li>
+              <li><code>path_tokens</code><span>each word of the address, split on /; a post's begins with <code>blog</code></span></li>
               <li><code>doc_id_idx</code><span>the document id</span></li>
               <li><code>meta</code><span>authors, year, journal; a post's date and tags</span></li>
-              <li><code>kind</code><span>either <code>docs</code> or <code>blog</code></span></li>
             </ul>
             <h3>Examples with a field</h3>
             <ul>
               <li><code>title_idx:slurm</code><span>pages whose title holds slurm</span></li>
               <li><code>path_tokens:software slurm</code><span>slurm within pages under software</span></li>
               <li><code>NOT path_tokens:old_docs AND slurm</code><span>slurm outside the old documents</span></li>
-              <li><code>kind:blog maintenance</code><span>within the blog posts alone</span></li>
-              <li><code>NOT kind:blog AND slurm</code><span>leaving the blog posts out</span></li>
+              <li><code>path_tokens:blog maintenance</code><span>within the blog posts alone</span></li>
+              <li><code>NOT path_tokens:blog AND slurm</code><span>leaving the blog posts out</span></li>
             </ul>
           </div>
         """;

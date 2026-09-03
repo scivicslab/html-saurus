@@ -65,8 +65,8 @@ public class SearchIndexer {
 
     /**
      * Creates an indexer that also indexes the blog posts under {@code blogDir}. A post is indexed
-     * like a page, with {@code kind} holding {@code blog} rather than {@code docs}, so a search can
-     * ask for the posts alone or leave them out.
+     * like a page, and its address begins with {@code blog}, which {@code path_tokens} holds, so a
+     * search can ask for the posts alone or leave them out without any field of its own.
      *
      * @param blogDir directory holding the blog posts, or {@code null} when there is no blog
      */
@@ -90,7 +90,6 @@ public class SearchIndexer {
         Analyzer analyzer = new PerFieldAnalyzerWrapper(baseAnalyzer,
                 Map.of("doc_id_idx", underscoreAnalyzer(),
                        "path_tokens", underscoreAnalyzer(),
-                       "kind", underscoreAnalyzer(),
                        "body_ng", shingleAnalyzer(baseAnalyzer)));
         var config = new IndexWriterConfig(analyzer);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
@@ -261,8 +260,6 @@ public class SearchIndexer {
         doc.add(new StoredField("src_path", mdFile.toAbsolutePath().toString()));
         // Authored short summary from frontmatter (preferred over a body snippet at search time).
         doc.add(new StoredField("description", description));
-        doc.add(new StoredField("kind", "docs"));
-        doc.add(new TextField("kind", "docs", Field.Store.NO));
         doc.add(new TextField("title_idx", title, Field.Store.NO));
         doc.add(new TextField("body", plainText, Field.Store.YES));
         doc.add(new TextField("body_ng", plainText, Field.Store.NO));
@@ -292,9 +289,9 @@ public class SearchIndexer {
     }
 
     /**
-     * Indexes a single blog post. A post carries the same fields as a page, with {@code kind}
-     * holding {@code blog}, its address computed from the slug the blog itself publishes it
-     * under, and its tags and date in {@code meta}.
+     * Indexes a single blog post. A post carries the same fields as a page: its address computed
+     * from the slug the blog itself publishes it under, that address's two words in
+     * {@code path_tokens}, and its tags and date in {@code meta}.
      */
     private void indexBlogPost(IndexWriter writer, Path mdFile) throws IOException {
         String source = Files.readString(mdFile);
@@ -345,8 +342,6 @@ public class SearchIndexer {
         doc.add(new StoredField("title", title));
         doc.add(new StoredField("src_path", mdFile.toAbsolutePath().toString()));
         doc.add(new StoredField("description", ""));
-        doc.add(new StoredField("kind", "blog"));
-        doc.add(new TextField("kind", "blog", Field.Store.NO));
         doc.add(new TextField("title_idx", title, Field.Store.NO));
         doc.add(new TextField("body", plainText, Field.Store.YES));
         doc.add(new TextField("body_ng", plainText, Field.Store.NO));

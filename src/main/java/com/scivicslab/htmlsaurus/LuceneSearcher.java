@@ -61,7 +61,6 @@ class LuceneSearcher implements Closeable {
                 baseAnalyzer,
                 Map.of("doc_id_idx", SearchIndexer.underscoreAnalyzer(),
                        "path_tokens", SearchIndexer.underscoreAnalyzer(),
-                       "kind", SearchIndexer.underscoreAnalyzer(),
                        "body_ng", SearchIndexer.shingleAnalyzer(new JapaneseAnalyzer())));
     }
 

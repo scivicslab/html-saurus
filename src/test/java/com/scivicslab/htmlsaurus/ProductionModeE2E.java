@@ -669,20 +669,20 @@ public class ProductionModeE2E {
                 "the search page's sidebar must not carry the document tree");
         });
 
-        withPage("K-9: kind picks the blog posts out, or leaves them out", page -> {
-            page.navigate(url("/search?q=kind%3Ablog"));
+        withPage("K-9: the address picks the blog posts out, or leaves them out", page -> {
+            page.navigate(url("/search?q=path_tokens%3Ablog"));
             int posts = page.querySelectorAll("a.search-hit").size();
-            check(posts > 0, "kind:blog must list blog posts");
+            check(posts > 0, "path_tokens:blog must list blog posts");
             for (ElementHandle hit : page.querySelectorAll("a.search-hit")) {
                 String href = hit.getAttribute("href");
                 check(href.contains("/blog/"),
-                    "kind:blog must list posts alone, listed: " + href);
+                    "path_tokens:blog must list posts alone, listed: " + href);
             }
-            page.navigate(url("/search?q=NOT+kind%3Ablog+AND+slurm"));
+            page.navigate(url("/search?q=NOT+path_tokens%3Ablog+AND+slurm"));
             for (ElementHandle hit : page.querySelectorAll("a.search-hit")) {
                 String href = hit.getAttribute("href");
                 check(!href.contains("/blog/"),
-                    "NOT kind:blog must leave the posts out, listed: " + href);
+                    "NOT path_tokens:blog must leave the posts out, listed: " + href);
             }
         });
 

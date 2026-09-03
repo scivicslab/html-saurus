@@ -1,6 +1,7 @@
 package com.scivicslab.htmlsaurus;
 
 import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.Term;
 import org.apache.lucene.search.*;
 import org.apache.lucene.store.NIOFSDirectory;
 import org.junit.jupiter.api.DisplayName;
@@ -343,8 +344,8 @@ class SearchIndexerTest {
         }
 
         @Test
-        @DisplayName("kind tells a post from a page")
-        void kind_separatesPostsFromPages() throws IOException {
+        @DisplayName("the address tells a post from a page: path_tokens holds blog")
+        void pathTokens_separatePostsFromPages() throws IOException {
             Path docsDir = createDocsDir("docs");
             writeDoc(docsDir, "page.md", "Page", "Content.");
             Path blogDir = writePost("2026-04-05-maintenance.md",
@@ -353,9 +354,15 @@ class SearchIndexerTest {
 
             new SearchIndexer(docsDir, indexDir, "ja", true, blogDir).index();
 
-            List<String> kinds = readField(indexDir, "kind");
-            assertTrue(kinds.contains("docs"), "a page must carry kind=docs, got: " + kinds);
-            assertTrue(kinds.contains("blog"), "a post must carry kind=blog, got: " + kinds);
+            try (var dir = new NIOFSDirectory(indexDir);
+                 var reader = DirectoryReader.open(dir)) {
+                var searcher = new IndexSearcher(reader);
+                var hits = searcher.search(new TermQuery(new Term("path_tokens", "blog")), 10);
+                assertEquals(1, hits.scoreDocs.length,
+                        "path_tokens:blog must find the post and nothing else");
+                assertEquals("/blog/maintenance/",
+                        searcher.storedFields().document(hits.scoreDocs[0].doc).get("path"));
+            }
         }
 
         @Test
