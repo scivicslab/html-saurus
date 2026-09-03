@@ -635,6 +635,8 @@ public class ProductionModeE2E {
             String value = page.inputValue("#search-input");
             check("slurm".equals(value),
                 "the search box must hold the query that produced the page, held: " + value);
+            int headings = page.querySelectorAll("main h1").size();
+            check(headings == 1, "the results page must carry one heading, carried: " + headings);
         });
 
         withPage("K-4: the results page lists hits, each linking to a clean URL", page -> {
