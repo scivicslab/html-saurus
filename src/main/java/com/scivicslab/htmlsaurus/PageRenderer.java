@@ -423,7 +423,7 @@ class PageRenderer {
 
     private static final String SEARCH_HELP_JA = """
           <div class="search-help">
-            <h2>語の並べ方</h2>
+            <h2>検索方法</h2>
             <p>語を空白で区切ると、その全てを含むページだけが出ます。</p>
             <ul>
               <li><code>slurm gcc</code><span>両方を含むページ</span></li>
@@ -434,8 +434,8 @@ class PageRenderer {
               <li><code>gcc*</code><span>gcc で始まる語</span></li>
               <li><code>slurm^5 gcc</code><span>^ の後の数だけその語を重く見る</span></li>
             </ul>
-            <h2>欄を指定する</h2>
-            <p><code>欄名:語</code> と書くと、その欄だけを見ます。欄は5つあります。</p>
+            <h2>フィールドの指定方法</h2>
+            <p><code>フィールド名:語</code> と書くと、そのフィールドだけを見ます。フィールドは5つあります。</p>
             <ul>
               <li><code>title_idx</code><span>ページの題名</span></li>
               <li><code>body</code><span>ページの本文</span></li>
@@ -443,7 +443,7 @@ class PageRenderer {
               <li><code>doc_id_idx</code><span>文書id</span></li>
               <li><code>meta</code><span>著者・年・雑誌名、ブログの日付とタグ</span></li>
             </ul>
-            <h3>欄を使った例</h3>
+            <h3>フィールドを使った例</h3>
             <ul>
               <li><code>title_idx:slurm</code><span>題名に slurm を含むページ</span></li>
               <li><code>path_tokens:software slurm</code><span>アドレスに software を含むページの中から slurm を探す</span></li>
@@ -456,7 +456,7 @@ class PageRenderer {
 
     private static final String SEARCH_HELP_EN = """
           <div class="search-help">
-            <h2>Writing a query</h2>
+            <h2>How to search</h2>
             <p>Words separated by spaces all have to appear on a page for it to be listed.</p>
             <ul>
               <li><code>slurm gcc</code><span>pages holding both</span></li>
@@ -467,7 +467,7 @@ class PageRenderer {
               <li><code>gcc*</code><span>words starting with gcc</span></li>
               <li><code>slurm^5 gcc</code><span>the number after ^ weighs that word</span></li>
             </ul>
-            <h2>Naming a field</h2>
+            <h2>How to name a field</h2>
             <p><code>field:word</code> looks in that field alone. There are five fields.</p>
             <ul>
               <li><code>title_idx</code><span>the page's title</span></li>
