@@ -303,15 +303,15 @@ public class SearchServer {
             return sb.toString();
         }
         for (var hit : hits) {
-            // Only the title is a link. Wrapping the whole box in one anchor made every line of
-            // the box, the path and the whole summary included, draw as link text under the cursor.
-            sb.append("<div class=\"search-hit\">\n");
-            sb.append("  <div class=\"search-hit-title\"><a href=\"").append(HttpUtils.escapeHtml(hit.path()))
-              .append("\">").append(HttpUtils.escapeHtml(hit.title())).append("</a></div>\n");
+            // The whole box is the link, as in the portal's result list: pointing at it highlights
+            // the box. page.css keeps the site's link underline off it, so the path and the summary
+            // do not draw as link text.
+            sb.append("<a class=\"search-hit\" href=\"").append(HttpUtils.escapeHtml(hit.path())).append("\">\n");
+            sb.append("  <div class=\"search-hit-title\">").append(HttpUtils.escapeHtml(hit.title())).append("</div>\n");
             sb.append("  <div class=\"search-hit-path\">").append(HttpUtils.escapeHtml(hit.path())).append("</div>\n");
             // The summary marks the matched words with <b>; everything else is escaped.
             sb.append("  <div class=\"search-hit-summary\">").append(escapeKeepingBold(hit.summary())).append("</div>\n");
-            sb.append("</div>\n");
+            sb.append("</a>\n");
         }
         return sb.toString();
     }

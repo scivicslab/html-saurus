@@ -190,8 +190,13 @@ aside.toc li.toc-h3 a { padding-left: 1.5rem; font-size: 0.76rem; }
 /* ---- Search results page (production mode) ---- */
 .search-count { color: var(--c-arrow); font-size: 0.9rem; margin: 0 0 1rem; }
 .search-none, .search-hint { color: var(--c-arrow); }
-.search-hit { padding: 0.9rem 1rem; margin-bottom: 0.6rem; border-radius: 6px;
-              border: 1px solid var(--c-border); color: var(--c-text); }
+.search-hit { display: block; padding: 0.9rem 1rem; margin-bottom: 0.6rem; border-radius: 6px;
+              border: 1px solid var(--c-border); }
+/* The box is an anchor inside main, so the site's link rules would colour and underline every
+   line in it. Name main here to outweigh them, and mark the box under the cursor the way the
+   portal's result list does. */
+main a.search-hit, main a.search-hit:hover { color: var(--c-text); text-decoration: none; }
+.search-hit:hover { background: var(--c-hover); border-color: var(--c-act-text); }
 .search-hit-title { font-weight: 600; font-size: 1.02rem; margin-bottom: 0.2rem; }
 .search-hit-path { font-size: 0.78rem; color: var(--c-arrow); margin-bottom: 0.35rem; }
 .search-hit-summary { font-size: 0.88rem; line-height: 1.6;
