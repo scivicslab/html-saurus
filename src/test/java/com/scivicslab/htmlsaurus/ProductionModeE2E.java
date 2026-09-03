@@ -640,7 +640,7 @@ public class ProductionModeE2E {
         withPage("K-4: the results page lists hits, each linking to a clean URL", page -> {
             page.navigate(url("/search?q=slurm"));
             check(page.querySelector(".search-count") != null, "the page must state how many hits");
-            ElementHandle first = page.querySelector("a.search-hit");
+            ElementHandle first = page.querySelector(".search-hit-title a");
             check(first != null, "at least one hit must be listed");
             check(page.querySelector(".search-hit-title") != null, "a hit must show its title");
             check(page.querySelector(".search-hit-summary") != null, "a hit must show its summary");
@@ -651,7 +651,7 @@ public class ProductionModeE2E {
 
         withPage("K-5: the results page for an empty query lists nothing", page -> {
             page.navigate(url("/search"));
-            check(page.querySelector("a.search-hit") == null,
+            check(page.querySelector(".search-hit-title a") == null,
                 "an empty query must list no hits");
             check(page.querySelector(".search-hint") != null,
                 "an empty query must say what to do instead");
