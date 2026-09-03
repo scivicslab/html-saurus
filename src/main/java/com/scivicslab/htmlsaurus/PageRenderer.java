@@ -435,18 +435,18 @@ class PageRenderer {
               <li><code>slurm^5 gcc</code><span>^ の後の数だけその語を重く見る</span></li>
             </ul>
             <h2>欄を指定する</h2>
-            <p><code>欄名:語</code> と書くと、その欄だけを見ます。欄は5つあります。</p>
+            <p><code>欄名:語</code> と書くと、その欄だけを見ます。欄は6つあります。</p>
             <ul>
               <li><code>title_idx</code><span>ページの題名</span></li>
               <li><code>body</code><span>ページの本文</span></li>
-              <li><code>path_tokens</code><span>住所を / で区切った各語</span></li>
+              <li><code>path_tokens</code><span>アドレスを / で区切った各語</span></li>
               <li><code>doc_id_idx</code><span>文書id</span></li>
               <li><code>meta</code><span>著者・年・雑誌名、ブログの日付とタグ</span></li>
               <li><code>kind</code><span>種類。<code>docs</code> か <code>blog</code></span></li>
             </ul>
             <ul>
               <li><code>title_idx:slurm</code><span>題名に slurm を含むページ</span></li>
-              <li><code>path_tokens:software slurm</code><span>住所に software を含むページの中から slurm を探す</span></li>
+              <li><code>path_tokens:software slurm</code><span>アドレスに software を含むページの中から slurm を探す</span></li>
               <li><code>NOT path_tokens:old_docs AND slurm</code><span>古い文書を除いて slurm を探す</span></li>
               <li><code>kind:blog メンテナンス</code><span>ブログの記事だけから探す</span></li>
               <li><code>NOT kind:blog AND slurm</code><span>ブログを除いて探す</span></li>
@@ -468,7 +468,7 @@ class PageRenderer {
               <li><code>slurm^5 gcc</code><span>the number after ^ weighs that word</span></li>
             </ul>
             <h2>Naming a field</h2>
-            <p><code>field:word</code> looks in that field alone. There are five fields.</p>
+            <p><code>field:word</code> looks in that field alone. There are six fields.</p>
             <ul>
               <li><code>title_idx</code><span>the page's title</span></li>
               <li><code>body</code><span>the page's text</span></li>
