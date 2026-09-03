@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -45,6 +46,10 @@ public class SearchServer {
     private final Runnable rebuildHtml;
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
+    /** Hits per page on the results page, matching the portal's own results page. */
+    private static final int HITS_PER_PAGE = 20;
+    /** How deep the results page goes; hits beyond this are not reachable by paging. */
+    private static final int MAX_HITS = 200;
 
     /**
      * @param staticDir     directory containing the generated static HTML files
@@ -249,7 +254,7 @@ public class SearchServer {
         // uses for its results page, so a reader who lands on it sees results rather than data.
         String accept = ex.getRequestHeaders().getFirst("Accept");
         if (accept != null && accept.contains("text/html")) {
-            String page = searchResultsPage(q, sRef);
+            String page = searchResultsPage(q, locale, pageNumber(ex), sRef);
             if (page != null) {
                 HttpUtils.respond(ex, 200, "text/html; charset=UTF-8", page);
                 return;
@@ -264,7 +269,7 @@ public class SearchServer {
      * which is every build made before this page existed; the caller then answers with JSON as it
      * always did.
      */
-    private String searchResultsPage(String q, ActorRef<LuceneSearcher> sRef) {
+    private String searchResultsPage(String q, String locale, int pageNo, ActorRef<LuceneSearcher> sRef) {
         Path page = staticDir.resolve("search").resolve("index.html");
         if (!Files.isRegularFile(page)) return null;
         String html;
@@ -274,20 +279,33 @@ public class SearchServer {
             return null;
         }
         return html
-            .replace(SiteBuilder.SEARCH_RESULTS_MARKER, searchResultsHtml(q, sRef))
+            .replace(SiteBuilder.SEARCH_RESULTS_MARKER, searchResultsHtml(q, locale, pageNo, sRef))
             .replace("id=\"search-input\" name=\"q\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\" value=\"\"",
                      "id=\"search-input\" name=\"q\" type=\"search\" placeholder=\"Search...\" autocomplete=\"off\" value=\""
                      + HttpUtils.escapeHtml(q) + "\"");
     }
 
-    /** The results themselves: a count, then one block per hit with its title, path and summary. */
-    private String searchResultsHtml(String q, ActorRef<LuceneSearcher> sRef) {
+    /** Reads the {@code page} parameter, counting from 1; anything unreadable is page 1. */
+    private static int pageNumber(HttpExchange ex) {
+        try {
+            int n = Integer.parseInt(HttpUtils.queryParam(ex, "page"));
+            return n < 1 ? 1 : n;
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
+
+    /**
+     * The results themselves: a count, then one block per hit with its title, path and summary,
+     * and, when the hits do not fit on one page, the paginator the blog listing pages use.
+     */
+    private String searchResultsHtml(String q, String locale, int pageNo, ActorRef<LuceneSearcher> sRef) {
         if (q == null || q.isBlank()) {
             return "<p class=\"search-hint\">Type a query in the box above.</p>";
         }
         List<LuceneSearcher.Hit> hits;
         try {
-            hits = sRef.ask(s -> { try { return s.search(q, 50,
+            hits = sRef.ask(s -> { try { return s.search(q, MAX_HITS,
                 new String[]{"title_idx", "doc_id_idx", "path_tokens", "meta", "body"},
                 Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f));
             } catch (Exception e) { throw new RuntimeException(e); } }).join();
@@ -295,14 +313,20 @@ public class SearchServer {
             System.err.println("Search error: " + e.getMessage());
             hits = List.of();
         }
+        int total = hits.size();
+        int totalPages = Math.max(1, (total + HITS_PER_PAGE - 1) / HITS_PER_PAGE);
+        int current = Math.min(pageNo, totalPages);
+        int from = (current - 1) * HITS_PER_PAGE;
+        int to = Math.min(from + HITS_PER_PAGE, total);
+
         var sb = new StringBuilder();
-        sb.append("<p class=\"search-count\"><strong>").append(hits.size())
+        sb.append("<p class=\"search-count\"><strong>").append(total)
           .append("</strong> result(s) for &quot;").append(HttpUtils.escapeHtml(q)).append("&quot;</p>\n");
         if (hits.isEmpty()) {
             sb.append("<p class=\"search-none\">No results.</p>\n");
             return sb.toString();
         }
-        for (var hit : hits) {
+        for (var hit : hits.subList(from, to)) {
             // The whole box is the link, as in the portal's result list: pointing at it highlights
             // the box. page.css keeps the site's link underline off it, so the path and the summary
             // do not draw as link text.
@@ -313,7 +337,50 @@ public class SearchServer {
             sb.append("  <div class=\"search-hit-summary\">").append(escapeKeepingBold(hit.summary())).append("</div>\n");
             sb.append("</a>\n");
         }
+        appendPaginator(sb, q, locale, current, totalPages);
         return sb.toString();
+    }
+
+    /**
+     * Appends the paginator, in the markup and the classes the blog listing pages use, so both
+     * kinds of listing page carry the same control. Nothing is appended for a single page.
+     */
+    private static void appendPaginator(StringBuilder sb, String q, String locale,
+                                        int current, int totalPages) {
+        if (totalPages < 2) return;
+        sb.append("<nav class=\"search-paginator\" aria-label=\"Search result pages\">\n");
+        if (current > 1) {
+            sb.append("  <a href=\"").append(pageHref(q, locale, current - 1))
+              .append("\" class=\"paginator-prev\">\u2190 Prev</a>\n");
+        } else {
+            sb.append("  <span class=\"paginator-prev paginator-disabled\">\u2190 Prev</span>\n");
+        }
+        sb.append("  <span class=\"paginator-pages\">");
+        for (int k = 1; k <= totalPages; k++) {
+            if (k == current) {
+                sb.append("<span class=\"paginator-current\">").append(k).append("</span>");
+            } else {
+                sb.append("<a href=\"").append(pageHref(q, locale, k))
+                  .append("\" class=\"paginator-page\">").append(k).append("</a>");
+            }
+        }
+        sb.append("</span>\n");
+        if (current < totalPages) {
+            sb.append("  <a href=\"").append(pageHref(q, locale, current + 1))
+              .append("\" class=\"paginator-next\">Next \u2192</a>\n");
+        } else {
+            sb.append("  <span class=\"paginator-next paginator-disabled\">Next \u2192</span>\n");
+        }
+        sb.append("</nav>\n");
+    }
+
+    /** The address of one page of results, carrying the query and the locale it was asked in. */
+    private static String pageHref(String q, String locale, int pageNo) {
+        var href = new StringBuilder("?q=").append(URLEncoder.encode(q, StandardCharsets.UTF_8));
+        if (locale != null && !locale.isBlank()) {
+            href.append("&amp;locale=").append(URLEncoder.encode(locale, StandardCharsets.UTF_8));
+        }
+        return href.append("&amp;page=").append(pageNo).toString();
     }
 
     /** Escapes the text, then restores the {@code <b>} pairs the highlighter put around matches. */

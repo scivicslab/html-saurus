@@ -656,6 +656,40 @@ public class ProductionModeE2E {
             check(page.querySelector(".search-hint") != null,
                 "an empty query must say what to do instead");
         });
+
+        withPage("K-6: a page of results holds at most twenty hits", page -> {
+            page.navigate(url("/search?q=slurm"));
+            int listed = page.querySelectorAll("a.search-hit").size();
+            check(listed <= 20, "a page must list at most 20 hits, listed: " + listed);
+            int total = Integer.parseInt(page.textContent(".search-count").replaceAll("\\D+.*$", ""));
+            check(total >= listed, "the count must not be smaller than the hits listed: "
+                + total + " < " + listed);
+            // The paginator appears exactly when the hits do not fit on one page.
+            boolean paginated = page.querySelector("nav.search-paginator") != null;
+            check(paginated == (total > 20),
+                "paginator present=" + paginated + " for " + total + " hit(s)");
+        });
+
+        withPage("K-7: the next page of results lists the hits that follow", page -> {
+            page.navigate(url("/search?q=slurm"));
+            int total = Integer.parseInt(page.textContent(".search-count").replaceAll("\\D+.*$", ""));
+            if (total <= 20) {
+                // Too few hits in this site to have a second page; K-6 already checked that the
+                // paginator stays away in that case.
+                return;
+            }
+            String firstOnPage1 = page.querySelector("a.search-hit").getAttribute("href");
+            page.click("nav.search-paginator a.paginator-next");
+            page.waitForLoadState();
+            check(page.url().contains("page=2"), "Next must lead to page 2, went to: " + page.url());
+            check(page.querySelector("span.paginator-current").textContent().trim().equals("2"),
+                "page 2 must mark 2 as the current page");
+            String firstOnPage2 = page.querySelector("a.search-hit").getAttribute("href");
+            check(!firstOnPage1.equals(firstOnPage2),
+                "page 2 must start after page 1, both started with: " + firstOnPage1);
+            check(page.inputValue("#search-input").equals("slurm"),
+                "the search box must still hold the query on page 2");
+        });
     }
 
     // -------------------------------------------------------------------------

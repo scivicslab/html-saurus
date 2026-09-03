@@ -413,8 +413,8 @@ main details.inline-translation > summary .translation-controls button:hover { b
 .blog-tag-chip span { background: var(--c-act-text); color: var(--c-bg);
                       border-radius: 999px; padding: 0 0.4rem; font-size: 0.75rem; }
 .blog-tag-chip:hover { opacity: 0.8; }
-/* ---- Blog paginator ---- */
-.blog-paginator { display: flex; align-items: center; gap: 0.75rem;
+/* ---- Blog paginator, shared with the search results page ---- */
+.blog-paginator, .search-paginator { display: flex; align-items: center; gap: 0.75rem;
                   margin-top: 2.5rem; padding-top: 1.5rem;
                   border-top: 1px solid var(--c-border); flex-wrap: wrap; }
 .paginator-pages { display: flex; align-items: center; gap: 0.4rem; }
