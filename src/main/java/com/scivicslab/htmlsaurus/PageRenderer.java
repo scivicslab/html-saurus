@@ -441,14 +441,16 @@ class PageRenderer {
               <li><code>body</code><span>ページの本文</span></li>
               <li><code>path_tokens</code><span>住所を / で区切った各語</span></li>
               <li><code>doc_id_idx</code><span>文書id</span></li>
-              <li><code>meta</code><span>著者・年・雑誌名</span></li>
+              <li><code>meta</code><span>著者・年・雑誌名、ブログの日付とタグ</span></li>
+              <li><code>kind</code><span>種類。<code>docs</code> か <code>blog</code></span></li>
             </ul>
             <ul>
               <li><code>title_idx:slurm</code><span>題名に slurm を含むページ</span></li>
               <li><code>path_tokens:software slurm</code><span>住所に software を含むページの中から slurm を探す</span></li>
               <li><code>NOT path_tokens:old_docs AND slurm</code><span>古い文書を除いて slurm を探す</span></li>
+              <li><code>kind:blog メンテナンス</code><span>ブログの記事だけから探す</span></li>
+              <li><code>NOT kind:blog AND slurm</code><span>ブログを除いて探す</span></li>
             </ul>
-            <p class="search-help-note">ブログの記事は索引に入っていないので、検索しても出ません。</p>
           </div>
         """;
 
@@ -472,14 +474,16 @@ class PageRenderer {
               <li><code>body</code><span>the page's text</span></li>
               <li><code>path_tokens</code><span>each word of the address, split on /</span></li>
               <li><code>doc_id_idx</code><span>the document id</span></li>
-              <li><code>meta</code><span>authors, year, journal</span></li>
+              <li><code>meta</code><span>authors, year, journal; a post's date and tags</span></li>
+              <li><code>kind</code><span>either <code>docs</code> or <code>blog</code></span></li>
             </ul>
             <ul>
               <li><code>title_idx:slurm</code><span>pages whose title holds slurm</span></li>
               <li><code>path_tokens:software slurm</code><span>slurm within pages under software</span></li>
               <li><code>NOT path_tokens:old_docs AND slurm</code><span>slurm outside the old documents</span></li>
+              <li><code>kind:blog maintenance</code><span>within the blog posts alone</span></li>
+              <li><code>NOT kind:blog AND slurm</code><span>leaving the blog posts out</span></li>
             </ul>
-            <p class="search-help-note">Blog posts are not in the index, so a search never lists them.</p>
           </div>
         """;
 

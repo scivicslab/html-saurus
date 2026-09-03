@@ -669,6 +669,23 @@ public class ProductionModeE2E {
                 "the search page's sidebar must not carry the document tree");
         });
 
+        withPage("K-9: kind picks the blog posts out, or leaves them out", page -> {
+            page.navigate(url("/search?q=kind%3Ablog"));
+            int posts = page.querySelectorAll("a.search-hit").size();
+            check(posts > 0, "kind:blog must list blog posts");
+            for (ElementHandle hit : page.querySelectorAll("a.search-hit")) {
+                String href = hit.getAttribute("href");
+                check(href.contains("/blog/"),
+                    "kind:blog must list posts alone, listed: " + href);
+            }
+            page.navigate(url("/search?q=NOT+kind%3Ablog+AND+slurm"));
+            for (ElementHandle hit : page.querySelectorAll("a.search-hit")) {
+                String href = hit.getAttribute("href");
+                check(!href.contains("/blog/"),
+                    "NOT kind:blog must leave the posts out, listed: " + href);
+            }
+        });
+
         withPage("K-6: a page of results holds at most twenty hits", page -> {
             page.navigate(url("/search?q=slurm"));
             int listed = page.querySelectorAll("a.search-hit").size();

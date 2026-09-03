@@ -73,18 +73,7 @@ class BlogBuilder {
             if (ddm.find()) { try { date = LocalDate.parse(ddm.group(1)); } catch (Exception ignored) {} }
         }
 
-        String slug;
-        var sm = BLOG_SLUG_PAT.matcher(rawFm);
-        if (sm.find()) {
-            slug = sm.group(1).trim();
-        } else if (file.getFileName().toString().equals("index.md")) {
-            // Folder-based post without slug in frontmatter: use directory name
-            slug = file.getParent().getFileName().toString()
-                       .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
-        } else {
-            slug = file.getFileName().toString().replaceAll("\\.md$", "")
-                       .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
-        }
+        String slug = blogSlug(file, rawFm);
 
         List<String> tags = new ArrayList<>();
         var tm = BLOG_TAGS_SECT.matcher(rawFm);
@@ -98,6 +87,27 @@ class BlogBuilder {
         String excerpt = ti >= 0 ? body.substring(0, ti).trim() : body;
 
         return new BlogPost(slug, title, date, List.copyOf(tags), excerpt, body);
+    }
+
+    /**
+     * The slug a post is published under, which is the last part of its address. The search
+     * index computes a post's address with this too, so a hit leads where the blog itself links.
+     *
+     * @param file  the post's Markdown file
+     * @param rawFm the post's raw frontmatter, where a {@code slug:} line wins over the filename
+     */
+    static String blogSlug(Path file, String rawFm) {
+        var sm = BLOG_SLUG_PAT.matcher(rawFm);
+        if (sm.find()) {
+            return sm.group(1).trim();
+        }
+        if (file.getFileName().toString().equals("index.md")) {
+            // Folder-based post without slug in frontmatter: use directory name
+            return file.getParent().getFileName().toString()
+                       .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
+        }
+        return file.getFileName().toString().replaceAll("\\.md$", "")
+                   .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
     }
 
     /** Builds the Blog SiteNode added as a top-level navbar section. */

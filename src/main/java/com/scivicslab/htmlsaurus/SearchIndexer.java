@@ -17,6 +17,8 @@ import org.apache.lucene.store.NIOFSDirectory;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -36,6 +38,8 @@ public class SearchIndexer {
     private final Path indexDir;
     private final String locale;
     private final boolean production;
+    /** The blog posts' directory, indexed alongside the docs; null when the project has no blog. */
+    private final Path blogDir;
 
     /**
      * Creates an indexer for the default (Japanese) locale in dev mode.
@@ -56,10 +60,22 @@ public class SearchIndexer {
      * @param production if {@code true}, generates clean URLs ({@code /page/}); otherwise {@code .html} URLs
      */
     public SearchIndexer(Path docsDir, Path indexDir, String locale, boolean production) {
+        this(docsDir, indexDir, locale, production, null);
+    }
+
+    /**
+     * Creates an indexer that also indexes the blog posts under {@code blogDir}. A post is indexed
+     * like a page, with {@code kind} holding {@code blog} rather than {@code docs}, so a search can
+     * ask for the posts alone or leave them out.
+     *
+     * @param blogDir directory holding the blog posts, or {@code null} when there is no blog
+     */
+    public SearchIndexer(Path docsDir, Path indexDir, String locale, boolean production, Path blogDir) {
         this.docsDir = docsDir;
         this.indexDir = indexDir;
         this.locale = locale;
         this.production = production;
+        this.blogDir = blogDir;
     }
 
     /**
@@ -74,6 +90,7 @@ public class SearchIndexer {
         Analyzer analyzer = new PerFieldAnalyzerWrapper(baseAnalyzer,
                 Map.of("doc_id_idx", underscoreAnalyzer(),
                        "path_tokens", underscoreAnalyzer(),
+                       "kind", underscoreAnalyzer(),
                        "body_ng", shingleAnalyzer(baseAnalyzer)));
         var config = new IndexWriterConfig(analyzer);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
@@ -90,6 +107,18 @@ public class SearchIndexer {
                     return FileVisitResult.CONTINUE;
                 }
             });
+
+            if (blogDir != null && Files.isDirectory(blogDir)) {
+                Files.walkFileTree(blogDir, new SimpleFileVisitor<>() {
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                        if (file.toString().endsWith(".md")) {
+                            indexBlogPost(writer, file);
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+            }
         }
     }
 
@@ -232,6 +261,8 @@ public class SearchIndexer {
         doc.add(new StoredField("src_path", mdFile.toAbsolutePath().toString()));
         // Authored short summary from frontmatter (preferred over a body snippet at search time).
         doc.add(new StoredField("description", description));
+        doc.add(new StoredField("kind", "docs"));
+        doc.add(new TextField("kind", "docs", Field.Store.NO));
         doc.add(new TextField("title_idx", title, Field.Store.NO));
         doc.add(new TextField("body", plainText, Field.Store.YES));
         doc.add(new TextField("body_ng", plainText, Field.Store.NO));
@@ -257,6 +288,74 @@ public class SearchIndexer {
             }
         }
 
+        writer.addDocument(doc);
+    }
+
+    /**
+     * Indexes a single blog post. A post carries the same fields as a page, with {@code kind}
+     * holding {@code blog}, its address computed from the slug the blog itself publishes it
+     * under, and its tags and date in {@code meta}.
+     */
+    private void indexBlogPost(IndexWriter writer, Path mdFile) throws IOException {
+        String source = Files.readString(mdFile);
+        String rawFm = "";
+        String body = source;
+        if (source.startsWith("---")) {
+            int end = source.indexOf("\n---", 3);
+            if (end != -1) {
+                rawFm = source.substring(3, end);
+                body = source.substring(end + 4).stripLeading();
+            }
+        }
+
+        String title = "";
+        String date = "";
+        List<String> tags = new ArrayList<>();
+        boolean inTags = false;
+        for (String line : rawFm.split("\n", -1)) {
+            if (line.startsWith("title:")) {
+                title = line.substring(6).trim().replaceAll("^[\"']|[\"']$", "");
+            } else if (line.startsWith("date:")) {
+                date = line.substring(5).trim();
+            } else if (line.startsWith("tags:")) {
+                inTags = true;
+            } else if (inTags && line.strip().startsWith("- ")) {
+                tags.add(line.strip().substring(2).trim());
+            } else if (!line.isBlank() && !line.startsWith(" ") && !line.startsWith("-")) {
+                inTags = false;
+            }
+        }
+        if (title.isBlank() && body.startsWith("# ")) {
+            int nl = body.indexOf('\n');
+            title = (nl >= 0 ? body.substring(2, nl) : body.substring(2)).trim();
+            body = nl >= 0 ? body.substring(nl + 1).stripLeading() : "";
+        }
+        if (title.isBlank()) {
+            title = mdFile.getFileName().toString().replaceAll("\\.md$", "")
+                          .replaceFirst("^\\d{4}-\\d{2}-\\d{2}-", "");
+        }
+
+        String slug = BlogBuilder.blogSlug(mdFile, rawFm);
+        String localePrefix = (locale != null && !isJapanese()) ? locale + "/" : "";
+        String href = "/" + localePrefix + "blog/" + slug + "/";
+        String plainText = stripMarkdown(body);
+
+        Document doc = new Document();
+        doc.add(new StoredField("path", href));
+        doc.add(new StoredField("title", title));
+        doc.add(new StoredField("src_path", mdFile.toAbsolutePath().toString()));
+        doc.add(new StoredField("description", ""));
+        doc.add(new StoredField("kind", "blog"));
+        doc.add(new TextField("kind", "blog", Field.Store.NO));
+        doc.add(new TextField("title_idx", title, Field.Store.NO));
+        doc.add(new TextField("body", plainText, Field.Store.YES));
+        doc.add(new TextField("body_ng", plainText, Field.Store.NO));
+        String meta = (String.join(" ", tags) + " " + date).trim();
+        if (!meta.isBlank()) {
+            doc.add(new TextField("meta", meta, Field.Store.NO));
+        }
+        doc.add(new TextField("path_tokens", "blog", Field.Store.NO));
+        doc.add(new TextField("path_tokens", slug, Field.Store.NO));
         writer.addDocument(doc);
     }
 

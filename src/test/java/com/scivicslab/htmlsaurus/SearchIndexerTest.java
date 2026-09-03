@@ -299,6 +299,94 @@ class SearchIndexerTest {
         }
     }
 
+    // ---- Blog posts -----------------------------------------------------
+
+    @Nested
+    @DisplayName("blog posts: indexed beside the docs")
+    class BlogPosts {
+
+        /** Returns the stored values of one field, in index order. */
+        private List<String> readField(Path indexDir, String field) throws IOException {
+            List<String> values = new ArrayList<>();
+            try (var dir = new NIOFSDirectory(indexDir);
+                 var reader = DirectoryReader.open(dir)) {
+                var sf = reader.storedFields();
+                for (int i = 0; i < reader.maxDoc(); i++) values.add(sf.document(i).get(field));
+            }
+            return values;
+        }
+
+        private Path writePost(String name, String frontmatter, String body) throws IOException {
+            Path blogDir = tempDir.resolve("blog");
+            Files.createDirectories(blogDir);
+            Path file = blogDir.resolve(name);
+            Files.writeString(file, "---\n" + frontmatter + "---\n\n" + body);
+            return blogDir;
+        }
+
+        @Test
+        @DisplayName("a post is indexed under the address the blog publishes it at")
+        void post_indexedAtItsPublishedAddress() throws IOException {
+            Path docsDir = createDocsDir("docs");
+            writeDoc(docsDir, "page.md", "Page", "Content.");
+            Path blogDir = writePost("2026-04-05-maintenance.md",
+                    "title: Maintenance\ndate: 2026-04-05\ntags:\n  - notice\n",
+                    "The machine stops on Sunday.\n");
+            Path indexDir = tempDir.resolve("index");
+
+            new SearchIndexer(docsDir, indexDir, "ja", true, blogDir).index();
+
+            List<String> paths = readPaths(indexDir);
+            assertEquals(2, paths.size(), "both the page and the post must be indexed");
+            assertTrue(paths.contains("/blog/maintenance/"),
+                    "the post's path must be /blog/maintenance/, got: " + paths);
+        }
+
+        @Test
+        @DisplayName("kind tells a post from a page")
+        void kind_separatesPostsFromPages() throws IOException {
+            Path docsDir = createDocsDir("docs");
+            writeDoc(docsDir, "page.md", "Page", "Content.");
+            Path blogDir = writePost("2026-04-05-maintenance.md",
+                    "title: Maintenance\n", "The machine stops on Sunday.\n");
+            Path indexDir = tempDir.resolve("index");
+
+            new SearchIndexer(docsDir, indexDir, "ja", true, blogDir).index();
+
+            List<String> kinds = readField(indexDir, "kind");
+            assertTrue(kinds.contains("docs"), "a page must carry kind=docs, got: " + kinds);
+            assertTrue(kinds.contains("blog"), "a post must carry kind=blog, got: " + kinds);
+        }
+
+        @Test
+        @DisplayName("a post's text is searchable")
+        void post_textIsIndexed() throws IOException {
+            Path docsDir = createDocsDir("docs");
+            writeDoc(docsDir, "page.md", "Page", "Content.");
+            Path blogDir = writePost("2026-04-05-maintenance.md",
+                    "title: Maintenance\n", "The machine stops on Sunday.\n");
+            Path indexDir = tempDir.resolve("index");
+
+            new SearchIndexer(docsDir, indexDir, "ja", true, blogDir).index();
+
+            List<String> bodies = readField(indexDir, "body");
+            assertTrue(bodies.stream().anyMatch(b -> b.contains("The machine stops on Sunday")),
+                    "the post's text must reach the body field, got: " + bodies);
+        }
+
+        @Test
+        @DisplayName("no blog directory leaves the index to the docs alone")
+        void noBlogDirectory_docsOnly() throws IOException {
+            Path docsDir = createDocsDir("docs");
+            writeDoc(docsDir, "page.md", "Page", "Content.");
+            Path indexDir = tempDir.resolve("index");
+
+            new SearchIndexer(docsDir, indexDir, "ja", true, tempDir.resolve("absent")).index();
+
+            assertEquals(1, readPaths(indexDir).size());
+        }
+    }
+
     // ---- cleanRelPath utility -------------------------------------------
 
     @Nested
