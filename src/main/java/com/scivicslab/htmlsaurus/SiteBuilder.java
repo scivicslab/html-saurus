@@ -370,8 +370,7 @@ public class SiteBuilder {
     private void writeSearchPage(SiteNode root) throws IOException {
         // renderPage writes the title as the page's h1 already; a second one here showed twice.
         String content = SEARCH_RESULTS_MARKER + "\n";
-        String html = renderPage("Search", content, root, "../", "/search/", null, "",
-                                 null, null, null, null, "");
+        String html = pageRenderer.renderSearchPage("Search", content, root, "../", "/search/");
         Path outFile = outDir.resolve("search").resolve("index.html");
         Files.createDirectories(outFile.getParent());
         Files.writeString(outFile, html);

@@ -413,6 +413,17 @@ main details.inline-translation > summary .translation-controls button:hover { b
 .blog-tag-chip span { background: var(--c-act-text); color: var(--c-bg);
                       border-radius: 999px; padding: 0 0.4rem; font-size: 0.75rem; }
 .blog-tag-chip:hover { opacity: 0.8; }
+/* ---- Search page sidebar: how to write a query ---- */
+.search-help { padding: 0 0.75rem 1.5rem; font-size: 0.82rem; line-height: 1.6; }
+.search-help h2 { font-size: 0.86rem; font-weight: 700; margin: 1.2rem 0 0.4rem; }
+.search-help p { margin: 0.3rem 0 0.6rem; color: var(--c-text); }
+.search-help ul { list-style: none; margin: 0 0 0.8rem; padding: 0; }
+.search-help li { margin-bottom: 0.45rem; }
+.search-help code { display: inline-block; background: var(--c-hover); border-radius: 3px;
+                    padding: 0.05rem 0.3rem; font-size: 0.78rem; word-break: break-all; }
+.search-help li > span { display: block; color: var(--c-arrow); font-size: 0.76rem; }
+.search-help-note { color: var(--c-arrow); }
+
 /* ---- Blog paginator, shared with the search results page ---- */
 .blog-paginator, .search-paginator { display: flex; align-items: center; gap: 0.75rem;
                   margin-top: 2.5rem; padding-top: 1.5rem;

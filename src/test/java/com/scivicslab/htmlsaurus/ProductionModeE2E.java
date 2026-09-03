@@ -619,9 +619,9 @@ public class ProductionModeE2E {
             page.navigate(url("/guides/top_page/"));
             page.fill("#search-input", "slurm");
             page.keyboard().press("Enter");
-            page.waitForURL("**/search?q=slurm");
-            check(page.url().contains("/search?q=slurm"),
-                "Enter must go to /search?q=slurm, went to: " + page.url());
+            page.waitForURL("**/search/?q=slurm");
+            check(page.url().contains("/search/?q=slurm"),
+                "Enter must go to /search/?q=slurm, went to: " + page.url());
         });
 
         withPage("K-3: the results page wears the site's own chrome", page -> {
@@ -657,6 +657,16 @@ public class ProductionModeE2E {
                 "an empty query must list no hits");
             check(page.querySelector(".search-hint") != null,
                 "an empty query must say what to do instead");
+        });
+
+        withPage("K-8: the results page's sidebar tells how to write a query", page -> {
+            page.navigate(url("/search?q=slurm"));
+            check(page.querySelector("nav.side .search-help") != null,
+                "the sidebar must carry the search help");
+            int examples = page.querySelectorAll("nav.side .search-help code").size();
+            check(examples >= 10, "the help must show its examples, showed: " + examples);
+            check(page.querySelector("nav.side > ul") == null,
+                "the search page's sidebar must not carry the document tree");
         });
 
         withPage("K-6: a page of results holds at most twenty hits", page -> {
@@ -818,7 +828,7 @@ public class ProductionModeE2E {
             page.navigate(url("/en/guides/software/"));
             page.fill("#search-input", "slurm");
             page.press("#search-input", "Enter");
-            page.waitForURL("**/search?q=slurm");
+            page.waitForURL("**/search/?q=slurm");
             check(page.url().contains("/en/search"),
                 "the English search box must lead to /en/search, went to: " + page.url());
             ElementHandle first = page.querySelector("a.search-hit");
@@ -826,6 +836,14 @@ public class ProductionModeE2E {
             String href = first.getAttribute("href");
             check(href.startsWith("/en/"),
                 "an English hit must live under /en/, got: " + href);
+        });
+
+        withPage("N-8: links on the English results page stay in English", page -> {
+            page.navigate(url("/en/search?q=slurm"));
+            String href = (String) page.evaluate(
+                "() => document.querySelector('nav.side .mobile-top-nav a').href");
+            check(href.contains("/en/"),
+                "a section link on the English results page must stay under /en/, got: " + href);
         });
 
         withPage("N-7: an English results page is a page, not the marker", page -> {

@@ -99,6 +99,31 @@ class PageRenderer {
                       String prevHref, String prevLabel,
                       String nextHref, String nextLabel,
                       String lastUpdated, String docId) {
+        return renderPage(title, content, root, prefix, currentPath, topSection, rawRelPath,
+                          prevHref, prevLabel, nextHref, nextLabel, lastUpdated, docId, null);
+    }
+
+    /**
+     * Renders the search page, whose sidebar carries how to write a query instead of the
+     * document tree. The tree would be of no use here: the reader arrived to search, and every
+     * entry in it repeats what the navbar already offers.
+     */
+    String renderSearchPage(String title, String content, SiteNode root,
+                            String prefix, String currentPath) {
+        return renderPage(title, content, root, prefix, currentPath, null, "",
+                          null, null, null, null, "", "", searchHelpHtml());
+    }
+
+    /**
+     * @param sidebarOverride sidebar markup to show in place of the document tree, or null to
+     *                        show the tree
+     */
+    private String renderPage(String title, String content, SiteNode root,
+                      String prefix, String currentPath, String topSection,
+                      String rawRelPath,
+                      String prevHref, String prevLabel,
+                      String nextHref, String nextLabel,
+                      String lastUpdated, String docId, String sidebarOverride) {
         StringBuilder sb = new StringBuilder();
         sb.append("""
             <!DOCTYPE html>
@@ -198,7 +223,10 @@ class PageRenderer {
         // Docusaurus carries its search box on the top bar, and a published site should look like
         // the site it replaces. In portal mode the bar also carries the rebuild controls and one
         // link per project section, so the box lives in the sidebar there instead.
-        if (production) appendSearchBox(sb, prefix + "search");
+        // The trailing slash matters: the results page is built as search/index.html and its links
+        // are relative to that directory. Asked for as "search", a browser resolves them one level
+        // too high, and on an English page every sidebar link then pointed at a Japanese page.
+        if (production) appendSearchBox(sb, prefix + "search/");
         if (!production) {
             // Two stages, not one: HTML alone is what an author presses repeatedly while editing
             // (about 2ms per document), while All also runs the Lucene index and re-sends every
@@ -305,7 +333,11 @@ class PageRenderer {
                 }
             }
         }
-        renderSidebar(sb, sidebarNodes, prefix, currentPath);
+        if (sidebarOverride != null) {
+            sb.append(sidebarOverride);
+        } else {
+            renderSidebar(sb, sidebarNodes, prefix, currentPath);
+        }
         sb.append("</nav>\n");
 
         sb.append("<main>\n<h1>").append(escapeHtml(title)).append("</h1>\n");
@@ -379,6 +411,77 @@ class PageRenderer {
             .replace("YADOC_LANG", escapeHtml(langAttr))
             .replace("YADOC_FAVICON", faviconHref);
     }
+
+    /**
+     * The search page's sidebar: how to write a query. The search runs on Lucene's QueryParser,
+     * so the operators are its own, and the field names are the ones SearchIndexer writes.
+     */
+    private String searchHelpHtml() {
+        boolean japanese = currentLocale == null || currentLocale.equals("ja");
+        return japanese ? SEARCH_HELP_JA : SEARCH_HELP_EN;
+    }
+
+    private static final String SEARCH_HELP_JA = """
+          <div class="search-help">
+            <h2>語の並べ方</h2>
+            <p>語を空白で区切ると、その全てを含むページだけが出ます。</p>
+            <ul>
+              <li><code>slurm gcc</code><span>両方を含むページ</span></li>
+              <li><code>slurm OR gcc</code><span>どちらかを含むページ</span></li>
+              <li><code>slurm NOT queue</code><span>slurm を含み queue を含まないページ</span></li>
+              <li><code>(slurm OR gcc) AND module</code><span>括弧でまとめる</span></li>
+              <li><code>"batch job"</code><span>この語順のまま含むページ</span></li>
+              <li><code>gcc*</code><span>gcc で始まる語</span></li>
+              <li><code>slurm^5 gcc</code><span>^ の後の数だけその語を重く見る</span></li>
+            </ul>
+            <h2>欄を指定する</h2>
+            <p><code>欄名:語</code> と書くと、その欄だけを見ます。欄は5つあります。</p>
+            <ul>
+              <li><code>title_idx</code><span>ページの題名</span></li>
+              <li><code>body</code><span>ページの本文</span></li>
+              <li><code>path_tokens</code><span>住所を / で区切った各語</span></li>
+              <li><code>doc_id_idx</code><span>文書id</span></li>
+              <li><code>meta</code><span>著者・年・雑誌名</span></li>
+            </ul>
+            <ul>
+              <li><code>title_idx:slurm</code><span>題名に slurm を含むページ</span></li>
+              <li><code>path_tokens:software slurm</code><span>住所に software を含むページの中から slurm を探す</span></li>
+              <li><code>NOT path_tokens:old_docs AND slurm</code><span>古い文書を除いて slurm を探す</span></li>
+            </ul>
+            <p class="search-help-note">ブログの記事は索引に入っていないので、検索しても出ません。</p>
+          </div>
+        """;
+
+    private static final String SEARCH_HELP_EN = """
+          <div class="search-help">
+            <h2>Writing a query</h2>
+            <p>Words separated by spaces all have to appear on a page for it to be listed.</p>
+            <ul>
+              <li><code>slurm gcc</code><span>pages holding both</span></li>
+              <li><code>slurm OR gcc</code><span>pages holding either</span></li>
+              <li><code>slurm NOT queue</code><span>pages holding slurm but not queue</span></li>
+              <li><code>(slurm OR gcc) AND module</code><span>parentheses group</span></li>
+              <li><code>"batch job"</code><span>pages holding the words in that order</span></li>
+              <li><code>gcc*</code><span>words starting with gcc</span></li>
+              <li><code>slurm^5 gcc</code><span>the number after ^ weighs that word</span></li>
+            </ul>
+            <h2>Naming a field</h2>
+            <p><code>field:word</code> looks in that field alone. There are five fields.</p>
+            <ul>
+              <li><code>title_idx</code><span>the page's title</span></li>
+              <li><code>body</code><span>the page's text</span></li>
+              <li><code>path_tokens</code><span>each word of the address, split on /</span></li>
+              <li><code>doc_id_idx</code><span>the document id</span></li>
+              <li><code>meta</code><span>authors, year, journal</span></li>
+            </ul>
+            <ul>
+              <li><code>title_idx:slurm</code><span>pages whose title holds slurm</span></li>
+              <li><code>path_tokens:software slurm</code><span>slurm within pages under software</span></li>
+              <li><code>NOT path_tokens:old_docs AND slurm</code><span>slurm outside the old documents</span></li>
+            </ul>
+            <p class="search-help-note">Blog posts are not in the index, so a search never lists them.</p>
+          </div>
+        """;
 
     /** Recursively renders the left navigation sidebar as nested HTML lists with collapsible categories. */
     private void renderSidebar(StringBuilder sb, List<SiteNode> nodes, String prefix, String currentPath) {

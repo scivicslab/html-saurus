@@ -247,15 +247,28 @@ public class SearchServer {
      */
     private void handleSearch(HttpExchange ex) throws IOException {
         String path = ex.getRequestURI().getPath();
+        boolean trailingSlash = path.endsWith("/");
+        String stem = trailingSlash ? path.substring(0, path.length() - 1) : path;
         String pathLocale = "";
-        if (!"/search".equals(path)) {
-            String[] seg = path.split("/");   // "", locale, "search"
+        if (!"/search".equals(stem)) {
+            String[] seg = stem.split("/");   // "", locale, "search"
             if (seg.length == 3 && "search".equals(seg[2]) && localeSearchers.containsKey(seg[1])) {
                 pathLocale = seg[1];
             } else {
                 respond(ex, 404, "text/plain", "Not Found");
                 return;
             }
+        }
+        String accepts = ex.getRequestHeaders().getFirst("Accept");
+        boolean wantsPage = accepts != null && accepts.contains("text/html");
+        // The results page's links are relative to the search/ directory, so a browser has to be
+        // standing in it. A program asking for JSON stays where it asked, redirect-free.
+        if (wantsPage && !trailingSlash) {
+            String query = ex.getRequestURI().getRawQuery();
+            ex.getResponseHeaders().set("Location", stem + "/" + (query == null ? "" : "?" + query));
+            ex.sendResponseHeaders(301, -1);
+            ex.close();
+            return;
         }
         String q = HttpUtils.queryParam(ex, "q");
         // The address states the locale twice over: in the path, for a reader who followed the
@@ -267,8 +280,7 @@ public class SearchServer {
         // A browser states that it wants a page; a program asking for the same address states
         // nothing, or asks for JSON, and keeps getting JSON. The address is the one Docusaurus
         // uses for its results page, so a reader who lands on it sees results rather than data.
-        String accept = ex.getRequestHeaders().getFirst("Accept");
-        if (accept != null && accept.contains("text/html")) {
+        if (wantsPage) {
             String page = searchResultsPage(q, locale, pageNumber(ex), sRef);
             if (page != null) {
                 HttpUtils.respond(ex, 200, "text/html; charset=UTF-8", page);
