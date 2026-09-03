@@ -444,6 +444,7 @@ class PageRenderer {
               <li><code>meta</code><span>著者・年・雑誌名、ブログの日付とタグ</span></li>
               <li><code>kind</code><span>種類。<code>docs</code> か <code>blog</code></span></li>
             </ul>
+            <h3>欄を使った例</h3>
             <ul>
               <li><code>title_idx:slurm</code><span>題名に slurm を含むページ</span></li>
               <li><code>path_tokens:software slurm</code><span>アドレスに software を含むページの中から slurm を探す</span></li>
@@ -477,6 +478,7 @@ class PageRenderer {
               <li><code>meta</code><span>authors, year, journal; a post's date and tags</span></li>
               <li><code>kind</code><span>either <code>docs</code> or <code>blog</code></span></li>
             </ul>
+            <h3>Examples with a field</h3>
             <ul>
               <li><code>title_idx:slurm</code><span>pages whose title holds slurm</span></li>
               <li><code>path_tokens:software slurm</code><span>slurm within pages under software</span></li>
