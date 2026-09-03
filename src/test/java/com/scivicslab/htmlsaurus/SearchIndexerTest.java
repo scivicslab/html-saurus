@@ -366,6 +366,30 @@ class SearchIndexerTest {
         }
 
         @Test
+        @DisplayName("a post's tags are searchable under their own name")
+        void tags_areSearchable() throws IOException {
+            Path docsDir = createDocsDir("docs");
+            writeDoc(docsDir, "page.md", "Page", "Content.");
+            Path blogDir = writePost("2026-04-05-maintenance.md",
+                    "title: Maintenance\ndate: 2026-04-05\ntags:\n  - notice\n",
+                    "The machine stops on Sunday.\n");
+            Path indexDir = tempDir.resolve("index");
+
+            new SearchIndexer(docsDir, indexDir, "ja", true, blogDir).index();
+
+            try (var dir = new NIOFSDirectory(indexDir);
+                 var reader = DirectoryReader.open(dir)) {
+                var searcher = new IndexSearcher(reader);
+                assertEquals(1, searcher.search(new TermQuery(new Term("tags", "notice")), 10)
+                                        .scoreDocs.length,
+                        "tags:notice must find the post");
+                assertEquals(1, searcher.search(new TermQuery(new Term("date", "2026-04-05")), 10)
+                                        .scoreDocs.length,
+                        "date must hold the day the post carries");
+            }
+        }
+
+        @Test
         @DisplayName("a post's text is searchable")
         void post_textIsIndexed() throws IOException {
             Path docsDir = createDocsDir("docs");

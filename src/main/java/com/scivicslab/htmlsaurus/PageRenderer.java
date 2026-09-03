@@ -441,7 +441,7 @@ class PageRenderer {
               <li><code>body</code><span>ページの本文</span></li>
               <li><code>path_tokens</code><span>アドレスを / で区切った各語。ブログの記事は <code>blog</code> で始まる</span></li>
               <li><code>doc_id_idx</code><span>文書id</span></li>
-              <li><code>meta</code><span>著者・年・雑誌名、ブログの日付とタグ</span></li>
+              <li><code>tags</code><span>ブログの記事に付いたタグ</span></li>
             </ul>
             <h3>フィールドを使った例</h3>
             <ul>
@@ -449,6 +449,7 @@ class PageRenderer {
               <li><code>path_tokens:software slurm</code><span>アドレスに software を含むページの中から slurm を探す</span></li>
               <li><code>NOT path_tokens:old_docs AND slurm</code><span>古い文書を除いて slurm を探す</span></li>
               <li><code>path_tokens:blog メンテナンス</code><span>ブログの記事だけから探す</span></li>
+              <li><code>tags:maintenance</code><span>そのタグが付いた記事だけ</span></li>
               <li><code>NOT path_tokens:blog AND slurm</code><span>ブログを除いて探す</span></li>
             </ul>
           </div>
@@ -474,7 +475,7 @@ class PageRenderer {
               <li><code>body</code><span>the page's text</span></li>
               <li><code>path_tokens</code><span>each word of the address, split on /; a post's begins with <code>blog</code></span></li>
               <li><code>doc_id_idx</code><span>the document id</span></li>
-              <li><code>meta</code><span>authors, year, journal; a post's date and tags</span></li>
+              <li><code>tags</code><span>the tags on a blog post</span></li>
             </ul>
             <h3>Examples with a field</h3>
             <ul>
@@ -482,6 +483,7 @@ class PageRenderer {
               <li><code>path_tokens:software slurm</code><span>slurm within pages under software</span></li>
               <li><code>NOT path_tokens:old_docs AND slurm</code><span>slurm outside the old documents</span></li>
               <li><code>path_tokens:blog maintenance</code><span>within the blog posts alone</span></li>
+              <li><code>tags:maintenance</code><span>the posts carrying that tag</span></li>
               <li><code>NOT path_tokens:blog AND slurm</code><span>leaving the blog posts out</span></li>
             </ul>
           </div>

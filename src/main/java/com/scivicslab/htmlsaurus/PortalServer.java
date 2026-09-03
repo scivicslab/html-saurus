@@ -1998,9 +1998,9 @@ public class PortalServer {
      * @param q the search query string
      * @return list of result maps, each containing project, title, pagePath, and summary
      */
-    private static final String[] SEARCH_FIELDS = {"title_idx", "doc_id_idx", "path_tokens", "meta", "body"};
+    private static final String[] SEARCH_FIELDS = {"title_idx", "doc_id_idx", "path_tokens", "tags", "body"};
     private static final Map<String, Float> SEARCH_BOOSTS =
-        Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f);
+        Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "tags", 2.0f, "body", 1.0f);
 
     private List<Map<String, String>> globalSearch(String q, String lang) {
         if (q.isBlank()) return List.of();

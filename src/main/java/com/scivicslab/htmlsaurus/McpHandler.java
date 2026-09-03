@@ -383,9 +383,9 @@ class McpHandler {
         Number maxNum = McpJsonParser.getNumber(args, "max_results");
         int maxResults = maxNum != null ? maxNum.intValue() : 20;
 
-        String[] fields = {"title_idx", "doc_id_idx", "path_tokens", "meta", "body"};
+        String[] fields = {"title_idx", "doc_id_idx", "path_tokens", "tags", "body"};
         Map<String, Float> boosts = Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f,
-                                           "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f);
+                                           "path_tokens", 5.0f, "tags", 2.0f, "body", 1.0f);
 
         List<LuceneSearcher.Hit> hits;
         if (locale != null && !locale.isEmpty() && localeSearchers.containsKey(locale)) {

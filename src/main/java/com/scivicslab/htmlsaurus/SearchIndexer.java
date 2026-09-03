@@ -90,6 +90,7 @@ public class SearchIndexer {
         Analyzer analyzer = new PerFieldAnalyzerWrapper(baseAnalyzer,
                 Map.of("doc_id_idx", underscoreAnalyzer(),
                        "path_tokens", underscoreAnalyzer(),
+                       "date", underscoreAnalyzer(),
                        "body_ng", shingleAnalyzer(baseAnalyzer)));
         var config = new IndexWriterConfig(analyzer);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
@@ -167,9 +168,6 @@ public class SearchIndexer {
         // Extract title, id, and metadata from frontmatter
         String title = "";
         String docId = "";
-        String authors = "";
-        String year = "";
-        String journal = "";
         String description = "";
         String body = source;
         if (source.startsWith("---")) {
@@ -184,12 +182,6 @@ public class SearchIndexer {
                         title = line.substring(6).trim().replaceAll("^\"|\"$", "");
                     } else if (line.startsWith("id:")) {
                         docId = line.substring(3).trim().replaceAll("^\"|\"$", "");
-                    } else if (line.startsWith("authors:")) {
-                        authors = line.substring(8).trim().replaceAll("^\"|\"$", "");
-                    } else if (line.startsWith("year:")) {
-                        year = line.substring(5).trim().replaceAll("^\"|\"$", "");
-                    } else if (line.startsWith("journal:")) {
-                        journal = line.substring(8).trim().replaceAll("^\"|\"$", "");
                     } else if (line.startsWith("description:")) {
                         String val = line.substring(12).trim();
                         if (val.startsWith("|") || val.startsWith(">")) {
@@ -263,10 +255,6 @@ public class SearchIndexer {
         doc.add(new TextField("title_idx", title, Field.Store.NO));
         doc.add(new TextField("body", plainText, Field.Store.YES));
         doc.add(new TextField("body_ng", plainText, Field.Store.NO));
-        String meta = (authors + " " + year + " " + journal).trim();
-        if (!meta.isBlank()) {
-            doc.add(new TextField("meta", meta, Field.Store.NO));
-        }
         if (!docId.isBlank()) {
             doc.add(new StoredField("doc_id", docId));
             doc.add(new TextField("doc_id_idx", docId, Field.Store.NO));
@@ -291,7 +279,7 @@ public class SearchIndexer {
     /**
      * Indexes a single blog post. A post carries the same fields as a page: its address computed
      * from the slug the blog itself publishes it under, that address's two words in
-     * {@code path_tokens}, and its tags and date in {@code meta}.
+     * {@code path_tokens}, its tags in {@code tags} and the day it was posted in {@code date}.
      */
     private void indexBlogPost(IndexWriter writer, Path mdFile) throws IOException {
         String source = Files.readString(mdFile);
@@ -345,9 +333,11 @@ public class SearchIndexer {
         doc.add(new TextField("title_idx", title, Field.Store.NO));
         doc.add(new TextField("body", plainText, Field.Store.YES));
         doc.add(new TextField("body_ng", plainText, Field.Store.NO));
-        String meta = (String.join(" ", tags) + " " + date).trim();
-        if (!meta.isBlank()) {
-            doc.add(new TextField("meta", meta, Field.Store.NO));
+        for (String tag : tags) {
+            doc.add(new TextField("tags", tag, Field.Store.NO));
+        }
+        if (!date.isBlank()) {
+            doc.add(new TextField("date", date, Field.Store.NO));
         }
         doc.add(new TextField("path_tokens", "blog", Field.Store.NO));
         doc.add(new TextField("path_tokens", slug, Field.Store.NO));

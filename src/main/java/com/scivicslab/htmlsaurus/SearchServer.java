@@ -335,8 +335,8 @@ public class SearchServer {
         List<LuceneSearcher.Hit> hits;
         try {
             hits = sRef.ask(s -> { try { return s.search(q, MAX_HITS,
-                new String[]{"title_idx", "doc_id_idx", "path_tokens", "meta", "body"},
-                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f));
+                new String[]{"title_idx", "doc_id_idx", "path_tokens", "tags", "body"},
+                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "tags", 2.0f, "body", 1.0f));
             } catch (Exception e) { throw new RuntimeException(e); } }).join();
         } catch (Exception e) {
             System.err.println("Search error: " + e.getMessage());
@@ -435,8 +435,8 @@ public class SearchServer {
     private String search(String queryStr, ActorRef<LuceneSearcher> sRef) {
         try {
             var hits = sRef.ask(s -> { try { return s.search(queryStr, 20,
-                new String[]{"title_idx", "doc_id_idx", "path_tokens", "meta", "body"},
-                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "meta", 2.0f, "body", 1.0f));
+                new String[]{"title_idx", "doc_id_idx", "path_tokens", "tags", "body"},
+                Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "tags", 2.0f, "body", 1.0f));
             } catch (Exception e) { throw new RuntimeException(e); } }).join();
             var sb = new StringBuilder("[");
             boolean first = true;
