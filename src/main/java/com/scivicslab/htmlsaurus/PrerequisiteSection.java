@@ -21,8 +21,10 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Parses the {@code ## 参考文献} section that an author may place at the end of a document's
- * Markdown source, per {@code PrerequisiteDocument_260728_oo01} (doc_SCIVICS002/html-saurus/040_design).
+ * Parses the reference section that an author may place at the end of a document's Markdown
+ * source, per {@code PrerequisiteDocument_260728_oo01} (doc_SCIVICS002/html-saurus/040_design).
+ * The section is headed {@code ## 参考文献}, {@code ## 参考資料} or {@code ## References}, whichever
+ * the document's language and age call for; the comparison ignores case.
  *
  * <p>The section body is a single well-formed HTML block, not hand-scanned Markdown bullets: a
  * {@code <ul>} whose {@code <li>} items each contain one {@code <span data-doc-id="...">...}
@@ -49,7 +51,13 @@ import java.util.Set;
  */
 final class PrerequisiteSection {
 
-    private static final String HEADING_TEXT = "参考文献";
+    /**
+     * The headings that open the section, compared without case. Japanese and English documents
+     * head the same section with their own word, and a document written in English would otherwise
+     * have to carry a Japanese heading to be read at all. {@code 参考資料} is the name {@code 参考文献}
+     * replaced; it is accepted so that the documents written under the older name keep working.
+     */
+    private static final Set<String> HEADING_TEXTS = Set.of("参考文献", "参考資料", "references");
 
     private PrerequisiteSection() {}
 
@@ -146,12 +154,13 @@ final class PrerequisiteSection {
         return out;
     }
 
-    /** Walks the top-level AST nodes for the {@code ## 参考文献} heading's immediate next sibling. */
+    /** Walks the top-level AST nodes for the reference heading's immediate next sibling. */
     private static HtmlBlock findPrerequisitesBlock(Node document) {
         Node node = document.getFirstChild();
         while (node != null) {
             if (node instanceof Heading heading && heading.getLevel() == 2
-                    && headingText(heading).equals(HEADING_TEXT)) {
+                    && HEADING_TEXTS.contains(headingText(heading).strip()
+                            .toLowerCase(java.util.Locale.ROOT))) {
                 Node next = heading.getNext();
                 return next instanceof HtmlBlock htmlBlock ? htmlBlock : null;
             }

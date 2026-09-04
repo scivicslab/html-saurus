@@ -41,6 +41,67 @@ class PrerequisiteSectionTest {
         assertEquals("", refs.get(0).category());
     }
 
+    /**
+     * A document written in English heads the same section with the English word. Requiring the
+     * Japanese heading would mean an English document could not declare a reference at all.
+     */
+    @Test
+    void englishHeading_isReadTheSameWay() {
+        String md = """
+            ## References
+
+            <ul>
+            <li><span data-relation="prerequisite" data-doc-id="DocA_260101_oo01">reason A</span></li>
+            </ul>
+            """;
+        List<PrerequisiteSection.Ref> refs = PrerequisiteSection.extractRefs(md);
+        assertEquals(1, refs.size());
+        assertEquals("DocA_260101_oo01", refs.get(0).docId());
+    }
+
+    /** The heading is matched without case, so "REFERENCES" and "references" both open a section. */
+    @Test
+    void englishHeading_isMatchedWithoutCase() {
+        for (String heading : List.of("References", "REFERENCES", "references")) {
+            String md = "## " + heading + """
+
+                <ul>
+                <li><span data-relation="prerequisite" data-doc-id="DocA_260101_oo01">reason A</span></li>
+                </ul>
+                """;
+            assertEquals(1, PrerequisiteSection.extractRefs(md).size(), heading);
+        }
+    }
+
+    /**
+     * {@code 参考資料} is the name {@code 参考文献} replaced. The documents written under the older
+     * name are read without editing all of them.
+     */
+    @Test
+    void theOlderJapaneseHeading_isStillRead() {
+        String md = """
+            ## 参考資料
+
+            <ul>
+            <li><span data-relation="prerequisite" data-doc-id="DocA_260101_oo01">reason A</span></li>
+            </ul>
+            """;
+        assertEquals(1, PrerequisiteSection.extractRefs(md).size());
+    }
+
+    /** A heading that is none of the three opens nothing, so an unrelated section is not read. */
+    @Test
+    void anotherHeading_opensNoSection() {
+        String md = """
+            ## Bibliography
+
+            <ul>
+            <li><span data-relation="prerequisite" data-doc-id="DocA_260101_oo01">reason A</span></li>
+            </ul>
+            """;
+        assertTrue(PrerequisiteSection.extractRefs(md).isEmpty());
+    }
+
     @Test
     void multipleRefs_inOrder() {
         String md = """

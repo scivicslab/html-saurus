@@ -67,7 +67,14 @@ public class PortalServer {
      * that name it as a prerequisite. Rebuilt from Markdown source on demand; never persisted —
      * see {@code PrerequisiteOf_260806_oo01} (doc_SCIVICS002/html-saurus/040_design).
      */
-    private volatile Map<String, List<Map<String, String>>> prerequisiteOfIndex = Map.of();
+    /**
+     * The backward direction of the {@code ## 参考文献} relation, or {@code null} while no one has
+     * asked for it yet. Built on the first request rather than at startup: building it reads every
+     * {@code .md} file of every project, and startup time should not depend on how many documents
+     * happen to be in {@code works}. A build stage or a reindex replaces it outright, so an edit
+     * published through either is visible from both directions.
+     */
+    private volatile Map<String, List<Map<String, String>>> prerequisiteOfIndex = null;
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
 
@@ -186,7 +193,7 @@ public class PortalServer {
         java.util.function.Function<String, List<Map<String, String>>> prerequisiteOfResolver = ref -> {
             Map<String, String> self = resolveDocRef(ref);
             return self == null ? List.of()
-                : prerequisiteOfIndex.getOrDefault(self.getOrDefault("id", ""), List.of());
+                : prerequisiteOfIndexNow().getOrDefault(self.getOrDefault("id", ""), List.of());
         };
         McpHandler.StageBuilder stageBuilder = (project, stage) -> {
             Project proj = projectMap.get(project);
@@ -205,11 +212,43 @@ public class PortalServer {
             textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
             siblingsResolver, prerequisiteOfResolver, stageBuilder, reindexAllRunner, scanWorksDirRunner,
             navbarLabelsResolver, this::translateCore);
+    }
+
+    /**
+     * Marks the backward index stale, so the next request for the backward direction builds it from
+     * the sources as they are now.
+     *
+     * <p>Called instead of building on the spot, for the same reason startup does not build: the
+     * build reads every {@code .md} file of every project, and someone who pressed Update on one
+     * project should not wait for that walk. The walk happens when the answer is actually wanted.
+     */
+    private void invalidatePrerequisiteOfIndex() {
+        prerequisiteOfIndex = null;
+    }
+
+    /**
+     * The backward index, built now if nothing has built it yet.
+     *
+     * <p>Two requests arriving together can both find it absent and both build it. That is allowed:
+     * the build reads only files and ends by replacing the field with a complete map, so the second
+     * result is the same as the first. Holding a lock instead would make one request wait for a
+     * walk of every document, which is the cost this defers in the first place.
+     *
+     * @return the index, or an empty map when the walk failed
+     */
+    private Map<String, List<Map<String, String>>> prerequisiteOfIndexNow() {
+        Map<String, List<Map<String, String>>> current = prerequisiteOfIndex;
+        if (current != null) {
+            return current;
+        }
         try {
             rebuildPrerequisiteOfIndex();
         } catch (Exception e) {
             System.err.println("Warning: could not build prerequisite-of index: " + e.getMessage());
+            return Map.of();
         }
+        current = prerequisiteOfIndex;
+        return current == null ? Map.of() : current;
     }
 
     /**
@@ -220,6 +259,7 @@ public class PortalServer {
      * (doc_SCIVICS002/html-saurus/040_design).
      */
     private void rebuildPrerequisiteOfIndex() {
+        long walkStart = System.currentTimeMillis();
         Map<String, List<Map<String, String>>> next = new LinkedHashMap<>();
         for (Project p : projects) {
             Path projectDocsDir = p.projectDir().resolve("docs");
@@ -264,6 +304,8 @@ public class PortalServer {
             }
         }
         prerequisiteOfIndex = next;
+        System.out.println("prerequisite-of index: " + next.size() + " document(s) referenced, "
+            + (System.currentTimeMillis() - walkStart) + "ms");
     }
 
     /**
@@ -569,7 +611,7 @@ public class PortalServer {
             }
         }
         if (added > 0) {
-            rebuildPrerequisiteOfIndex();
+            invalidatePrerequisiteOfIndex();
         }
         return new int[]{projects.size(), added};
     }
@@ -604,7 +646,7 @@ public class PortalServer {
             Main.reindexAll(p.projectDir(), production);
             System.out.println("  Reindexed: " + p.name());
         }
-        rebuildPrerequisiteOfIndex();
+        invalidatePrerequisiteOfIndex();
         return projects.size();
     }
 
@@ -767,7 +809,7 @@ public class PortalServer {
             respond(ex, 404, "application/json", "{\"error\":\"not found\",\"id\":" + jsonStr(ref) + "}");
             return;
         }
-        List<Map<String, String>> hits = prerequisiteOfIndex.getOrDefault(self.getOrDefault("id", ""), List.of());
+        List<Map<String, String>> hits = prerequisiteOfIndexNow().getOrDefault(self.getOrDefault("id", ""), List.of());
         RelatedDocsView.writeJson(ex, hits);
     }
 
@@ -877,6 +919,13 @@ public class PortalServer {
      * Runs one build stage ({@code html}, {@code index}, {@code embedding}, or {@code all}) for a
      * project. Shared by {@link #handleBuildStage} (REST) and the MCP {@code build-*} tools.
      *
+     * <p>A successful stage also marks {@link #prerequisiteOfIndex} stale. Editing a document's
+     * {@code ## 参考文献} section and pressing Update or Rebuild is the ordinary way to publish that
+     * edit, and without this the forward direction would answer from the edited file while the
+     * backward direction went on answering from an index built before it — the same edit visible
+     * from one end and not from the other. Every stage marks it, not only the ones that read the
+     * sources, so that there is no stage a user has to remember is the exception.
+     *
      * @throws IllegalArgumentException if {@code stage} is none of the four known stages
      */
     private void runBuildStage(Project proj, String stage) throws Exception {
@@ -891,6 +940,7 @@ public class PortalServer {
             }
             default -> throw new IllegalArgumentException("Unknown stage: " + stage);
         }
+        invalidatePrerequisiteOfIndex();
     }
 
     /**

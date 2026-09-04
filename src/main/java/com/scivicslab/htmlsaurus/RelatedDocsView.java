@@ -40,10 +40,13 @@ final class RelatedDocsView {
     }
 
     /** Serializes one hit map as a JSON object {@code {id,title,path,srcPath,summary}}. Absent
-     *  fixed keys serialize as an empty string ({@link HttpUtils#jsonStr} is null-safe). A
-     *  {@code "category"} key is appended when present in the map (even if its value is empty),
-     *  so endpoints that never set it (related, siblings, resolve, ...) keep their existing JSON
-     *  shape unchanged, while {@code /api/prerequisites} always includes the field. */
+     *  fixed keys serialize as an empty string ({@link HttpUtils#jsonStr} is null-safe). The
+     *  {@code "relation"} and {@code "category"} keys are appended when present in the map (even
+     *  if the value is empty), so endpoints that never set them (related, siblings, resolve, ...)
+     *  keep their existing JSON shape unchanged, while the two prerequisite endpoints carry the
+     *  kind of each edge that {@link PrerequisiteSection} read from {@code data-relation}
+     *  ({@code RelationKind_260830_oo01}). Both keys are optional here for that reason: a fixed
+     *  key would put an empty {@code relation} on every semantic-search hit as well. */
     static String hitJson(Map<String, String> hit) {
         var sb = new StringBuilder("{")
           .append("\"id\":").append(HttpUtils.jsonStr(hit.get("id"))).append(",")
@@ -51,6 +54,9 @@ final class RelatedDocsView {
           .append("\"path\":").append(HttpUtils.jsonStr(hit.get("path"))).append(",")
           .append("\"srcPath\":").append(HttpUtils.jsonStr(hit.get("srcPath"))).append(",")
           .append("\"summary\":").append(HttpUtils.jsonStr(hit.get("summary")));
+        if (hit.containsKey("relation")) {
+            sb.append(",\"relation\":").append(HttpUtils.jsonStr(hit.get("relation")));
+        }
         if (hit.containsKey("category")) {
             sb.append(",\"category\":").append(HttpUtils.jsonStr(hit.get("category")));
         }
