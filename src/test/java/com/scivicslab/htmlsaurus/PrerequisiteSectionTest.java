@@ -32,7 +32,7 @@ class PrerequisiteSectionTest {
             ## 参考文献
 
             <ul>
-            <li><span data-doc-id="POJOActorConcept_251023_oo01">Turing-workflow is built on POJO-actor's actor model</span></li>
+            <li><span data-relation="prerequisite" data-doc-id="POJOActorConcept_251023_oo01">Turing-workflow is built on POJO-actor's actor model</span></li>
             </ul>
             """;
         List<PrerequisiteSection.Ref> refs = PrerequisiteSection.extractRefs(md);
@@ -47,9 +47,9 @@ class PrerequisiteSectionTest {
             ## 参考文献
 
             <ul>
-            <li><span data-doc-id="DocA_260101_oo01">reason A</span></li>
-            <li><span data-doc-id="DocB_260102_oo01"></span></li>
-            <li><span data-doc-id="DocC_260103_oo01">reason C</span></li>
+            <li><span data-relation="prerequisite" data-doc-id="DocA_260101_oo01">reason A</span></li>
+            <li><span data-relation="prerequisite" data-doc-id="DocB_260102_oo01"></span></li>
+            <li><span data-relation="prerequisite" data-doc-id="DocC_260103_oo01">reason C</span></li>
             </ul>
             """;
         assertEquals(
@@ -63,8 +63,8 @@ class PrerequisiteSectionTest {
             ## 参考文献
 
             <ul>
-            <li><span data-doc-id="ClassicalMechanics_260101_oo01" data-category="physics">直接の物理的関係</span></li>
-            <li><span data-doc-id="LinearAlgebra_260101_oo01" data-category="mathematics">測定に使う数学的前提</span></li>
+            <li><span data-relation="prerequisite" data-doc-id="ClassicalMechanics_260101_oo01" data-category="physics">直接の物理的関係</span></li>
+            <li><span data-relation="prerequisite" data-doc-id="LinearAlgebra_260101_oo01" data-category="mathematics">測定に使う数学的前提</span></li>
             </ul>
             """;
         List<PrerequisiteSection.Ref> refs = PrerequisiteSection.extractRefs(md);
@@ -79,13 +79,13 @@ class PrerequisiteSectionTest {
             ### 関連文書
 
             <ul>
-            <li><span data-doc-id="UnrelatedDoc_260101_oo01">this is a plain related-doc link, not a prerequisite</span></li>
+            <li><span data-relation="prerequisite" data-doc-id="UnrelatedDoc_260101_oo01">this is a plain related-doc link, not a prerequisite</span></li>
             </ul>
 
             ## 参考文献
 
             <ul>
-            <li><span data-doc-id="RealPrereq_260101_oo01"></span></li>
+            <li><span data-relation="prerequisite" data-doc-id="RealPrereq_260101_oo01"></span></li>
             </ul>
             """;
         assertEquals(List.of("RealPrereq_260101_oo01"),
@@ -109,8 +109,8 @@ class PrerequisiteSectionTest {
             ## 参考文献
 
             <ul>
-            <li><span data-doc-id="DupDoc_260101_oo01">first mention</span></li>
-            <li><span data-doc-id="DupDoc_260101_oo01">accidental repeat</span></li>
+            <li><span data-relation="prerequisite" data-doc-id="DupDoc_260101_oo01">first mention</span></li>
+            <li><span data-relation="prerequisite" data-doc-id="DupDoc_260101_oo01">accidental repeat</span></li>
             </ul>
             """;
         assertEquals(List.of("DupDoc_260101_oo01"),
@@ -135,14 +135,14 @@ class PrerequisiteSectionTest {
             ## 参考文献
 
             <ul>
-            <li><span data-doc-id="ExampleOnly_260101_oo01"></span></li>
+            <li><span data-relation="prerequisite" data-doc-id="ExampleOnly_260101_oo01"></span></li>
             </ul>
             ```
 
             ## 参考文献
 
             <ul>
-            <li><span data-doc-id="RealPrereq_260101_oo01"></span></li>
+            <li><span data-relation="prerequisite" data-doc-id="RealPrereq_260101_oo01"></span></li>
             </ul>
             """;
         assertEquals(List.of("RealPrereq_260101_oo01"),
@@ -160,7 +160,7 @@ class PrerequisiteSectionTest {
             以下の文書を先に読むこと。
 
             <ul>
-            <li><span data-doc-id="DocA_260101_oo01"></span></li>
+            <li><span data-relation="prerequisite" data-doc-id="DocA_260101_oo01"></span></li>
             </ul>
             """;
         assertTrue(PrerequisiteSection.extractRefs(md).isEmpty());
@@ -172,7 +172,7 @@ class PrerequisiteSectionTest {
             ## 参考文献
 
             <ul>
-            <li><span data-doc-id="DocA_260101_oo01">unclosed li
+            <li><span data-relation="prerequisite" data-doc-id="DocA_260101_oo01">unclosed li
             </ul>
             """;
         assertThrows(PrerequisiteSection.MalformedPrerequisitesException.class,
@@ -190,7 +190,7 @@ class PrerequisiteSectionTest {
         hit.put("title", "Doc A");
 
         Map<String, String> result = PrerequisiteSection.withCategory(
-                hit, new PrerequisiteSection.Ref("DocA_260101_oo01", "physics"));
+                hit, new PrerequisiteSection.Ref("DocA_260101_oo01", "prerequisite", "physics"));
 
         assertEquals("physics", result.get("category"));
         assertEquals("DocA_260101_oo01", result.get("id"));
@@ -203,7 +203,7 @@ class PrerequisiteSectionTest {
         hit.put("id", "DocA_260101_oo01");
 
         Map<String, String> result = PrerequisiteSection.withCategory(
-                hit, new PrerequisiteSection.Ref("DocA_260101_oo01", ""));
+                hit, new PrerequisiteSection.Ref("DocA_260101_oo01", "prerequisite", ""));
 
         assertEquals("", result.get("category"));
     }
@@ -215,8 +215,101 @@ class PrerequisiteSectionTest {
         Map<String, String> hit = new LinkedHashMap<>();
         hit.put("id", "DocA_260101_oo01");
 
-        PrerequisiteSection.withCategory(hit, new PrerequisiteSection.Ref("DocA_260101_oo01", "physics"));
+        PrerequisiteSection.withCategory(hit, new PrerequisiteSection.Ref("DocA_260101_oo01", "prerequisite", "physics"));
 
         assertFalse(hit.containsKey("category"));
+    }
+
+    // ---- data-relation: the kind of relation, required on every entry
+    //      (RelationKind_260830_oo01). The vocabulary is open, so only its shape is checked.
+
+    @Test
+    void extractRefs_readsTheRelationEachEntryDeclares() {
+        String md = """
+            # Doc
+
+            ## 参考文献
+
+            <ul>
+            <li><span data-doc-id="Setup_260101_oo01" data-relation="prerequisite">read first</span></li>
+            <li><span data-doc-id="Old_251201_oo01" data-relation="supersedes">this replaced it</span></li>
+            </ul>
+            """;
+
+        List<PrerequisiteSection.Ref> refs = PrerequisiteSection.extractRefs(md);
+
+        assertEquals(2, refs.size());
+        assertEquals("prerequisite", refs.get(0).relation());
+        assertEquals("supersedes", refs.get(1).relation());
+    }
+
+    /**
+     * An entry without the attribute is rejected rather than given a default. A default would make
+     * an entry whose author forgot the kind indistinguishable from one that says "prerequisite".
+     */
+    @Test
+    void extractRefs_entryWithoutRelation_isRejected() {
+        String md = """
+            # Doc
+
+            ## 参考文献
+
+            <ul>
+            <li><span data-doc-id="Setup_260101_oo01">read first</span></li>
+            </ul>
+            """;
+
+        PrerequisiteSection.MalformedPrerequisitesException e =
+                assertThrows(PrerequisiteSection.MalformedPrerequisitesException.class,
+                        () -> PrerequisiteSection.extractRefs(md));
+        assertTrue(e.getMessage().contains("data-relation"), e.getMessage());
+        assertTrue(e.getMessage().contains("Setup_260101_oo01"), e.getMessage());
+    }
+
+    /**
+     * The vocabulary is open, so the value is not checked against a list; only its shape is, so
+     * that one relation does not split across spellings differing by case or spacing.
+     */
+    @Test
+    void extractRefs_relationOutsideTheIdentifierShape_isRejected() {
+        String md = """
+            # Doc
+
+            ## 参考文献
+
+            <ul>
+            <li><span data-doc-id="Setup_260101_oo01" data-relation="Read First">read first</span></li>
+            </ul>
+            """;
+
+        assertThrows(PrerequisiteSection.MalformedPrerequisitesException.class,
+                () -> PrerequisiteSection.extractRefs(md));
+    }
+
+    /** A kind nobody has used before is accepted: there is no list to check it against. */
+    @Test
+    void extractRefs_unknownRelation_isAccepted() {
+        String md = """
+            # Doc
+
+            ## 参考文献
+
+            <ul>
+            <li><span data-doc-id="Data_260101_oo01" data-relation="cites-data-from">the figures</span></li>
+            </ul>
+            """;
+
+        assertEquals("cites-data-from", PrerequisiteSection.extractRefs(md).get(0).relation());
+    }
+
+    @Test
+    void withCategory_addsRelationFromRef() {
+        Map<String, String> hit = new LinkedHashMap<>();
+        hit.put("id", "DocA_260101_oo01");
+
+        Map<String, String> result = PrerequisiteSection.withCategory(
+                hit, new PrerequisiteSection.Ref("DocA_260101_oo01", "best-practice", ""));
+
+        assertEquals("best-practice", result.get("relation"));
     }
 }

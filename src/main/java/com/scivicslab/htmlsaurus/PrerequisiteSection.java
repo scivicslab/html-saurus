@@ -53,15 +53,38 @@ final class PrerequisiteSection {
 
     private PrerequisiteSection() {}
 
-    /** One {@code ## 参考文献} entry: the referenced document id and its optional category. */
-    record Ref(String docId, String category) {}
+    /**
+     * One {@code ## 参考文献} entry: the referenced document id, the kind of relation its author
+     * declared, and the optional category that predates the kind.
+     *
+     * @param docId    the referenced document's id, from {@code data-doc-id}
+     * @param relation the kind of relation, from {@code data-relation}; required
+     * @param category the older, optional grouping from {@code data-category}
+     */
+    record Ref(String docId, String relation, String category) {}
 
-    /** Thrown when the {@code ## 参考文献} HTML block is present but not well-formed XML. */
+    /**
+     * Thrown when the {@code ## 参考文献} HTML block is present but cannot be read as declared:
+     * either it is not well-formed XML, or an entry is missing a required attribute.
+     */
     static final class MalformedPrerequisitesException extends RuntimeException {
         MalformedPrerequisitesException(String message, Throwable cause) {
             super(message, cause);
         }
+
+        MalformedPrerequisitesException(String message) {
+            super(message, null);
+        }
     }
+
+    /**
+     * The vocabulary of relation kinds is not defined in advance
+     * ({@code RelationKind_260830_oo01}): a kind is whatever word its author needed. Only the shape
+     * of the word is checked, so that one relation does not end up split across spellings that
+     * differ by case or spacing.
+     */
+    private static final java.util.regex.Pattern RELATION_FORM =
+            java.util.regex.Pattern.compile("[a-z0-9]+(-[a-z0-9]+)*");
 
     /**
      * Returns the document references listed under the {@code ## 参考文献} heading, in the order
@@ -89,8 +112,19 @@ final class PrerequisiteSection {
             if (docId.isEmpty() || !seen.add(docId)) {
                 continue;
             }
+            String relation = span.getAttribute("data-relation").strip();
+            if (relation.isEmpty()) {
+                throw new MalformedPrerequisitesException(
+                        "## 参考文献 entry for " + docId + " has no data-relation attribute."
+                        + " Every entry states the kind of relation its author declared.");
+            }
+            if (!RELATION_FORM.matcher(relation).matches()) {
+                throw new MalformedPrerequisitesException(
+                        "## 参考文献 entry for " + docId + " has data-relation=\"" + relation
+                        + "\", which is not an identifier of lower-case letters, digits and hyphens.");
+            }
             String category = span.getAttribute("data-category").strip();
-            refs.add(new Ref(docId, category));
+            refs.add(new Ref(docId, relation, category));
         }
         return refs;
     }
@@ -107,6 +141,7 @@ final class PrerequisiteSection {
      */
     static Map<String, String> withCategory(Map<String, String> hit, Ref ref) {
         Map<String, String> out = new LinkedHashMap<>(hit);
+        out.put("relation", ref.relation());
         out.put("category", ref.category());
         return out;
     }

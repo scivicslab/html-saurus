@@ -253,7 +253,13 @@ public class PortalServer {
                 Map<String, String> selfHit = resolveDocRef(id);
                 if (selfHit == null) continue;
                 for (PrerequisiteSection.Ref ref : refs) {
-                    next.computeIfAbsent(ref.docId(), k -> new ArrayList<>()).add(selfHit);
+                    // The kind travels with the edge, unchanged, in both directions: the name the
+                    // author wrote is what is reported whichever end the caller asks from
+                    // (RelationKind_260830_oo01 "逆方向の呼び名は作らない"). The hit is copied per
+                    // edge because one document can be reached by several edges of different kinds.
+                    Map<String, String> hit = new LinkedHashMap<>(selfHit);
+                    hit.put("relation", ref.relation());
+                    next.computeIfAbsent(ref.docId(), k -> new ArrayList<>()).add(hit);
                 }
             }
         }
