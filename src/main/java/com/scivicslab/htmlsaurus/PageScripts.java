@@ -105,18 +105,38 @@ class PageScripts {
               (function() {
                 var btn = document.getElementById('rebuild-btn');
                 if (!btn) return;
-                btn.addEventListener('click', function() {
-                  var sel = document.getElementById('rebuild-stage');
-                  var stage = sel ? sel.value : 'html';
-                  btn.disabled = true; btn.textContent = 'Building\\u2026';
-                  fetch('/api/build-' + stage + '/' + encodeURIComponent('YADOC_BUILD_SITE'), {method: 'POST'})
+                // The build runs on the server's own thread and this asks how it is going. A
+                // whole-project build takes minutes, and waiting for the response left the button
+                // on 'Building...' for all of it -- and for good, whenever anything in between
+                // dropped the connection.
+                function poll(jobId) {
+                  fetch('/api/build-status?jobId=' + encodeURIComponent(jobId))
                     .then(function(r) { return r.json(); })
                     .then(function(j) {
-                      btn.textContent = j.status === 'ok'
+                      if (j.state === 'running') {
+                        btn.textContent = 'Building\\u2026 ' + Math.round(j.ms / 1000) + 's';
+                        setTimeout(function() { poll(jobId); }, 1500);
+                        return;
+                      }
+                      btn.textContent = j.state === 'done'
                         ? '\\u2713 Done (' + j.ms + 'ms)' : '\\u2717 Error';
                       setTimeout(function() {
                         btn.textContent = '\\u21BB Rebuild'; btn.disabled = false;
                       }, 3000);
+                    })
+                    .catch(function() {
+                      btn.textContent = '\\u21BB Rebuild'; btn.disabled = false;
+                    });
+                }
+                btn.addEventListener('click', function() {
+                  var sel = document.getElementById('rebuild-stage');
+                  var stage = sel ? sel.value : 'html';
+                  btn.disabled = true; btn.textContent = 'Building\\u2026';
+                  fetch('/api/build-async/' + stage + '/' + encodeURIComponent('YADOC_BUILD_SITE'), {method: 'POST'})
+                    .then(function(r) { return r.json(); })
+                    .then(function(j) {
+                      if (!j.jobId) { btn.textContent = '\\u2717 Error'; btn.disabled = false; return; }
+                      poll(j.jobId);
                     })
                     .catch(function() {
                       btn.textContent = '\\u21BB Rebuild'; btn.disabled = false;

@@ -389,6 +389,18 @@ public class PortalServer {
             return;
         }
 
+        // Background build (development mode only): POST /api/build-async/<stage>/<project> starts
+        // the build and answers at once with a job id; GET /api/build-status?jobId=... reports it.
+        // The synchronous /api/build-<stage>/<project> above stays for the MCP build-* tools.
+        if (!production && path.startsWith("/api/build-async/")) {
+            handleBuildAsync(ex, path.substring("/api/build-async/".length()));
+            return;
+        }
+        if (!production && path.equals("/api/build-status")) {
+            handleBuildStatus(ex);
+            return;
+        }
+
         // Navbar labels refresh (development mode only): GET /api/navbar-labels/<project>
         //   Re-reads docusaurus.config.ts live and returns the current position:'left' labels,
         //   so a portal row can refresh its label list in place without a full page reload.
@@ -916,6 +928,97 @@ public class PortalServer {
     }
 
     /**
+     * One build the browser started and can ask about.
+     *
+     * <p>A build of a whole project takes as long as it takes — {@code all} rebuilds the HTML, the
+     * Lucene index and then every document's embedding, and the embedding step re-runs in full
+     * because the index it compares itself against was just rewritten. Answering the browser only
+     * when that finished meant the Rebuild button sat on "Building…" for minutes and, if anything
+     * between the two dropped the connection, never came back at all. The work is the same; what
+     * changes is that the request returns immediately and the button asks how it is going.</p>
+     */
+    private static final class BuildJob {
+        private final String project;
+        private final String stage;
+        private final long startedAt = System.currentTimeMillis();
+        private volatile String state = "running";     // running | done | error
+        private volatile String message = "";
+        private volatile long finishedAt;
+
+        BuildJob(String project, String stage) {
+            this.project = project;
+            this.stage = stage;
+        }
+
+        String json(String id) {
+            long ms = (finishedAt > 0 ? finishedAt : System.currentTimeMillis()) - startedAt;
+            return "{\"jobId\":" + HttpUtils.jsonStr(id) + ",\"state\":" + HttpUtils.jsonStr(state)
+                    + ",\"project\":" + HttpUtils.jsonStr(project) + ",\"stage\":" + HttpUtils.jsonStr(stage)
+                    + ",\"ms\":" + ms + ",\"message\":" + HttpUtils.jsonStr(message) + "}";
+        }
+    }
+
+    /** Builds started through {@link #handleBuildAsync}, by job id. */
+    private final Map<String, BuildJob> buildJobs = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Handles {@code POST /api/build-async/<stage>/<project>}. Starts the build on its own thread
+     * and answers at once with a job id to poll {@link #handleBuildStatus} with.
+     */
+    private void handleBuildAsync(HttpExchange ex, String rest) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        int slash = rest.indexOf('/');
+        if (slash <= 0 || slash == rest.length() - 1) {
+            respond(ex, 400, "application/json", "{\"error\":\"expected /api/build-async/<stage>/<project>\"}");
+            return;
+        }
+        String stage = rest.substring(0, slash);
+        String name = rest.substring(slash + 1);
+        Project proj = projectMap.get(name);
+        if (proj == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
+            return;
+        }
+        String id = java.util.UUID.randomUUID().toString();
+        BuildJob job = new BuildJob(name, stage);
+        buildJobs.put(id, job);
+        System.out.println("Build stage '" + stage + "' started in background: " + name + " (job " + id + ")");
+        Thread worker = new Thread(() -> {
+            try {
+                runBuildStage(proj, stage);
+                job.message = "";
+                job.state = "done";
+            } catch (IllegalArgumentException e) {
+                job.message = "unknown stage: " + stage;
+                job.state = "error";
+            } catch (Exception e) {
+                System.err.println("Build stage '" + stage + "' error for " + name + ": " + e.getMessage());
+                job.message = String.valueOf(e.getMessage());
+                job.state = "error";
+            } finally {
+                job.finishedAt = System.currentTimeMillis();
+            }
+        }, "build-" + name + "-" + stage);
+        worker.setDaemon(true);
+        worker.start();
+        respond(ex, 202, "application/json", job.json(id));
+    }
+
+    /** Handles {@code GET /api/build-status?jobId=...}. */
+    private void handleBuildStatus(HttpExchange ex) throws IOException {
+        String id = queryParam(ex, "jobId");
+        BuildJob job = id.isBlank() ? null : buildJobs.get(id);
+        if (job == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"no such build job\"}");
+            return;
+        }
+        respond(ex, 200, "application/json", job.json(id));
+    }
+
+    /**
      * Runs one build stage ({@code html}, {@code index}, {@code embedding}, or {@code all}) for a
      * project. Shared by {@link #handleBuildStage} (REST) and the MCP {@code build-*} tools.
      *
@@ -1398,9 +1501,19 @@ public class PortalServer {
                     status.style.color = '#e06060';
                   }
                 } else {
-                  const r = await fetch('/api/build-' + action + '/' + encodeURIComponent(name), {method: 'POST'});
-                  const j = await r.json();
-                  if (j.status === 'ok') {
+                  // Started, then polled: a whole-project build takes minutes, and waiting for the
+                  // response held this button on '...' for all of it.
+                  const started = await fetch('/api/build-async/' + action + '/' + encodeURIComponent(name),
+                                              {method: 'POST'});
+                  const s0 = await started.json();
+                  let j = s0;
+                  while (j.state === 'running') {
+                    status.textContent = action + ' ' + Math.round(j.ms / 1000) + 's...';
+                    await new Promise(res => setTimeout(res, 1500));
+                    const r2 = await fetch('/api/build-status?jobId=' + encodeURIComponent(s0.jobId));
+                    j = await r2.json();
+                  }
+                  if (j.state === 'done') {
                     // 'all' rebuilds HTML/index/embedding; also refresh the navbar labels so the row
                     // reflects every action in the dropdown at once.
                     if (action === 'all') { await renderLabels(name); }
