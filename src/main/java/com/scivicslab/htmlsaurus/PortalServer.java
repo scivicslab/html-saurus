@@ -498,6 +498,14 @@ public class PortalServer {
             return;
         }
 
+        // What this server is showing (JSON): GET /api/activity (development mode only — the
+        // production deployment is a published site, and what its readers are reading is not
+        // something it reports).
+        if (!production && path.equals("/api/activity")) {
+            handleActivity(ex);
+            return;
+        }
+
         // Prerequisite documents (JSON): GET /api/prerequisites?id=... — the "## 参考文献" section
         // (development mode only)
         if (!production && path.equals("/api/prerequisites")) {
@@ -756,6 +764,68 @@ public class PortalServer {
             System.err.println("siblings error for " + srcPath + ": " + e.getMessage());
         }
         return out;
+    }
+
+    /** One document this server sent to a browser: what it was, and when. */
+    private record Served(String path, String title, long at) {}
+
+    /** How many recently served documents are remembered. */
+    private static final int SERVED_LIMIT = 20;
+
+    /**
+     * The documents this server has served, newest first, one entry per document.
+     *
+     * <p>What this server is doing is what it is showing, so this is the answer to
+     * {@code GET /api/activity} ({@code ActivitySummary_260905_oo01}). The portal page has a
+     * {@code Recent} menu, but that lives in the browser's {@code localStorage} and this server
+     * never sees it. Several people reading through one server all feed this one list, which is
+     * right: the question is what this instance is doing, not who asked it to.</p>
+     */
+    private final java.util.Deque<Served> served = new java.util.concurrent.ConcurrentLinkedDeque<>();
+
+    /** Remembers one served document, newest first, without repeating a document already in the list. */
+    private void noteServed(String path, String title) {
+        if (title == null || title.isBlank()) return;
+        served.removeIf(v -> v.path().equals(path));
+        served.addFirst(new Served(path, title, System.currentTimeMillis()));
+        while (served.size() > SERVED_LIMIT) served.pollLast();
+    }
+
+    /** @return the {@code <title>} of a built page, without the site name the builder appends */
+    private static String titleOf(String html) {
+        java.util.regex.Matcher m =
+                java.util.regex.Pattern.compile("<title>(.*?)</title>", java.util.regex.Pattern.DOTALL)
+                        .matcher(html);
+        if (!m.find()) return "";
+        String title = m.group(1).replaceAll("\\s+", " ").strip();
+        int bar = title.lastIndexOf(" | ");
+        return bar > 0 ? title.substring(0, bar).strip() : title;
+    }
+
+    /**
+     * Handles {@code GET /api/activity}. Answers what this server is showing: the document it sent
+     * most recently, and the ones before it ({@code ActivitySummary_260905_oo01}).
+     *
+     * <p>No model is asked anything. The titles are what people wrote at the top of their own
+     * documents, and a title is already the answer in a human's words.</p>
+     */
+    private void handleActivity(HttpExchange ex) throws IOException {
+        List<Served> recent = new ArrayList<>(served);
+        String summary = recent.isEmpty()
+                ? "文書を配信しているが、まだ誰も開いていない。"
+                : recent.get(0).title();
+        StringBuilder parts = new StringBuilder("[");
+        for (int i = 0; i < recent.size(); i++) {
+            if (i > 0) parts.append(",");
+            parts.append("{\"name\":").append(jsonStr(recent.get(i).path()))
+                 .append(",\"summary\":").append(jsonStr(recent.get(i).title())).append("}");
+        }
+        parts.append("]");
+        String asOf = recent.isEmpty() ? java.time.Instant.now().toString()
+                : java.time.Instant.ofEpochMilli(recent.get(0).at()).toString();
+        respond(ex, 200, "application/json",
+                "{\"summary\":" + jsonStr(summary) + ",\"asOf\":" + jsonStr(asOf)
+                        + ",\"parts\":" + parts + "}");
     }
 
     /**
@@ -3040,6 +3110,7 @@ public class PortalServer {
                 // theme mechanism existed (no rebuild needed). Skipped for pages already carrying it.
                 html = HttpUtils.injectDocTheme(html);
                 html = injectRelatedDocs(html, docPath);
+                noteServed(docPath, titleOf(html));
                 body = html.getBytes(StandardCharsets.UTF_8);
             }
         }
