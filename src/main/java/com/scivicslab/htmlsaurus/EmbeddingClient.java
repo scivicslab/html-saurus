@@ -36,13 +36,40 @@ public class EmbeddingClient {
 
     private static final Logger logger = Logger.getLogger(EmbeddingClient.class.getName());
 
-    /** Default embedding server (W206 GPU host). Node/port may move — see config. */
+    /** Embedding server used when neither {@code GPU_BROKER_URL} nor an explicit URL is given
+     *  (W206 GPU host). Node/port may move — see config. */
     public static final String DEFAULT_BASE_URL = "http://192.168.5.17:8012";
+
+    /**
+     * Where embeddings go when no explicit URL was given: {@code quarkus-gpu-broker} when this
+     * process was started with {@code GPU_BROKER_URL}, and the fixed node otherwise.
+     *
+     * <p>This is the rule OCR already follows ({@code PortalServer.buildOcrClients},
+     * {@code GpuBrokerOcrIntegration_260820_oo01}): one decision, made once from the environment,
+     * never a per-request choice and never a runtime fallback from one to the other. Embeddings
+     * were the one GPU user that ignored it and went straight to a node, which put them outside
+     * the broker's queueing and multi-node routing while every other GPU call went through it.</p>
+     *
+     * <p>The broker answers {@code POST /v1/embeddings} with the same model and the same 1024
+     * dimensions as the node does, so nothing about the request or the stored vectors changes.</p>
+     *
+     * @return the base URL to use
+     */
+    static String defaultBaseUrl() {
+        String broker = System.getenv("GPU_BROKER_URL");
+        return (broker == null || broker.isBlank()) ? DEFAULT_BASE_URL : broker.replaceAll("/+$", "");
+    }
     /** Default model id sent in the request (the server reports this model). */
     public static final String DEFAULT_MODEL = "intfloat/multilingual-e5-large";
 
+    /** The queue {@code quarkus-gpu-broker} runs embeddings on. Override: {@code GPU_BROKER_EMBEDDING_QUEUE}. */
+    public static final String DEFAULT_BROKER_QUEUE = "embedding-e5large";
+
     private final String baseUrl;
     private final String model;
+    /** Whether {@link #baseUrl} is {@code quarkus-gpu-broker} rather than an embedding server. */
+    private final boolean viaBroker;
+    private final String brokerQueue;
     private final HttpClient httpClient;
 
     /**
@@ -53,10 +80,15 @@ public class EmbeddingClient {
      *                {@link #DEFAULT_BASE_URL}
      */
     public EmbeddingClient(String baseUrl) {
-        this.baseUrl = baseUrl == null || baseUrl.isBlank() ? DEFAULT_BASE_URL
+        this.baseUrl = baseUrl == null || baseUrl.isBlank() ? defaultBaseUrl()
                 : baseUrl.replaceAll("/+$", "");
         String envModel = System.getenv("EMBEDDING_MODEL");
         this.model = (envModel == null || envModel.isBlank()) ? DEFAULT_MODEL : envModel;
+        String broker = System.getenv("GPU_BROKER_URL");
+        this.viaBroker = broker != null && !broker.isBlank()
+                && broker.replaceAll("/+$", "").equals(this.baseUrl);
+        String envQueue = System.getenv("GPU_BROKER_EMBEDDING_QUEUE");
+        this.brokerQueue = (envQueue == null || envQueue.isBlank()) ? DEFAULT_BROKER_QUEUE : envQueue;
         this.httpClient = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(10))
@@ -69,26 +101,84 @@ public class EmbeddingClient {
     }
 
     /**
-     * Checks that the embedding server is reachable and responding.
+     * Checks that embeddings can actually be produced.
      *
-     * @return {@code true} if {@code GET /} returns HTTP 200, {@code false} otherwise
+     * <p>What is worth checking differs by where this client points. Against
+     * {@code quarkus-gpu-broker}, {@code GET /queues} reports every queue it manages and whether
+     * each is ready, so the answer is about the embedding queue itself rather than about the broker
+     * being up. Against an embedding server, {@code GET /v1/models} is part of the API this client
+     * uses; {@code GET /} is not, and a server that serves a page there answers 200 whatever its
+     * API does.</p>
+     *
+     * <p>Which of the two is asked is settled at construction from the environment, not per call
+     * and not by trying one and falling back to the other.</p>
+     *
+     * @return {@code true} when embeddings can be produced, {@code false} otherwise
      */
     public boolean isReachable() {
+        if (!viaBroker) {
+            return getOk(baseUrl + "/v1/models") != null;
+        }
+        String body = getOk(baseUrl + "/queues");
+        if (body == null) {
+            return false;
+        }
+        if (queueReady(body, brokerQueue)) {
+            return true;
+        }
+        logger.warning("gpu-broker has no ready queue named " + brokerQueue + "; embeddings skipped");
+        return false;
+    }
+
+    /** @return the response body when the GET answered 200, or {@code null} */
+    private String getOk(String url) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/"))
+                    .uri(URI.create(url))
                     .GET()
                     .timeout(Duration.ofSeconds(5))
                     .build();
             HttpResponse<String> response = httpClient.send(request,
                     HttpResponse.BodyHandlers.ofString());
-            return response.statusCode() == 200;
+            return response.statusCode() == 200 ? response.body() : null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return false;
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Reads {@code quarkus-gpu-broker}'s {@code GET /queues} answer and reports whether the named
+     * queue is there and ready.
+     *
+     * <p>The answer is a JSON array, one object per queue, each carrying at least {@code name} and
+     * {@code ready}. A queue that is absent and a queue that is present but not ready are the same
+     * answer here — neither will produce an embedding.</p>
+     *
+     * @param body  the response body
+     * @param queue the queue name to look for
+     * @return {@code true} when that queue is listed with {@code ready} true
+     */
+    static boolean queueReady(String body, String queue) {
+        Object parsed;
+        try {
+            parsed = McpJsonParser.parse(body);
         } catch (Exception e) {
             return false;
         }
+        if (!(parsed instanceof List<?> queues)) {
+            return false;
+        }
+        for (Object row : queues) {
+            if (row instanceof Map<?, ?> m
+                    && queue.equals(m.get("name"))
+                    && Boolean.TRUE.equals(m.get("ready"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

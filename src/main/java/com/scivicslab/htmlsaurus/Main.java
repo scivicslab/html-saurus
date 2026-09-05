@@ -285,8 +285,9 @@ public class Main {
      * Ensures each project's embedding vector cache ({@code search-embedding/vectors.bin})
      * is present and not older than its {@code search-index/}, (re)building stale ones via
      * the shared embedding server. The model is NOT run in-process: each document's text is
-     * sent over HTTP (default {@link EmbeddingClient#DEFAULT_BASE_URL}; override with
-     * {@code EMBEDDING_SERVER_URL}).
+     * sent over HTTP, to {@code quarkus-gpu-broker} when {@code GPU_BROKER_URL} is set and to
+     * {@link EmbeddingClient#DEFAULT_BASE_URL} otherwise ({@link EmbeddingClient#defaultBaseUrl}).
+     * {@code EMBEDDING_SERVER_URL} overrides both.
      *
      * <p>If the embedding server is unreachable, this logs a warning and returns: stale or
      * missing projects keep whatever cached vectors they already have (possibly none), so the
