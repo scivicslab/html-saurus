@@ -1,3 +1,6 @@
 target*/
 dependency-reduced-pom.xml
 *.class
+static-html/
+search-index/
+search-embedding/
