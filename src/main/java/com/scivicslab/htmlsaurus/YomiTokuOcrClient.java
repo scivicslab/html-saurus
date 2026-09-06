@@ -18,7 +18,13 @@ import java.util.logging.Logger;
  * column), no math support. Same server/contract as W206's other YomiToku deployment (see
  * {@code EmbeddingClient}'s W206 GPU host convention): {@code POST {baseUrl}/ocr}, multipart
  * fields {@code file} (single-page PDF bytes) + {@code page} (always {@code "0"}, since the
- * caller already extracted one page), response {@code {"paragraphs": ["...", ...]}}.
+ * caller already extracted one page).
+ *
+ * <p>Requests go to {@code /ocr/markdown}, which returns one {@code markdown} string. The server's
+ * other endpoint, {@code /ocr}, returns a {@code paragraphs} array holding only the analyzer's
+ * paragraphs and drops the tables it read. {@link #parseParagraphs} accepts both shapes, which is
+ * what let this move without a moment where an import silently read zero paragraphs — see
+ * {@code YomiTokuMarkdownEndpoint_260907_oo01}.</p>
  */
 class YomiTokuOcrClient implements OcrClient {
 
@@ -49,7 +55,7 @@ class YomiTokuOcrClient implements OcrClient {
         GpuBrokerOcrClient.MultipartRequest req = buildRequest(onePagePdfBytes);
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/ocr"))
+                .uri(URI.create(baseUrl + "/ocr/markdown"))
                 .header("Content-Type", req.contentType())
                 .POST(HttpRequest.BodyPublishers.ofByteArray(req.body()))
                 .timeout(Duration.ofSeconds(120))
@@ -73,23 +79,35 @@ class YomiTokuOcrClient implements OcrClient {
         return new GpuBrokerOcrClient.MultipartRequest(body, "multipart/form-data; boundary=" + boundary);
     }
 
-    /** Parses a YomiToku {@code /ocr} response body, shared with {@link GpuBrokerOcrClient}
-     *  (whose job result carries the same body YomiToku itself returned). YomiToku has no
-     *  images field — it is a plain-text OCR engine. */
+    /** Parses a YomiToku response body, shared with {@link GpuBrokerOcrClient} (whose job result
+     *  carries the same body YomiToku itself returned). YomiToku has no images field — it is a
+     *  plain-text OCR engine. */
     static Result parseResult(String responseBody) {
         return new Result(parseParagraphs(responseBody), Map.of());
     }
 
-    @SuppressWarnings("unchecked")
+    /**
+     * The paragraphs of one page, from either shape YomiToku's server can return: the {@code
+     * paragraphs} array of {@code /ocr}, or the single {@code markdown} string of {@code
+     * /ocr/markdown}, which is split on blank lines the same way Marker's Markdown is. Reading both
+     * is what lets the request path move from one endpoint to the other without a moment where the
+     * import silently reads zero paragraphs -- see {@code YomiTokuMarkdownEndpoint_260907_oo01}.
+     */
     static List<String> parseParagraphs(String responseBody) {
         Map<String, Object> root = McpJsonParser.parseObject(responseBody);
         Object paragraphs = root.get("paragraphs");
-        List<String> out = new ArrayList<>();
         if (paragraphs instanceof List<?> list) {
+            List<String> out = new ArrayList<>();
             for (Object p : list) {
                 if (p != null && !p.toString().isBlank()) out.add(p.toString());
             }
+            return out;
         }
-        return out;
+        Object markdown = root.get("markdown");
+        if (markdown == null) {
+            markdown = root.get("text");
+        }
+        return markdown == null ? new ArrayList<>()
+                : MarkerOcrClient.splitParagraphs(markdown.toString());
     }
 }
