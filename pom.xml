@@ -83,7 +83,7 @@
         <dependency>
             <groupId>com.scivicslab</groupId>
             <artifactId>pojo-actor</artifactId>
-            <version>3.5.0</version>
+            <version>4.0.0</version>
         </dependency>
 
         <!-- gpu-broker-client: flow-controlled SDK for quarkus-gpu-broker's async job path -->
