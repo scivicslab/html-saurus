@@ -2237,9 +2237,6 @@ public class PortalServer {
      * @param q the search query string
      * @return list of result maps, each containing project, title, pagePath, and summary
      */
-    private static final String[] SEARCH_FIELDS = {"title_idx", "doc_id_idx", "path_tokens", "tags", "body"};
-    private static final Map<String, Float> SEARCH_BOOSTS =
-        Map.of("title_idx", 3.0f, "doc_id_idx", 5.0f, "path_tokens", 5.0f, "tags", 2.0f, "body", 1.0f);
 
     private List<Map<String, String>> globalSearch(String q, String lang) {
         if (q.isBlank()) return List.of();
@@ -2270,8 +2267,8 @@ public class PortalServer {
             var mr = new MultiReader(readers.toArray(new DirectoryReader[0]), false);
             var globalSearcher = new IndexSearcher(mr);
             var analyzer = "en".equals(lang) ? new StandardAnalyzer() : new JapaneseAnalyzer();
-            var expr = LuceneQueryBuilder.build(SEARCH_FIELDS, SEARCH_BOOSTS, q);
-            var parser = new MultiFieldQueryParser(SEARCH_FIELDS, analyzer, SEARCH_BOOSTS);
+            var expr = LuceneQueryBuilder.build(LuceneQueryBuilder.fields(), LuceneQueryBuilder.BOOSTS, q);
+            var parser = new MultiFieldQueryParser(LuceneQueryBuilder.fields(), analyzer, LuceneQueryBuilder.BOOSTS);
             var query = parser.parse(expr);
             var topDocs = globalSearcher.search(query, 1000);
             var stored = globalSearcher.storedFields();
@@ -2352,7 +2349,7 @@ public class PortalServer {
         ActorRef<LuceneSearcher> sRef = searchers.get(proj.name());
         if (sRef == null) return;
         try {
-            var hits = sRef.ask(s -> { try { return s.search(queryStr, 1000, SEARCH_FIELDS, SEARCH_BOOSTS); } catch (Exception e) { throw new RuntimeException(e); } }).join();
+            var hits = sRef.ask(s -> { try { return s.search(queryStr, 1000, LuceneQueryBuilder.fields(), LuceneQueryBuilder.BOOSTS); } catch (Exception e) { throw new RuntimeException(e); } }).join();
             for (var hit : hits) {
                 out.add(Map.of(
                     "project",  proj.name(),
@@ -2391,7 +2388,7 @@ public class PortalServer {
     private String searchWithSearcher(String queryStr, Project proj, ActorRef<LuceneSearcher> sRef) {
         if (sRef == null) return "[]";
         try {
-            var hits = sRef.ask(s -> { try { return s.search(queryStr, 20, SEARCH_FIELDS, SEARCH_BOOSTS); } catch (Exception e) { throw new RuntimeException(e); } }).join();
+            var hits = sRef.ask(s -> { try { return s.search(queryStr, 20, LuceneQueryBuilder.fields(), LuceneQueryBuilder.BOOSTS); } catch (Exception e) { throw new RuntimeException(e); } }).join();
             var sb = new StringBuilder("[");
             boolean first = true;
             for (var hit : hits) {
