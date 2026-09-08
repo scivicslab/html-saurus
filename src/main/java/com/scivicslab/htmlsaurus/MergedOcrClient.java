@@ -18,16 +18,23 @@ import com.scivicslab.gpubroker.client.GpuBrokerClient;
 
 /**
  * OCR client that reads one page with BOTH YomiToku and Marker and merges the two by page
- * position: the regions Marker classified as {@code Equation} take Marker's LaTeX, everything
- * else takes YomiToku's Japanese text — see {@code MixedJapaneseMathOcr_260907_oo01}.
+ * position: the blocks where Marker read mathematics take Marker's LaTeX, everything else takes
+ * YomiToku's Japanese text — see {@code MixedJapaneseMathOcr_260907_oo01} and
+ * {@code MergedOcrBackend_260909_oo01}.
  *
- * <p>Neither engine alone can read a Japanese book with mathematics: YomiToku reads the prose
- * correctly but garbles every formula (it has no math support), Marker reads the formulas as
- * clean LaTeX but garbles the Japanese prose. Which output to take is decided by where a block
- * sits on the page, never by what its text looks like — Marker's {@code Equation} bounding boxes
- * (PDF points) are scaled by {@code dpi/72} into the pixel coordinate system of YomiToku's
- * paragraph boxes, and every YomiToku paragraph that an {@code Equation} rectangle mostly covers
- * is replaced by that equation's LaTeX.</p>
+ * <p>Marker is called with {@code force_ocr=true}. A scanned book often carries the text layer
+ * its scanner's own OCR embedded at scan time, and without the flag Marker reads that layer
+ * instead of the page image — the garbled Japanese the design document first attributed to
+ * Marker was, measured again, that embedded layer's text verbatim. With the flag, Marker reads
+ * the image itself: display equations become {@code Equation} blocks, formulas inside a sentence
+ * become {@code <math display="inline">} elements inside {@code Text}/{@code ListItem} blocks,
+ * and both are taken from Marker. YomiToku still reads the pure prose better (and reads
+ * multi-column layouts in the right order), so paragraphs without mathematics stay YomiToku's.</p>
+ *
+ * <p>Which output to take is decided by where a block sits on the page, never by what its text
+ * looks like — Marker's bounding boxes (PDF points) are scaled by {@code dpi/72} into the pixel
+ * coordinate system of YomiToku's paragraph boxes, and every YomiToku paragraph that a
+ * math-bearing Marker block mostly covers is replaced by that block's Markdown.</p>
  *
  * <p>Both backends are called through the same two request shapes the single-engine clients send
  * ({@link YomiTokuOcrClient#buildRequest} to {@code /ocr/markdown}, whose response now also
@@ -56,13 +63,14 @@ class MergedOcrClient implements OcrClient {
      *  pixel coordinates are relative to. */
     record YomiTokuBlocks(List<YomiTokuBlock> blocks, double dpi) {}
 
-    /** One Marker {@code Equation} block: its bounding box in PDF points, and its content already
-     *  converted to Markdown (math as {@code $$...$$}, kept together with any trailing plain text
-     *  such as an equation number). */
-    record MarkerEquation(double x1, double y1, double x2, double y2, String markdown) {}
+    /** One math-bearing Marker block — an {@code Equation}, or a {@code Text}/{@code ListItem}
+     *  with {@code <math>} inside — as its bounding box in PDF points and its content already
+     *  converted to Markdown (display math as {@code $$...$$} lines, inline math as
+     *  {@code $...$} within the surrounding text, other markup dropped). */
+    record MarkerBlock(double x1, double y1, double x2, double y2, String markdown) {}
 
-    /** A YomiToku paragraph counts as covered by an Equation rectangle when at least this share
-     *  of the paragraph's area lies inside it. The rectangles come from two different layout
+    /** A YomiToku paragraph counts as covered by a Marker block's rectangle when at least this
+     *  share of the paragraph's area lies inside it. The rectangles come from two different layout
      *  analyses of the same scan, so they never agree exactly; the design document's own measured
      *  example overlaps at 0.83. */
     static final double COVERAGE_THRESHOLD = 0.5;
@@ -129,8 +137,8 @@ class MergedOcrClient implements OcrClient {
     @Override
     public Result ocrPage(byte[] onePagePdfBytes) throws IOException, InterruptedException {
         YomiTokuBlocks yomi = parseYomiTokuBlocks(yomiTokuCall.call(onePagePdfBytes));
-        List<MarkerEquation> equations = parseMarkerEquations(markerCall.call(onePagePdfBytes));
-        return new Result(merge(yomi, equations), Map.of());
+        List<MarkerBlock> mathBlocks = parseMarkerMathBlocks(markerCall.call(onePagePdfBytes));
+        return new Result(merge(yomi, mathBlocks), Map.of());
     }
 
     /**
@@ -168,57 +176,75 @@ class MergedOcrClient implements OcrClient {
     /** Builds the Marker request this client sends: same multipart shape as
      *  {@link MarkerOcrClient#buildRequest} but with {@code output_format=json}, which returns
      *  the page as a block tree with a type and a bounding box per block instead of one
-     *  Markdown string. */
+     *  Markdown string, and {@code force_ocr=true}, which makes Marker read the page image
+     *  instead of any text layer the scanner's own OCR embedded at scan time — without it, a
+     *  scanned book answers with that (old, garbled) layer and no inline math at all. */
     static GpuBrokerOcrClient.MultipartRequest buildMarkerJsonRequest(byte[] onePagePdfBytes)
             throws IOException {
         String boundary = "----htmlsaurus" + System.nanoTime();
         var fields = new java.util.LinkedHashMap<String, String>();
         fields.put("page_range", "0");
         fields.put("output_format", "json");
+        fields.put("force_ocr", "true");
         byte[] body = HttpUtils.buildMultipart(boundary, fields, "file", "page.pdf", onePagePdfBytes);
         return new GpuBrokerOcrClient.MultipartRequest(body, "multipart/form-data; boundary=" + boundary);
     }
 
     /**
-     * The {@code Equation} blocks of a Marker {@code output_format=json} response, in reading
-     * order. The response's {@code output} is a JSON string holding a {@code Document} whose
-     * {@code Page} children each carry {@code block_type}, {@code bbox} (PDF points) and
-     * {@code html}; only single pages are ever sent, so the first page is the whole answer.
+     * The math-bearing blocks of a Marker {@code output_format=json} response, in reading order:
+     * every {@code Equation} block, and every other block (a {@code Text}, a {@code ListItem})
+     * whose {@code html} contains a {@code <math>} element. The tree is walked depth-first; a
+     * collected block's children are not descended into, because its {@code html} already carries
+     * the nested content (a {@code ListItem} holds its sub-items' text), and collecting a child
+     * again would duplicate it. The response's {@code output} is a JSON string holding a
+     * {@code Document} whose {@code Page} children carry {@code block_type}, {@code bbox}
+     * (PDF points) and {@code html}; only single pages are ever sent.
      */
-    @SuppressWarnings("unchecked")
-    static List<MarkerEquation> parseMarkerEquations(String responseBody) {
+    static List<MarkerBlock> parseMarkerMathBlocks(String responseBody) {
         Map<String, Object> root = McpJsonParser.parseObject(responseBody);
         Object output = root.get("output");
         if (output == null) return List.of();
         Object tree = output instanceof String s ? McpJsonParser.parse(s) : output;
         if (!(tree instanceof Map<?, ?> doc)) return List.of();
 
-        List<Map<String, Object>> pages = new ArrayList<>();
-        if ("Document".equals(doc.get("block_type")) && doc.get("children") instanceof List<?> kids) {
-            for (Object k : kids) {
-                if (k instanceof Map<?, ?> km) pages.add((Map<String, Object>) km);
-            }
-        } else {
-            pages.add((Map<String, Object>) doc);
-        }
+        List<MarkerBlock> mathBlocks = new ArrayList<>();
+        collectMathBlocks(doc, mathBlocks);
+        return mathBlocks;
+    }
 
-        List<MarkerEquation> equations = new ArrayList<>();
-        for (Map<String, Object> page : pages) {
-            if (!(page.get("children") instanceof List<?> children)) continue;
-            for (Object child : children) {
-                if (!(child instanceof Map<?, ?> block)) continue;
-                if (!"Equation".equals(block.get("block_type"))) continue;
-                Object bbox = block.get("bbox");
-                Object html = block.get("html");
-                if (!(bbox instanceof List<?> b) || b.size() != 4 || html == null) continue;
-                String markdown = equationHtmlToMarkdown(html.toString());
-                if (markdown.isBlank()) continue;
-                equations.add(new MarkerEquation(
+    /** Depth-first collection for {@link #parseMarkerMathBlocks}: collect and stop, or descend. */
+    private static void collectMathBlocks(Map<?, ?> block, List<MarkerBlock> out) {
+        Object type = block.get("block_type");
+        Object bbox = block.get("bbox");
+        Object html = block.get("html");
+        boolean container = "Document".equals(type) || "Page".equals(type) || "ListGroup".equals(type);
+        if (!container && bbox instanceof List<?> b && b.size() == 4 && html != null
+                && ("Equation".equals(type) || html.toString().contains("<math"))) {
+            String markdown = equationHtmlToMarkdown(html.toString());
+            if (!markdown.isBlank() && !hasDegenerateRepetition(markdown)) {
+                out.add(new MarkerBlock(
                         toDouble(b.get(0)), toDouble(b.get(1)), toDouble(b.get(2)), toDouble(b.get(3)),
                         markdown));
             }
+            return;
         }
-        return equations;
+        if (block.get("children") instanceof List<?> children) {
+            for (Object child : children) {
+                if (child instanceof Map<?, ?> m) collectMathBlocks(m, out);
+            }
+        }
+    }
+
+    private static final Pattern DEGENERATE_REPETITION = Pattern.compile("(\\S{1,3})( \\1){4,}");
+
+    /**
+     * Whether a converted block shows the repetition failure OCR models fall into on a line they
+     * cannot read — the same short token emitted over and over ({@code で で で で で …}, observed
+     * live on a real page). Such a block is not collected: the YomiToku paragraphs under it stay,
+     * which loses that block's inline LaTeX but keeps the sentence a human can read.
+     */
+    static boolean hasDegenerateRepetition(String markdown) {
+        return DEGENERATE_REPETITION.matcher(markdown).find();
     }
 
     private static final Pattern MATH_ELEMENT = Pattern.compile(
@@ -275,20 +301,20 @@ class MergedOcrClient implements OcrClient {
 
     /**
      * Merges one page: YomiToku's paragraphs in their reading order, with every paragraph that a
-     * Marker {@code Equation} rectangle mostly covers replaced by that equation's Markdown. An
-     * equation that covers several paragraphs replaces them all at the first one's position; an
-     * equation that covers none (YomiToku read nothing there at all) is inserted before the first
+     * math-bearing Marker block's rectangle mostly covers replaced by that block's Markdown. A
+     * block that covers several paragraphs replaces them all at the first one's position; a
+     * block that covers none (YomiToku read nothing there at all) is inserted before the first
      * paragraph that starts below it.
      */
-    static List<String> merge(YomiTokuBlocks yomi, List<MarkerEquation> equations) {
+    static List<String> merge(YomiTokuBlocks yomi, List<MarkerBlock> mathBlocks) {
         double scale = yomi.dpi() / 72.0;
         List<YomiTokuBlock> paragraphs = yomi.blocks();
 
-        // For each equation: the indices of the paragraphs it covers.
+        // For each math block: the indices of the paragraphs it covers.
         List<Set<Integer>> covered = new ArrayList<>();
-        for (MarkerEquation eq : equations) {
-            double ex1 = eq.x1() * scale, ey1 = eq.y1() * scale;
-            double ex2 = eq.x2() * scale, ey2 = eq.y2() * scale;
+        for (MarkerBlock mb : mathBlocks) {
+            double ex1 = mb.x1() * scale, ey1 = mb.y1() * scale;
+            double ex2 = mb.x2() * scale, ey2 = mb.y2() * scale;
             Set<Integer> hits = new LinkedHashSet<>();
             for (int i = 0; i < paragraphs.size(); i++) {
                 YomiTokuBlock p = paragraphs.get(i);
@@ -302,29 +328,29 @@ class MergedOcrClient implements OcrClient {
             covered.add(hits);
         }
 
-        // Which equation (if any) is anchored at each paragraph index, and which paragraph
-        // indices disappear into an equation.
+        // Which math block (if any) is anchored at each paragraph index, and which paragraph
+        // indices disappear into one.
         String[] anchored = new String[paragraphs.size()];
         Set<Integer> replaced = new LinkedHashSet<>();
-        List<MarkerEquation> unanchored = new ArrayList<>();
-        for (int e = 0; e < equations.size(); e++) {
+        List<MarkerBlock> unanchored = new ArrayList<>();
+        for (int e = 0; e < mathBlocks.size(); e++) {
             Set<Integer> hits = covered.get(e);
             if (hits.isEmpty()) {
-                unanchored.add(equations.get(e));
+                unanchored.add(mathBlocks.get(e));
                 continue;
             }
             int first = hits.iterator().next();
-            anchored[first] = anchored[first] == null ? equations.get(e).markdown()
-                    : anchored[first] + "\n" + equations.get(e).markdown();
+            anchored[first] = anchored[first] == null ? mathBlocks.get(e).markdown()
+                    : anchored[first] + "\n" + mathBlocks.get(e).markdown();
             replaced.addAll(hits);
         }
 
         List<String> out = new ArrayList<>();
         for (int i = 0; i < paragraphs.size(); i++) {
             for (var it = unanchored.iterator(); it.hasNext(); ) {
-                MarkerEquation eq = it.next();
-                if (eq.y1() * scale < paragraphs.get(i).y1()) {
-                    out.add(eq.markdown());
+                MarkerBlock mb = it.next();
+                if (mb.y1() * scale < paragraphs.get(i).y1()) {
+                    out.add(mb.markdown());
                     it.remove();
                 }
             }
@@ -334,8 +360,8 @@ class MergedOcrClient implements OcrClient {
                 out.add(paragraphs.get(i).contents());
             }
         }
-        for (MarkerEquation eq : unanchored) {
-            out.add(eq.markdown());
+        for (MarkerBlock mb : unanchored) {
+            out.add(mb.markdown());
         }
         return out;
     }
