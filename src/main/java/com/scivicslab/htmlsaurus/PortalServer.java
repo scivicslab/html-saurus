@@ -106,7 +106,9 @@ public class PortalServer {
         if (brokerUrl == null || brokerUrl.isBlank()) {
             return Map.of(
                 "yomitoku", new YomiTokuOcrClient(System.getenv("YOMITOKU_SERVER_URL")),
-                "marker", new MarkerOcrClient(System.getenv("MARKER_SERVER_URL"))
+                "marker", new MarkerOcrClient(System.getenv("MARKER_SERVER_URL")),
+                "yomitoku-marker", MergedOcrClient.direct(
+                        System.getenv("YOMITOKU_SERVER_URL"), System.getenv("MARKER_SERVER_URL"))
             );
         }
         GpuBrokerClient client = new GpuBrokerClient(brokerUrl, "html-saurus", GPU_BROKER_TARGET_IN_FLIGHT);
@@ -114,7 +116,8 @@ public class PortalServer {
             "yomitoku", new GpuBrokerOcrClient(client, "yomitoku-ocr", "yomitoku",
                     YomiTokuOcrClient::buildRequest, YomiTokuOcrClient::parseResult),
             "marker", new GpuBrokerOcrClient(client, "marker-ocr", "marker",
-                    MarkerOcrClient::buildRequest, MarkerOcrClient::parseResult)
+                    MarkerOcrClient::buildRequest, MarkerOcrClient::parseResult),
+            "yomitoku-marker", MergedOcrClient.viaGpuBroker(client)
         );
     }
 
@@ -1454,6 +1457,7 @@ public class PortalServer {
                     <select id="import-pdf-backend">
                       <option value="yomitoku">YomiToku (Japanese, multi-column)</option>
                       <option value="marker">Marker (math/LaTeX, GPU)</option>
+                      <option value="yomitoku-marker">YomiToku + Marker (Japanese with math)</option>
                     </select>
                   </div>
                   <div class="field">
@@ -2588,8 +2592,9 @@ public class PortalServer {
      * Handles {@code POST /api/import/pdf/start}. Form fields: {@code path} (absolute path of the
      * PDF on this server's filesystem — the browser never uploads the file's bytes, matching
      * {@code quarkus-english-drill}'s Import screen), {@code project}, {@code destPath} (directory
-     * under that project's {@code docs/} to write into), {@code backend} ({@code yomitoku} or
-     * {@code marker}), {@code pagesPerFile}, {@code title} (optional, defaults to the filename).
+     * under that project's {@code docs/} to write into), {@code backend} ({@code yomitoku},
+     * {@code marker} or {@code yomitoku-marker}), {@code pagesPerFile}, {@code title} (optional,
+     * defaults to the filename).
      * Registers a {@link PdfImportJobActor} as a named child of {@link #searcherSystem} and starts
      * it immediately ({@code ref.tell(PdfImportJobActor::start)}) — the job runs to completion on
      * its own actor thread, independent of this request or the browser connection. Returns

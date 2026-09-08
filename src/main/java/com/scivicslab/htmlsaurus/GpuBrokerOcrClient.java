@@ -70,7 +70,15 @@ class GpuBrokerOcrClient implements OcrClient {
     @Override
     public Result ocrPage(byte[] onePagePdfBytes) throws IOException {
         MultipartRequest req = buildRequest.build(onePagePdfBytes);
+        return parseResult.apply(submitRaw(client, queueName, backendId, req));
+    }
 
+    /** Submits one already-built request through gpu-broker and returns the backend's raw
+     *  response body — the same body a direct HTTP call to that backend would have returned.
+     *  {@link #ocrPage} parses it into a {@link Result}; {@link MergedOcrClient} parses the two
+     *  bodies it collects with its own block-level parsers instead. */
+    static String submitRaw(GpuBrokerClient client, String queueName, String backendId,
+                             MultipartRequest req) throws IOException {
         CompletableFuture<JobResult> resultFuture = new CompletableFuture<>();
         try {
             client.submit(queueName, req.body(), req.contentType(), Priority.BACKGROUND, resultFuture::complete);
@@ -91,6 +99,6 @@ class GpuBrokerOcrClient implements OcrClient {
         if (result.status() != JobResult.Status.DONE) {
             throw new IOException(backendId + " OCR failed via gpu-broker: " + result.error());
         }
-        return parseResult.apply(new String(result.body(), StandardCharsets.UTF_8));
+        return new String(result.body(), StandardCharsets.UTF_8);
     }
 }
