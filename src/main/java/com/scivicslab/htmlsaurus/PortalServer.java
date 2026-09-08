@@ -805,18 +805,29 @@ public class PortalServer {
         return bar > 0 ? title.substring(0, bar).strip() : title;
     }
 
+    /** The Activity column's LLM budget ({@code ActivitySummary_260905_oo01}): at most one
+     *  translation call per this interval; a miss outside the window answers with the original
+     *  title instead of waiting. */
+    private static final long ACTIVITY_TRANSLATE_INTERVAL_MS = 30 * 60 * 1000;
+    /** Epoch millis at which the next activity translation call is allowed. */
+    private final java.util.concurrent.atomic.AtomicLong activityTranslateAllowedAtMs =
+            new java.util.concurrent.atomic.AtomicLong(0);
+
     /**
      * Handles {@code GET /api/activity}. Answers what this server is showing: the document it sent
      * most recently, and the ones before it ({@code ActivitySummary_260905_oo01}).
      *
-     * <p>No model is asked anything. The titles are what people wrote at the top of their own
-     * documents, and a title is already the answer in a human's words.</p>
+     * <p>The one-line {@code summary} is in English — AI-workspace's Instances table shows every
+     * app's answer in one language — so the most recent document's title is translated through
+     * {@link #translateCore} (disk-cached; a title is translated once, ever). {@code parts} keeps
+     * the titles as their authors wrote them: that list is the detail view, and a title is a
+     * human's own words.</p>
      */
     private void handleActivity(HttpExchange ex) throws IOException {
         List<Served> recent = new ArrayList<>(served);
         String summary = recent.isEmpty()
-                ? "文書を配信しているが、まだ誰も開いていない。"
-                : recent.get(0).title();
+                ? "Serving documentation; no document has been opened yet."
+                : activitySummaryEnglish(recent.get(0).title());
         StringBuilder parts = new StringBuilder("[");
         for (int i = 0; i < recent.size(); i++) {
             if (i > 0) parts.append(",");
@@ -829,6 +840,25 @@ public class PortalServer {
         respond(ex, 200, "application/json",
                 "{\"summary\":" + jsonStr(summary) + ",\"asOf\":" + jsonStr(asOf)
                         + ",\"parts\":" + parts + "}");
+    }
+
+    /**
+     * The English form of one served document's title, for the Activity column. A cached
+     * translation answers for free; an uncached one costs an LLM call, allowed at most once per
+     * {@link #ACTIVITY_TRANSLATE_INTERVAL_MS}. Outside that window — or when the translation
+     * server is down — the original title is the answer: a stale-language line beats an empty one.
+     */
+    private String activitySummaryEnglish(String title) {
+        String cached = translationCache.get(TranslationCache.key(title, "English"));
+        if (cached != null) return cached;
+        long now = System.currentTimeMillis();
+        long allowedAt = activityTranslateAllowedAtMs.get();
+        if (now < allowedAt
+                || !activityTranslateAllowedAtMs.compareAndSet(allowedAt, now + ACTIVITY_TRANSLATE_INTERVAL_MS)) {
+            return title;
+        }
+        String english = translateCore(title, "English");
+        return english == null || english.isBlank() ? title : english;
     }
 
     /**
