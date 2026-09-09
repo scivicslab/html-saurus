@@ -25,9 +25,6 @@ import java.util.Map;
  */
 class PdfImportJob {
 
-    /** What the import has produced so far: the newest file written, and how many images in total. */
-    record Result(String lastFile, int totalImages) {}
-
     private final byte[] pdfBytes;
     private final Path destDir;
     private final String stem;
@@ -75,9 +72,9 @@ class PdfImportJob {
      * @param job the registry's handle on this run, used to report progress and to notice a stop
      * @throws Exception to fail the job; the registry records the message
      */
-    void run(Job<Result> job) throws Exception {
+    void run(Job<ImportOutcome> job) throws Exception {
         job.progress(0, totalPages);
-        job.result(new Result("", 0));
+        job.result(ImportOutcome.NOTHING_YET);
         int batchStart = 0;
         for (int page = 0; page < totalPages; page++) {
             if (job.isTerminal()) {
@@ -94,7 +91,7 @@ class PdfImportJob {
                 batchStart = donePages;
             }
             job.progress(donePages, totalPages);
-            job.result(new Result(lastFile, totalImages));
+            job.result(new ImportOutcome(lastFile, totalImages));
         }
         onDone.run();
     }

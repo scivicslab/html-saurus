@@ -95,15 +95,30 @@ public class PortalServer {
      *  quarkus-gpu-broker's own {@code maxConcurrency} per node is the real bottleneck either way. */
     private static final int GPU_BROKER_TARGET_IN_FLIGHT = 10;
 
+    /** The one quarkus-gpu-broker connection this portal uses -- for OCR and for video
+     *  transcription alike -- or {@code null} when {@code GPU_BROKER_URL} is unset and every
+     *  backend is called at its own fixed node instead. */
+    private static final GpuBrokerClient GPU_BROKER = buildGpuBroker();
+
+    private static GpuBrokerClient buildGpuBroker() {
+        String brokerUrl = System.getenv("GPU_BROKER_URL");
+        return brokerUrl == null || brokerUrl.isBlank() ? null
+            : new GpuBrokerClient(brokerUrl, "html-saurus", GPU_BROKER_TARGET_IN_FLIGHT);
+    }
+
     /** OCR backends available to the Import tab, keyed by {@link OcrClient#backendId()}. Whether
      *  these call quarkus-gpu-broker or the fixed OCR nodes directly is decided once here, at
      *  construction, by {@code GPU_BROKER_URL} -- never per request, never as a runtime fallback
      *  from one to the other. See {@code GpuBrokerOcrIntegration_260820_oo01}. */
     private final Map<String, OcrClient> ocrClients = buildOcrClients();
 
+    /** Video transcription for the Import tab, taking the same broker-or-direct decision the OCR
+     *  backends take, at the same moment and from the same {@code GPU_BROKER_URL}. */
+    private final TranscriptClient transcripts =
+            new TranscriptClient(System.getenv("TRANSCRIPT_SERVER_URL"), GPU_BROKER);
+
     private static Map<String, OcrClient> buildOcrClients() {
-        String brokerUrl = System.getenv("GPU_BROKER_URL");
-        if (brokerUrl == null || brokerUrl.isBlank()) {
+        if (GPU_BROKER == null) {
             return Map.of(
                 "yomitoku", new YomiTokuOcrClient(System.getenv("YOMITOKU_SERVER_URL")),
                 "marker", new MarkerOcrClient(System.getenv("MARKER_SERVER_URL")),
@@ -111,13 +126,12 @@ public class PortalServer {
                         System.getenv("YOMITOKU_SERVER_URL"), System.getenv("MARKER_SERVER_URL"))
             );
         }
-        GpuBrokerClient client = new GpuBrokerClient(brokerUrl, "html-saurus", GPU_BROKER_TARGET_IN_FLIGHT);
         return Map.of(
-            "yomitoku", new GpuBrokerOcrClient(client, "yomitoku-ocr", "yomitoku",
+            "yomitoku", new GpuBrokerOcrClient(GPU_BROKER, "yomitoku-ocr", "yomitoku",
                     YomiTokuOcrClient::buildRequest, YomiTokuOcrClient::parseResult),
-            "marker", new GpuBrokerOcrClient(client, "marker-ocr", "marker",
+            "marker", new GpuBrokerOcrClient(GPU_BROKER, "marker-ocr", "marker",
                     MarkerOcrClient::buildRequest, MarkerOcrClient::parseResult),
-            "yomitoku-marker", MergedOcrClient.viaGpuBroker(client)
+            "yomitoku-marker", MergedOcrClient.viaGpuBroker(GPU_BROKER)
         );
     }
 
@@ -460,23 +474,30 @@ public class PortalServer {
             return;
         }
 
-        // Import tab: poll an in-progress PDF import job's status (non-production only).
-        if (!production && path.equals("/api/import/pdf/status")) {
-            handleImportPdfStatus(ex);
+        // Import tab: start a video transcript import as a background job (non-production only).
+        // Form fields: url, project, destPath, title (optional), filename (optional).
+        if (!production && path.equals("/api/import/video/start")) {
+            handleImportVideoStart(ex);
             return;
         }
 
-        // Import tab: request an in-progress PDF import job stop before its next page (non-production only).
-        if (!production && path.equals("/api/import/pdf/jobs")) {
-            handleImportPdfJobs(ex);
+        // Import tab: the job endpoints below serve every import kind, not only PDF -- one
+        // JobRegistry holds them all, so the Batch Job list is one list.
+        if (!production && path.equals("/api/import/status")) {
+            handleImportStatus(ex);
             return;
         }
-        if (!production && path.equals("/api/import/pdf/clear")) {
-            handleImportPdfClear(ex);
+        if (!production && path.equals("/api/import/jobs")) {
+            handleImportJobs(ex);
             return;
         }
-        if (!production && path.equals("/api/import/pdf/stop")) {
-            handleImportPdfStop(ex);
+        if (!production && path.equals("/api/import/clear")) {
+            handleImportClear(ex);
+            return;
+        }
+        // Requests an in-progress import stop before its next step.
+        if (!production && path.equals("/api/import/stop")) {
+            handleImportStop(ex);
             return;
         }
 
@@ -484,6 +505,13 @@ public class PortalServer {
         // project, destPath, title (optional).
         if (!production && path.equals("/api/import/word")) {
             handleImportWord(ex);
+            return;
+        }
+
+        // Import tab: import a web page, no OCR (non-production only). Form fields: url, project,
+        // destPath, title (optional), filename (optional).
+        if (!production && path.equals("/api/import/web")) {
+            handleImportWeb(ex);
             return;
         }
 
@@ -1278,9 +1306,9 @@ public class PortalServer {
                 .tab-btn:hover { color: var(--text-primary); }
                 .tab-btn.active { color: var(--text-primary); border-bottom-color: var(--accent-green); }
                 .tab-panel[hidden] { display: none; }
-                /* Import tab: a type picker (dropdown, so adding more types later — web, video,
-                   arxiv, ... — doesn't mean adding more sub-tabs) followed by one panel per type,
-                   styled after quarkus-english-drill's ingest_form.html. */
+                /* Import tab: a type picker (dropdown, so adding a type — arxiv, ... — doesn't
+                   mean adding a sub-tab) followed by one panel per type, styled after
+                   quarkus-english-drill's ingest_form.html. */
                 .import-panel[hidden] { display: none; }
 
             .import-job { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0;
@@ -1462,6 +1490,8 @@ public class PortalServer {
                 <select id="import-type">
                   <option value="pdf">PDF</option>
                   <option value="word">Word</option>
+                  <option value="web">Web page</option>
+                  <option value="video">Video</option>
                 </select>
               </div>
 
@@ -1526,6 +1556,64 @@ public class PortalServer {
                     <input type="text" id="import-word-path" autocomplete="off" placeholder="/home/devteam/works/document.docx">
                   </div>
                   <div class="btn-row"><button class="btn" type="button" id="import-word-start">Convert &amp; save</button></div>
+                </div>
+              </section>
+
+              <section class="import-panel" id="import-panel-web" hidden>
+                <p class="hint">Give the URL of a web page. Its article text is extracted and written as
+                  one Markdown file under the chosen project's docs/, and the images that text refers to
+                  are downloaded alongside it.</p>
+                <div class="card">
+                  <div class="field">
+                    <span class="field-label">Project</span>
+                    <select id="import-web-project"></select>
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Destination path (under docs/)</span>
+                    <input type="text" id="import-web-dest" autocomplete="off" placeholder="papers/my-book">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Title (optional)</span>
+                    <input type="text" id="import-web-title" autocomplete="off" placeholder="defaults to the page title">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Directory / file name (optional)</span>
+                    <input type="text" id="import-web-filename" autocomplete="off" placeholder="defaults to the title">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Page URL</span>
+                    <input type="text" id="import-web-url" autocomplete="off" placeholder="https://example.com/article">
+                  </div>
+                  <div class="btn-row"><button class="btn" type="button" id="import-web-start">Fetch &amp; save</button></div>
+                </div>
+              </section>
+
+              <section class="import-panel" id="import-panel-video" hidden>
+                <p class="hint">Give the URL of a video (YouTube, or anything else yt-dlp reads). It is
+                  transcribed with Whisper and written as one Markdown file under the chosen project's
+                  docs/. Transcription takes minutes, so it is listed under Batch Job while it runs.</p>
+                <div class="card">
+                  <div class="field">
+                    <span class="field-label">Project</span>
+                    <select id="import-video-project"></select>
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Destination path (under docs/)</span>
+                    <input type="text" id="import-video-dest" autocomplete="off" placeholder="papers/my-book">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Title (optional)</span>
+                    <input type="text" id="import-video-title" autocomplete="off" placeholder="defaults to the video title">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Directory / file name (optional)</span>
+                    <input type="text" id="import-video-filename" autocomplete="off" placeholder="defaults to the title">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Video URL</span>
+                    <input type="text" id="import-video-url" autocomplete="off" placeholder="https://www.youtube.com/watch?v=...">
+                  </div>
+                  <div class="btn-row"><button class="btn" type="button" id="import-video-start">Transcribe &amp; save</button></div>
                 </div>
               </section>
 
@@ -1681,8 +1769,9 @@ public class PortalServer {
               selectTab(document.getElementById('tab-' + stored) ? stored : 'projects');
             })();
             (function () {
-              // Import type picker: a dropdown rather than sub-tabs, since more types (web,
-              // video, arxiv, ...) are expected later — a dropdown scales, a row of tabs doesn't.
+              // Import type picker: a dropdown rather than sub-tabs, since the list of types keeps
+              // growing (PDF, Word, web, video, and arxiv later) — a dropdown scales, a row of
+              // tabs doesn't.
               var picker = document.getElementById('import-type');
               if (!picker) return;
               function selectImportType(name) {
@@ -1700,10 +1789,18 @@ public class PortalServer {
               }
               populateImportProjects();
             })();
+            // Every Import panel picks its own project, so all four dropdowns are filled and
+            // remembered the same way. A function declaration, not a var: populateImportProjects()
+            // is called from the type-picker block above this point, and a var would still be
+            // undefined there.
+            function importProjectSelectIds() {
+              return ['import-pdf-project', 'import-word-project',
+                'import-web-project', 'import-video-project'];
+            }
             function populateImportProjects() {
               var names = Array.prototype.map.call(
                 document.querySelectorAll('.project-name a.project-link'), function(a) { return a.textContent; });
-              ['import-pdf-project', 'import-word-project'].forEach(function(id) {
+              importProjectSelectIds().forEach(function(id) {
                 var sel = document.getElementById(id);
                 if (!sel || sel.options.length > 0) return;
                 names.forEach(function(name) {
@@ -1733,7 +1830,9 @@ public class PortalServer {
             (function () {
               var fieldIds = ['import-pdf-dest', 'import-pdf-title', 'import-pdf-backend',
                 'import-pdf-pages-per-file', 'import-pdf-path',
-                'import-word-dest', 'import-word-title', 'import-word-path'];
+                'import-word-dest', 'import-word-title', 'import-word-path',
+                'import-web-dest', 'import-web-title', 'import-web-filename', 'import-web-url',
+                'import-video-dest', 'import-video-title', 'import-video-filename', 'import-video-url'];
               var saved = importFormFieldStore();
               fieldIds.forEach(function(id) {
                 var el = document.getElementById(id);
@@ -1742,9 +1841,9 @@ public class PortalServer {
                 el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input',
                   function() { importFormFieldStore({id: id, value: el.value}); });
               });
-              // import-pdf-project / import-word-project save the same way, but restoring them
-              // happens inside populateImportProjects() once their <option>s exist.
-              ['import-pdf-project', 'import-word-project'].forEach(function(id) {
+              // The project dropdowns save the same way, but restoring them happens inside
+              // populateImportProjects() once their <option>s exist.
+              importProjectSelectIds().forEach(function(id) {
                 var el = document.getElementById(id);
                 if (el) el.addEventListener('change', function() { importFormFieldStore({id: id, value: el.value}); });
               });
@@ -1785,7 +1884,16 @@ public class PortalServer {
                 progress.textContent = 'Error: ' + e.message;
               }
             }
+            // A PDF import counts real pages; a video import is one step whose phase text is the
+            // only honest progress there is, so the two are worded differently.
             function importJobLine(j) {
+              if (j.kind === 'video') {
+                if (j.state === 'running') return (j.phase || 'Working') + '...';
+                if (j.state === 'done') return 'Done: ' + (j.lastFile || 'transcript saved')
+                  + (j.totalImages ? ' (' + j.totalImages + ' image(s))' : '');
+                if (j.state === 'stopped') return 'Stopped. Nothing was written.';
+                return 'Error: ' + (j.error || 'unknown');
+              }
               if (j.state === 'running') {
                 return 'OCR: page ' + j.currentPage + ' / ' + j.totalPages
                   + (j.lastFile ? ' \u2014 last wrote ' + j.lastFile : '') + '...';
@@ -1822,7 +1930,7 @@ public class PortalServer {
                 btn.textContent = j.state === 'running' ? 'Stop' : 'Clear';
                 btn.addEventListener('click', function () {
                   btn.disabled = true;
-                  const url = j.state === 'running' ? '/api/import/pdf/stop' : '/api/import/pdf/clear';
+                  const url = j.state === 'running' ? '/api/import/stop' : '/api/import/clear';
                   fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
                               body: JSON.stringify({jobId: j.jobId})})
                     .then(refreshImportJobs).catch(refreshImportJobs);
@@ -1844,7 +1952,7 @@ public class PortalServer {
             async function refreshImportJobs() {
               let jobs;
               try {
-                const r = await fetch('/api/import/pdf/jobs');
+                const r = await fetch('/api/import/jobs');
                 jobs = await r.json();
               } catch (e) {
                 return;   // the portal may be restarting; the next tick tries again
@@ -1879,11 +1987,70 @@ public class PortalServer {
               }
               btn.disabled = false;
             }
+            async function startWebImport() {
+              const progress = document.getElementById('import-progress');
+              const btn = document.getElementById('import-web-start');
+              const url = importField('import-web-url');
+              if (!url) { progress.textContent = 'Give a page URL first.'; return; }
+              const body = new URLSearchParams();
+              body.set('url', url);
+              body.set('project', importField('import-web-project'));
+              body.set('destPath', importField('import-web-dest'));
+              const title = importField('import-web-title');
+              if (title) body.set('title', title);
+              const filename = importField('import-web-filename');
+              if (filename) body.set('filename', filename);
+              btn.disabled = true;
+              progress.textContent = 'Fetching...';
+              try {
+                const r = await fetch('/api/import/web', {
+                  method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
+                const j = await r.json();
+                progress.textContent = r.ok
+                  ? ('Done: ' + j.file + ' (' + j.images + ' image(s))')
+                  : ('Error: ' + (j.error || 'unknown'));
+              } catch (e) {
+                progress.textContent = 'Error: ' + e.message;
+              }
+              btn.disabled = false;
+            }
+            async function startVideoImport() {
+              const progress = document.getElementById('import-progress');
+              const url = importField('import-video-url');
+              if (!url) { progress.textContent = 'Give a video URL first.'; return; }
+              const body = new URLSearchParams();
+              body.set('url', url);
+              body.set('project', importField('import-video-project'));
+              body.set('destPath', importField('import-video-dest'));
+              const title = importField('import-video-title');
+              if (title) body.set('title', title);
+              const filename = importField('import-video-filename');
+              if (filename) body.set('filename', filename);
+              progress.textContent = 'Starting...';
+              try {
+                // Like the PDF import, the Start button stays enabled: the job is the server's, so
+                // queueing another does not wait for this one.
+                const r = await fetch('/api/import/video/start', {
+                  method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
+                const j = await r.json();
+                if (!r.ok) { progress.textContent = 'Error: ' + (j.error || 'unknown'); return; }
+                progress.textContent = 'Transcribing. It is listed under Batch Job; queue another whenever you like.';
+                const urlField = document.getElementById('import-video-url');
+                if (urlField) urlField.value = '';
+                refreshImportJobs();
+              } catch (e) {
+                progress.textContent = 'Error: ' + e.message;
+              }
+            }
             (function () {
               var pdfBtn = document.getElementById('import-pdf-start');
               if (pdfBtn) pdfBtn.addEventListener('click', startPdfImport);
               var wordBtn = document.getElementById('import-word-start');
               if (wordBtn) wordBtn.addEventListener('click', startWordImport);
+              var webBtn = document.getElementById('import-web-start');
+              if (webBtn) webBtn.addEventListener('click', startWebImport);
+              var videoBtn = document.getElementById('import-video-start');
+              if (videoBtn) videoBtn.addEventListener('click', startVideoImport);
               // Nothing to resume: the jobs are the server's, so listing them is enough. A reload
               // shows whatever is running, including imports this browser never started.
               if (pdfBtn) refreshImportJobs();
@@ -2628,7 +2795,7 @@ public class PortalServer {
      * Registers a {@link PdfImportJobActor} as a named child of {@link #searcherSystem} and starts
      * it immediately ({@code ref.tell(PdfImportJobActor::start)}) — the job runs to completion on
      * its own actor thread, independent of this request or the browser connection. Returns
-     * {@code {jobId, totalPages}} right away; the browser polls {@link #handleImportPdfStatus}.
+     * {@code {jobId, totalPages}} right away; the browser polls {@link #handleImportStatus}.
      */
     private void handleImportPdfStart(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -2646,23 +2813,17 @@ public class PortalServer {
             respond(ex, 404, "application/json", "{\"error\":\"file not found: " + srcPathStr.replace("\"", "'") + "\"}");
             return;
         }
-        Project proj = projectMap.get(form.get("project"));
-        if (proj == null) {
-            respond(ex, 404, "application/json", "{\"error\":\"unknown project\"}");
-            return;
-        }
         OcrClient ocr = ocrClients.get(form.get("backend"));
         if (ocr == null) {
             respond(ex, 400, "application/json", "{\"error\":\"unknown backend\"}");
             return;
         }
-        String destPath = Objects.requireNonNullElse(form.get("destPath"), "");
-        Path docsDir = proj.projectDir().resolve("docs");
-        Path destDir = docsDir.resolve(destPath).normalize();
-        if (!destDir.startsWith(docsDir)) {
-            respond(ex, 400, "application/json", "{\"error\":\"path traversal not allowed\"}");
+        ImportTarget target = resolveImportTarget(ex, form);
+        if (target == null) {
             return;
         }
+        Project proj = target.project();
+        Path destDir = target.destDir();
         int pagesPerFile;
         try {
             pagesPerFile = Integer.parseInt(form.get("pagesPerFile"));
@@ -2681,18 +2842,9 @@ public class PortalServer {
         }
         String stem = PageRenderer.stripExtension(srcPath.getFileName().toString());
         String title = form.get("title");
-        String jobId = java.util.UUID.randomUUID().toString();
-        String fileDisplayPrefix = proj.name() + "/docs/" + destPath;
-        Runnable onDone = () -> {
-            try {
-                runBuildStage(proj, "html");
-                runBuildStage(proj, "index");
-            } catch (Exception e) {
-                System.err.println("Post-import rebuild failed for " + proj.name() + ": " + e.getMessage());
-            }
-        };
         PdfImportJob work = new PdfImportJob(pdfBytes, destDir, stem, ocr, pagesPerFile,
-            totalPages, (title == null || title.isBlank()) ? stem : title, fileDisplayPrefix, onDone);
+            totalPages, (title == null || title.isBlank()) ? stem : title,
+            target.fileDisplayPrefix(), rebuildAfterImport(proj));
         var job = importJobs.submit("pdf", srcPath.getFileName().toString(),
             work::run, System.currentTimeMillis());
 
@@ -2701,11 +2853,11 @@ public class PortalServer {
     }
 
     /**
-     * Handles {@code GET /api/import/pdf/status?jobId=...}. Reads the job's progress via
-     * {@code ask(PdfImportJobActor::snapshot)} — a read serialized through the same actor mailbox
-     * as the job's own writes, so it never observes a half-updated state.
+     * Handles {@code GET /api/import/status?jobId=...} for an import of any kind. Reads the job's
+     * progress through the registry, whose writes happen on the job's own actor thread, so it never
+     * observes a half-updated state.
      */
-    private void handleImportPdfStatus(HttpExchange ex) throws IOException {
+    private void handleImportStatus(HttpExchange ex) throws IOException {
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
@@ -2721,11 +2873,11 @@ public class PortalServer {
 
 
     /**
-     * Handles {@code GET /api/import/pdf/jobs}. Every import this process is holding, newest
-     * first, so the Import screen can show them all instead of one at a time — the point of
+     * Handles {@code GET /api/import/jobs}. Every import this process is holding, of every kind,
+     * newest first, so the Import screen can show them all instead of one at a time — the point of
      * starting a job being to walk away and start the next one.
      */
-    private void handleImportPdfJobs(HttpExchange ex) throws IOException {
+    private void handleImportJobs(HttpExchange ex) throws IOException {
         if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
@@ -2742,10 +2894,10 @@ public class PortalServer {
     }
 
     /**
-     * Handles {@code POST /api/import/pdf/clear}. JSON body {@code {"jobId":"..."}}. Forgets a
+     * Handles {@code POST /api/import/clear}. JSON body {@code {"jobId":"..."}}. Forgets a
      * finished job so it leaves the list; a running job is refused.
      */
-    private void handleImportPdfClear(HttpExchange ex) throws IOException {
+    private void handleImportClear(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
@@ -2760,10 +2912,11 @@ public class PortalServer {
         respond(ex, 200, "application/json", "{\"status\":\"ok\"}");
     }
 
-    /** One import as the Import screen reads it. Shared by the list and the single-job status. */
+    /** One import as the Import screen reads it. Shared by the list and the single-job status.
+     *  {@code kind} is what lets the browser word a video job's line differently from a PDF's,
+     *  whose {@code currentPage}/{@code totalPages} are a real page count rather than one step. */
     private String importJobJson(com.scivicslab.jobregistry.Job<?> job) {
-        PdfImportJob.Result r = job.result() instanceof PdfImportJob.Result got
-                ? got : new PdfImportJob.Result("", 0);
+        ImportOutcome r = job.result() instanceof ImportOutcome got ? got : ImportOutcome.NOTHING_YET;
         // The browser's vocabulary predates the registry's: a cancelled job reads as "stopped", and
         // only a genuine failure carries an error string.
         String state = switch (job.state()) {
@@ -2773,7 +2926,9 @@ public class PortalServer {
             case CANCELLED -> "stopped";
         };
         return "{\"jobId\":" + jsonStr(job.id())
+            + ",\"kind\":" + jsonStr(job.kind())
             + ",\"label\":" + jsonStr(job.label())
+            + ",\"phase\":" + jsonStr(job.phase() == null ? "" : job.phase())
             + ",\"currentPage\":" + job.done() + ",\"totalPages\":" + job.total()
             + ",\"lastFile\":" + jsonStr(r.lastFile()) + ",\"totalImages\":" + r.totalImages()
             + ",\"state\":" + jsonStr(state)
@@ -2782,11 +2937,10 @@ public class PortalServer {
     }
 
     /**
-     * Handles {@code POST /api/import/pdf/stop}. JSON body {@code {"jobId":"..."}}. Requests the
-     * job stop before its next page starts ({@code ref.tell(PdfImportJobActor::requestStop)}) —
-     * batches already written are kept.
+     * Handles {@code POST /api/import/stop}. JSON body {@code {"jobId":"..."}}. Requests the job
+     * stop before its next step starts — whatever it has already written is kept.
      */
-    private void handleImportPdfStop(HttpExchange ex) throws IOException {
+    private void handleImportStop(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
@@ -2829,18 +2983,12 @@ public class PortalServer {
             respond(ex, 404, "application/json", "{\"error\":\"file not found: " + srcPathStr.replace("\"", "'") + "\"}");
             return;
         }
-        Project proj = projectMap.get(form.get("project"));
-        if (proj == null) {
-            respond(ex, 404, "application/json", "{\"error\":\"unknown project\"}");
+        ImportTarget target = resolveImportTarget(ex, form);
+        if (target == null) {
             return;
         }
-        String destPath = Objects.requireNonNullElse(form.get("destPath"), "");
-        Path docsDir = proj.projectDir().resolve("docs");
-        Path destDir = docsDir.resolve(destPath).normalize();
-        if (!destDir.startsWith(docsDir)) {
-            respond(ex, 400, "application/json", "{\"error\":\"path traversal not allowed\"}");
-            return;
-        }
+        Project proj = target.project();
+        Path destDir = target.destDir();
 
         String filename = srcPath.getFileName().toString();
         String stem = PageRenderer.stripExtension(filename);
@@ -2865,15 +3013,139 @@ public class PortalServer {
         for (var e : result.images().entrySet()) {
             Files.write(docDir.resolve(e.getKey()), e.getValue());
         }
-        try {
-            runBuildStage(proj, "html");
-            runBuildStage(proj, "index");
-        } catch (Exception e) {
-            System.err.println("Post-import rebuild failed for " + proj.name() + ": " + e.getMessage());
-        }
+        rebuildAfterImport(proj).run();
         respond(ex, 200, "application/json",
-            "{\"status\":\"ok\",\"file\":" + jsonStr(proj.name() + "/docs/" + destPath + "/" + stem + "/" + stem + ".md")
+            "{\"status\":\"ok\",\"file\":" + jsonStr(target.fileDisplayPrefix() + "/" + stem + "/" + stem + ".md")
             + ",\"images\":" + result.images().size() + "}");
+    }
+
+    /**
+     * Where one import writes: the project it names, the directory under that project's
+     * {@code docs/} it resolves to, and how finished files there are named back to the browser.
+     */
+    private record ImportTarget(Project project, Path destDir, String fileDisplayPrefix) {}
+
+    /**
+     * Reads the {@code project} and {@code destPath} fields every import form carries, refusing a
+     * project this portal does not serve and a {@code destPath} that climbs out of the project's
+     * {@code docs/}.
+     *
+     * @return where to write, or {@code null} after this method has already answered {@code ex}
+     *         with the reason it will not
+     */
+    private ImportTarget resolveImportTarget(HttpExchange ex, Map<String, String> form) throws IOException {
+        Project proj = projectMap.get(form.get("project"));
+        if (proj == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"unknown project\"}");
+            return null;
+        }
+        String destPath = Objects.requireNonNullElse(form.get("destPath"), "");
+        Path docsDir = proj.projectDir().resolve("docs");
+        Path destDir = docsDir.resolve(destPath).normalize();
+        if (!destDir.startsWith(docsDir)) {
+            respond(ex, 400, "application/json", "{\"error\":\"path traversal not allowed\"}");
+            return null;
+        }
+        return new ImportTarget(proj, destDir, proj.name() + "/docs/" + destPath);
+    }
+
+    /** Rebuilds one project's HTML and search index, so a just-imported document is readable and
+     *  findable without anyone pressing Update. A failed rebuild is reported, not thrown: the
+     *  document is already on disk, and the next build picks it up. */
+    private Runnable rebuildAfterImport(Project proj) {
+        return () -> {
+            try {
+                runBuildStage(proj, "html");
+                runBuildStage(proj, "index");
+            } catch (Exception e) {
+                System.err.println("Post-import rebuild failed for " + proj.name() + ": " + e.getMessage());
+            }
+        };
+    }
+
+    /**
+     * Handles {@code POST /api/import/web}. Form fields: {@code url}, {@code project},
+     * {@code destPath}, {@code title} (optional, defaults to the page's own title) and
+     * {@code filename} (optional, defaults to a stem derived from that title). Writes
+     * {@code <stem>/<stem>.md} plus the article's images alongside it, the same one-document =
+     * one-directory shape {@link #handleImportWord} writes.
+     *
+     * <p>Synchronous, unlike the PDF and video imports: fetching a page and its images takes
+     * seconds, not the minutes that make a background job worth its complexity.
+     */
+    private void handleImportWeb(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, String> form = parseFormBody(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String url = form.get("url");
+        if (url == null || url.isBlank()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing url\"}");
+            return;
+        }
+        ImportTarget target = resolveImportTarget(ex, form);
+        if (target == null) {
+            return;
+        }
+
+        WebImportService.Result result;
+        try {
+            result = WebImportService.fetch(url.trim(), form.get("title"));
+        } catch (Exception e) {
+            System.err.println("Web import failed for " + url + ": " + e.getMessage());
+            respond(ex, 400, "application/json",
+                "{\"error\":\"could not read that page: " + jsonSafe(e.getMessage()) + "\"}");
+            return;
+        }
+
+        String filename = form.get("filename");
+        String stem = filename == null || filename.isBlank()
+                ? WebImportService.titleToStem(result.title()) : filename.strip();
+        Path docDir = target.destDir().resolve(stem);
+        Files.createDirectories(docDir);
+        Files.writeString(docDir.resolve(stem + ".md"), result.markdown(), StandardCharsets.UTF_8);
+        for (var image : result.images().entrySet()) {
+            Files.write(docDir.resolve(image.getKey()), image.getValue());
+        }
+
+        rebuildAfterImport(target.project()).run();
+        respond(ex, 200, "application/json",
+            "{\"status\":\"ok\",\"file\":" + jsonStr(target.fileDisplayPrefix() + "/" + stem + "/" + stem + ".md")
+            + ",\"images\":" + result.images().size() + "}");
+    }
+
+    /**
+     * Handles {@code POST /api/import/video/start}. Form fields: {@code url}, {@code project},
+     * {@code destPath}, {@code title} (optional) and {@code filename} (optional, defaults to a stem
+     * derived from the video's title). Returns a job id at once; the transcript takes minutes, so
+     * the work runs on its own actor and the browser watches it in the Batch Job list.
+     */
+    private void handleImportVideoStart(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, String> form = parseFormBody(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String url = form.get("url");
+        if (url == null || url.isBlank()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing url\"}");
+            return;
+        }
+        ImportTarget target = resolveImportTarget(ex, form);
+        if (target == null) {
+            return;
+        }
+        VideoImportJob work = new VideoImportJob(url.trim(), transcripts, target.destDir(),
+            form.get("filename"), form.get("title"), target.fileDisplayPrefix(),
+            rebuildAfterImport(target.project()));
+        var job = importJobs.submit("video", url.trim(), work::run, System.currentTimeMillis());
+        respond(ex, 200, "application/json", "{\"jobId\":" + jsonStr(job.id()) + "}");
+    }
+
+    /** A message safe to place inside a JSON string literal this class builds by hand. */
+    private static String jsonSafe(String message) {
+        return message == null ? "unknown" : message.replace("\\", "/").replace("\"", "'");
     }
 
     /** POST /find-related — form submission; renders an HTML page with up to 20 similar docs. */

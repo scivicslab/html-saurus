@@ -7,8 +7,9 @@ import java.nio.file.Path;
 
 /**
  * E2E test for the portal sidebar's Import tab (top-level tab, alongside Projects — Search lives
- * inside the Projects tab). Import has a type dropdown (#import-type: PDF / Word, more types
- * expected later) rather than sub-tabs, and a server-side file path input, not a browser upload.
+ * inside the Projects tab). Import has a type dropdown (#import-type: PDF / Word / Web page /
+ * Video) rather than sub-tabs. PDF and Word take a server-side file path, not a browser upload;
+ * Web page and Video take a URL.
  *
  * <p>Requires an already-running dev-mode portal with at least one project named {@code proj1}
  * that has a {@code docs/} directory:
@@ -40,6 +41,7 @@ public class ImportTabE2E {
             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
             runSubTabSwitching(browser);
             runWordImport(browser);
+            runWebImport(browser);
             runPdfImportWithImage(browser);
             runReloadDoesNotLoseState(browser);
         }
@@ -64,26 +66,36 @@ public class ImportTabE2E {
             check(!page.isVisible("#tab-projects"), "#tab-projects must be hidden after click");
             check(page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be visible by default within Import");
             check(!page.isVisible("#import-panel-word"), "#import-panel-word must be hidden by default within Import");
+            check(!page.isVisible("#import-panel-web"), "#import-panel-web must be hidden by default within Import");
+            check(!page.isVisible("#import-panel-video"), "#import-panel-video must be hidden by default within Import");
         });
 
-        withPage("T-2: selecting Word in the type dropdown shows it and hides PDF", browser, page -> {
+        withPage("T-2: each type in the dropdown shows its own panel and hides the others", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
             page.click("#tab-btn-import");
-            page.selectOption("#import-type", "word");
-            check(page.isVisible("#import-panel-word"), "#import-panel-word must be visible after selecting Word");
-            check(!page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be hidden after selecting Word");
+            String[] types = {"word", "web", "video", "pdf"};
+            for (String type : types) {
+                page.selectOption("#import-type", type);
+                for (String other : types) {
+                    boolean shown = page.isVisible("#import-panel-" + other);
+                    check(shown == other.equals(type),
+                            "selecting " + type + ": #import-panel-" + other
+                            + " must be " + (other.equals(type) ? "visible" : "hidden"));
+                }
+            }
         });
 
         withPage("T-3: project dropdowns are populated from the project list", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
             page.click("#tab-btn-import");
-            int pdfCount = ((Number) page.evalOnSelector("#import-pdf-project", "el => el.options.length")).intValue();
-            check(pdfCount > 0, "#import-pdf-project must have at least one option");
-            page.selectOption("#import-type", "word");
-            int wordCount = ((Number) page.evalOnSelector("#import-word-project", "el => el.options.length")).intValue();
-            check(wordCount > 0, "#import-word-project must have at least one option");
+            for (String type : new String[] {"pdf", "word", "web", "video"}) {
+                page.selectOption("#import-type", type);
+                int count = ((Number) page.evalOnSelector(
+                        "#import-" + type + "-project", "el => el.options.length")).intValue();
+                check(count > 0, "#import-" + type + "-project must have at least one option");
+            }
         });
     }
 
@@ -114,6 +126,88 @@ public class ImportTabE2E {
                 throw new AssertionError("setup/build failed: " + e.getMessage(), e);
             }
         });
+    }
+
+    /**
+     * Drives the Web page import end to end against a fixture site this test serves itself, so it
+     * asserts the whole path — form, fetch, article extraction, image download, file write — without
+     * depending on any outside page staying the way it is today. The fixture states one article with
+     * a heading, two paragraphs and one image, plus boilerplate the extractor is meant to drop.
+     */
+    private static void runWebImport(Browser browser) {
+        com.sun.net.httpserver.HttpServer site;
+        try {
+            site = startFixtureSite();
+        } catch (Exception e) {
+            throw new AssertionError("could not start the fixture web site: " + e.getMessage(), e);
+        }
+        String articleUrl = "http://localhost:" + site.getAddress().getPort() + "/article";
+        try {
+            withPage("B-1: importing a web page writes a Markdown file and downloads its image", browser, page -> {
+                page.navigate(BASE_URL + "/");
+                page.waitForLoadState();
+                page.click("#tab-btn-import");
+                page.selectOption("#import-type", "web");
+                page.selectOption("#import-web-project", "proj1");
+                page.fill("#import-web-dest", "e2e-import-test");
+                page.fill("#import-web-filename", "e2e-web-fixture");
+                page.fill("#import-web-url", articleUrl);
+                page.click("#import-web-start");
+
+                String progressText = "";
+                for (int i = 0; i < 100; i++) {
+                    progressText = page.textContent("#import-progress");
+                    if (progressText.contains("Done:") || progressText.contains("Error")) break;
+                    page.waitForTimeout(100);
+                }
+                check(progressText.contains("Done:"), "progress must report success, got: " + progressText);
+                check(progressText.contains("1 image(s)"),
+                        "the fixture article has one image — anything else means the image download "
+                        + "is not running, got: " + progressText);
+                check(progressText.contains("e2e-web-fixture/e2e-web-fixture.md"),
+                        "the written file must be named after the Filename field, got: " + progressText);
+            });
+        } finally {
+            site.stop(0);
+        }
+    }
+
+    /**
+     * Serves the two-URL fixture site {@link #runWebImport} imports: {@code /article} and the
+     * {@code /pic.png} it refers to. On an ephemeral port, so a stale server from an earlier run
+     * cannot answer for this one.
+     */
+    private static com.sun.net.httpserver.HttpServer startFixtureSite() throws Exception {
+        String html = """
+            <html><head><title>E2E Fixture Article</title></head>
+            <body>
+              <nav>Navigation that must not be imported</nav>
+              <article>
+                <h2>Fixture Heading</h2>
+                <p>The first fixture paragraph.</p>
+                <figure><img src="/pic.png"><figcaption>A figure</figcaption></figure>
+                <p>The second fixture paragraph.</p>
+              </article>
+              <footer>Footer that must not be imported</footer>
+            </body></html>
+            """;
+        byte[] onePixelPng = java.util.Base64.getDecoder().decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        server.createContext("/article", ex -> {
+            byte[] body = html.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            ex.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
+            ex.sendResponseHeaders(200, body.length);
+            try (var out = ex.getResponseBody()) { out.write(body); }
+        });
+        server.createContext("/pic.png", ex -> {
+            ex.getResponseHeaders().add("Content-Type", "image/png");
+            ex.sendResponseHeaders(200, onePixelPng.length);
+            try (var out = ex.getResponseBody()) { out.write(onePixelPng); }
+        });
+        server.start();
+        return server;
     }
 
     /**
