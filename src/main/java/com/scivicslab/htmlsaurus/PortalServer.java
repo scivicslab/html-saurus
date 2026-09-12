@@ -681,6 +681,10 @@ public class PortalServer {
         int removed = removeVanishedProjects(
                 found.stream().map(p -> p.getFileName().toString()).collect(java.util.stream.Collectors.toSet()));
         if (added > 0 || removed > 0) {
+            // Same order a fresh start gives: Main.findProjects sorts, and the portal draws the
+            // list in list order. Appending would leave a project found by a scan at the bottom
+            // until the next restart moved it to where its name says it belongs.
+            projects.sort(java.util.Comparator.comparing(Project::name));
             // The MCP handler's starting searcher may be one this scan just closed.
             this.defaultSearcher = searchers.values().stream().findFirst().orElse(null);
             invalidatePrerequisiteOfIndex();

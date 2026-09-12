@@ -425,6 +425,34 @@ class ModeTest {
         }
 
         @Test
+        @DisplayName("scan works dir API puts a newly found project in name order, not at the end")
+        void scanWorksDirApi_keepsListInNameOrder() throws Exception {
+            Path last = createProject("zzz-last");
+            Main.build(last.resolve("docs"), last.resolve("static-html"), false);
+            Main.reindex(last.resolve("docs"), last.resolve("search-index"));
+
+            PortalServer ps = new PortalServer(tempDir, List.of(last), 0, false, null, 0);
+            HttpServer http = ps.start();
+            int port = http.getAddress().getPort();
+
+            createProject("aaa-first");
+
+            try {
+                var client = HttpClient.newHttpClient();
+                var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/scan-works-dir"))
+                        .POST(HttpRequest.BodyPublishers.noBody())
+                        .build();
+                client.send(request, HttpResponse.BodyHandlers.ofString());
+
+                String html = httpGet("http://localhost:" + port + "/");
+                assertTrue(html.indexOf(">aaa-first<") < html.indexOf(">zzz-last<"),
+                        "a project found by a scan must sit where its name belongs, not at the end");
+            } finally {
+                http.stop(0);
+            }
+        }
+
+        @Test
         @DisplayName("scan works dir API drops a project whose directory was renamed away")
         void scanWorksDirApi_dropsRenamedProject() throws Exception {
             Path staying = createProject("staying");
