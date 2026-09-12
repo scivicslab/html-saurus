@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
@@ -85,7 +86,7 @@ class McpHandler {
     }
 
     private final Path docsDir;
-    private final ActorRef<LuceneSearcher> searcher;
+    private final Supplier<ActorRef<LuceneSearcher>> searcher;
     private final Map<String, ActorRef<LuceneSearcher>> localeSearchers;
     private final DocRefResolver docRefResolver;
     private final BiFunction<String, String, List<Map<String, String>>> textRelatedResolver;
@@ -105,7 +106,9 @@ class McpHandler {
 
     /**
      * @param docsDir                 the docs/ directory containing raw Markdown source files
-     * @param searcher                the default Lucene searcher actor for full-text search
+     * @param searcher                supplies the Lucene searcher actor full-text search starts from.
+     *                                Read on each call rather than kept, because a scan that drops a
+     *                                project closes that project's searcher actor.
      * @param localeSearchers         locale-specific searcher actors (may be empty)
      * @param docRefResolver          resolves a document id or path fragment to a hit map
      *                                ({@code id,title,path,srcPath,summary}); same resolver the
@@ -134,8 +137,9 @@ class McpHandler {
      * @param reindexAllRunner        rebuilds the full-text index for every project, returning the
      *                                project count; same as {@code /api/reindex-all}. {@code null}
      *                                in single-project mode.
-     * @param scanWorksDirRunner      discovers and builds new projects under the works directory,
-     *                                returning {@code {total, added}}; same as
+     * @param scanWorksDirRunner      discovers and builds new projects under the works directory and
+     *                                drops the ones whose directory is gone, returning
+     *                                {@code {total, added, removed}}; same as
      *                                {@code /api/scan-works-dir}. {@code null} in single-project mode.
      * @param updateAllProjectsRunner rescans the works directory and then rebuilds the HTML, index
      *                                and embedding of every project, returning the project count;
@@ -149,7 +153,7 @@ class McpHandler {
      *                                {@code (text, lang)}, returning {@code null} on failure; same
      *                                as {@code /api/translate}.
      */
-    McpHandler(Path docsDir, ActorRef<LuceneSearcher> searcher,
+    McpHandler(Path docsDir, Supplier<ActorRef<LuceneSearcher>> searcher,
                Map<String, ActorRef<LuceneSearcher>> localeSearchers, DocRefResolver docRefResolver,
                BiFunction<String, String, List<Map<String, String>>> textRelatedResolver,
                Function<String, List<Map<String, String>>> semanticQueryResolver,
@@ -321,7 +325,7 @@ class McpHandler {
                 """
                 {"type":"object","properties":{},"required":[]}"""),
             toolDef("scan-works-dir",
-                "Rescan the works directory for project subdirectories not yet known to this server, and build and index each one found. Existing projects are left untouched. Portal mode only.",
+                "Rescan the works directory: build and index each project subdirectory not yet known to this server, and drop each known project whose directory is gone (renamed or deleted). Projects that are still there are left untouched. Portal mode only.",
                 """
                 {"type":"object","properties":{},"required":[]}"""),
             toolDef("update-all-projects",
@@ -409,7 +413,8 @@ class McpHandler {
         } else {
             // No locale: aggregate across default + all project searchers
             List<ActorRef<LuceneSearcher>> all = new java.util.ArrayList<>();
-            if (searcher != null) all.add(searcher);
+            ActorRef<LuceneSearcher> first = searcher.get();
+            if (first != null) all.add(first);
             all.addAll(localeSearchers.values());
 
             var seen = new java.util.LinkedHashSet<String>();
@@ -528,7 +533,8 @@ class McpHandler {
 
         // Try default searcher first, then all project/locale searchers until the doc is found
         List<ActorRef<LuceneSearcher>> candidates = new java.util.ArrayList<>();
-        if (searcher != null) candidates.add(searcher);
+        ActorRef<LuceneSearcher> first = searcher.get();
+        if (first != null) candidates.add(first);
         candidates.addAll(localeSearchers.values());
 
         List<LuceneSearcher.Hit> hits = List.of();
@@ -682,7 +688,8 @@ class McpHandler {
         }
         try {
             int[] result = scanWorksDirRunner.call();
-            return toolResult("Scan complete: " + result[0] + " total project(s), " + result[1] + " newly added.");
+            return toolResult("Scan complete: " + result[0] + " total project(s), " + result[1]
+                    + " newly added, " + result[2] + " removed.");
         } catch (Exception e) {
             return toolError("Scan failed: " + e.getMessage());
         }

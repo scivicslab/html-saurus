@@ -45,6 +45,9 @@ public class PortalServer {
     private final Map<String, ActorRef<LuceneSearcher>> searchers = new LinkedHashMap<>();
     /** Maps searcher key → locale string for language-filtered search. */
     private final Map<String, String> searcherLocales = new LinkedHashMap<>();
+    /** The searcher the MCP handler starts from. Re-derived whenever a scan removes a project,
+     *  since the one it pointed at may be the searcher that scan closed. */
+    private volatile ActorRef<LuceneSearcher> defaultSearcher;
     private final int port;
     private final boolean production;
     /** Page-conversion parallelism passed to every {@link Main#build} call this server makes
@@ -178,7 +181,7 @@ public class PortalServer {
             }
         }
         // MCP handler: in portal mode, use worksDir as root so all projects' docs/ are accessible
-        ActorRef<LuceneSearcher> defaultSearcher = searchers.values().stream().findFirst().orElse(null);
+        this.defaultSearcher = searchers.values().stream().findFirst().orElse(null);
         // Semantic related-docs: render the in-memory neighbour index into portal URLs
         // (project-prefixed: /<project>/<page>). Empty index -> empty map -> widget shows nothing.
         this.semanticRelated = semanticIndex == null ? Map.of()
@@ -222,12 +225,12 @@ public class PortalServer {
         java.util.concurrent.Callable<Integer> reindexAllRunner = this::reindexAllCore;
         java.util.concurrent.Callable<int[]> scanWorksDirRunner = this::scanWorksDirCore;
         // No BuildJob: an MCP caller waits for the answer, so there is nobody polling for progress.
-        java.util.concurrent.Callable<Integer> updateAllProjectsRunner = () -> updateAllProjectsCore(null);
+        java.util.concurrent.Callable<Integer> updateAllProjectsRunner = () -> updateAllProjectsCore(null)[0];
         java.util.function.Function<String, List<String>> navbarLabelsResolver = name -> {
             Project proj = projectMap.get(name);
             return proj == null ? null : readNavbarLabels(proj.projectDir());
         };
-        this.mcpHandler = new McpHandler(worksDir, defaultSearcher, searchers, this::resolveDocRef,
+        this.mcpHandler = new McpHandler(worksDir, () -> defaultSearcher, searchers, this::resolveDocRef,
             textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
             siblingsResolver, prerequisiteOfResolver, stageBuilder, reindexAllRunner, scanWorksDirRunner,
             updateAllProjectsRunner, navbarLabelsResolver, this::translateCore);
@@ -626,9 +629,9 @@ public class PortalServer {
     // ---- Scan works dir API endpoint -----------------------------
 
     /**
-     * Handles {@code POST /api/scan-works-dir} requests. Rescans the works directory for
-     * project subdirectories not yet known to this server, and builds and indexes each one
-     * found. Existing projects are left untouched.
+     * Handles {@code POST /api/scan-works-dir} requests. Rescans the works directory, builds and
+     * indexes each project subdirectory not yet known to this server, and drops the projects whose
+     * directory the rescan no longer finds. Projects that are still there are left untouched.
      */
     private void handleScanWorksDir(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -640,7 +643,8 @@ public class PortalServer {
             int[] result = scanWorksDirCore();
             long elapsed = System.currentTimeMillis() - start;
             respond(ex, 200, "application/json",
-                "{\"status\":\"ok\",\"total\":" + result[0] + ",\"added\":" + result[1] + ",\"ms\":" + elapsed + "}");
+                "{\"status\":\"ok\",\"total\":" + result[0] + ",\"added\":" + result[1]
+                    + ",\"removed\":" + result[2] + ",\"ms\":" + elapsed + "}");
         } catch (Exception e) {
             System.err.println("Scan works dir error: " + e.getMessage());
             respond(ex, 500, "application/json", "{\"error\":\"Scan failed\"}");
@@ -648,10 +652,11 @@ public class PortalServer {
     }
 
     /**
-     * Rescans the works directory for project subdirectories not yet known to this server, and
-     * builds and indexes each one found. Existing projects are left untouched. Returns
-     * {@code {total known projects, newly added}}. Shared by {@link #handleScanWorksDir} (REST)
-     * and the MCP {@code scan-works-dir} tool.
+     * Makes the registry match the works directory: builds and indexes each project subdirectory
+     * not yet known to this server, and drops each registered project the rescan no longer finds.
+     * Projects that are still there are left untouched. Returns
+     * {@code {total known projects, newly added, removed}}. Shared by {@link #handleScanWorksDir}
+     * (REST) and the MCP {@code scan-works-dir} tool.
      */
     private synchronized int[] scanWorksDirCore() throws IOException {
         System.out.println("Scan works dir requested: rescanning " + worksDir);
@@ -673,10 +678,78 @@ public class PortalServer {
                 added++;
             }
         }
-        if (added > 0) {
+        int removed = removeVanishedProjects(
+                found.stream().map(p -> p.getFileName().toString()).collect(java.util.stream.Collectors.toSet()));
+        if (added > 0 || removed > 0) {
+            // The MCP handler's starting searcher may be one this scan just closed.
+            this.defaultSearcher = searchers.values().stream().findFirst().orElse(null);
             invalidatePrerequisiteOfIndex();
         }
-        return new int[]{projects.size(), added};
+        return new int[]{projects.size(), added, removed};
+    }
+
+    /**
+     * Drops every registered project whose name {@link Main#findProjects} no longer returns —
+     * the directory was renamed or deleted, or it lost the {@code docs/} directory or the
+     * Docusaurus config that make a directory a project.
+     *
+     * <p>Without this, a renamed project leaves a row in the portal whose every link answers 404,
+     * search goes on offering its documents at addresses that no longer exist, and the
+     * whole-portal update goes on rebuilding a path that is not there — recreating its
+     * {@code search-index/} directory on the way, because {@link Main#reindexAll} creates that
+     * directory before it indexes into it.</p>
+     *
+     * <p>Each removed project's searchers are closed before their actors are stopped, so that the
+     * Lucene reader and the directory handles are released rather than held until the process
+     * exits. A project has one searcher under its own name and one per locale sub-index under
+     * {@code <project>:<locale>}, and all of them go.</p>
+     *
+     * <p>A project that this scan cannot see for a transient reason (an unreadable mount, say) is
+     * removed too, and comes back on the next scan that can see it. Removal only changes what this
+     * server has registered; nothing on disk is touched.</p>
+     *
+     * @param foundNames the project names this scan found on disk
+     * @return the number of projects removed
+     */
+    private int removeVanishedProjects(java.util.Set<String> foundNames) {
+        List<Project> vanished = projects.stream()
+                .filter(proj -> !foundNames.contains(proj.name()))
+                .toList();
+        for (Project proj : vanished) {
+            projects.remove(proj);
+            projectMap.remove(proj.name());
+            String localePrefix = proj.name() + ":";
+            List<String> keys = searchers.keySet().stream()
+                    .filter(key -> key.equals(proj.name()) || key.startsWith(localePrefix))
+                    .toList();
+            for (String key : keys) {
+                searcherLocales.remove(key);
+                closeSearcher(key, searchers.remove(key));
+            }
+            System.out.println("  Removed: " + proj.name());
+        }
+        return vanished.size();
+    }
+
+    /**
+     * Closes one searcher's Lucene handles on the searcher's own actor thread, then stops the
+     * actor. The close runs as a message rather than a direct call because {@link LuceneSearcher}
+     * is unsynchronized and owned by its actor; stopping the actor first would cancel the message
+     * and leak the open reader.
+     */
+    private void closeSearcher(String key, ActorRef<LuceneSearcher> ref) {
+        if (ref == null) {
+            return;
+        }
+        try {
+            ref.ask(searcher -> {
+                searcher.close();
+                return Boolean.TRUE;
+            }).get(10, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            System.err.println("Could not close the searcher " + key + ": " + e.getMessage());
+        }
+        ref.close();
     }
 
     // ---- Reindex All API endpoint -------------------------------
@@ -1087,6 +1160,8 @@ public class PortalServer {
         private volatile String state = "running";     // running | done | error
         private volatile String message = "";
         private volatile long finishedAt;
+        /** Set when the run changed which projects the portal knows, so the page reloads its list. */
+        private volatile boolean listChanged;
 
         BuildJob(String project, String stage) {
             this.project = project;
@@ -1097,7 +1172,8 @@ public class PortalServer {
             long ms = (finishedAt > 0 ? finishedAt : System.currentTimeMillis()) - startedAt;
             return "{\"jobId\":" + HttpUtils.jsonStr(id) + ",\"state\":" + HttpUtils.jsonStr(state)
                     + ",\"project\":" + HttpUtils.jsonStr(project) + ",\"stage\":" + HttpUtils.jsonStr(stage)
-                    + ",\"ms\":" + ms + ",\"message\":" + HttpUtils.jsonStr(message) + "}";
+                    + ",\"ms\":" + ms + ",\"message\":" + HttpUtils.jsonStr(message)
+                    + ",\"listChanged\":" + listChanged + "}";
         }
     }
 
@@ -1178,10 +1254,11 @@ public class PortalServer {
         System.out.println("Update all projects started in background (job " + id + ")");
         Thread worker = new Thread(() -> {
             try {
-                int total = updateAllProjectsCore(job);
-                // The count leads the message: the page reads it back to tell whether the rescan
-                // registered a project it has not drawn a row for.
-                job.message = total + " project(s) updated";
+                int[] result = updateAllProjectsCore(job);
+                int total = result[0], added = result[1], removed = result[2];
+                job.listChanged = added + removed > 0;
+                job.message = total + " project(s) updated"
+                        + (job.listChanged ? " (" + added + " added, " + removed + " removed)" : "");
                 job.state = "done";
             } catch (Exception e) {
                 System.err.println("Update all projects error: " + e.getMessage());
@@ -1222,13 +1299,14 @@ public class PortalServer {
      *
      * @param job the job whose {@code message} carries progress to the browser, or {@code null}
      *            to run without reporting progress
-     * @return the number of projects updated
+     * @return {@code {projects updated, newly added, removed}} — the caller reports the last two so
+     *         that a page showing the old list knows to redraw it
      * @throws Exception if the rescan or any build stage fails
      */
-    private int updateAllProjectsCore(BuildJob job) throws Exception {
+    private int[] updateAllProjectsCore(BuildJob job) throws Exception {
         System.out.println("Update all projects requested");
         reportProgress(job, "scanning " + worksDir);
-        scanWorksDirCore();
+        int[] scan = scanWorksDirCore();
 
         // Copied because the rescan above appends to the live list.
         List<Project> targets = List.copyOf(projects);
@@ -1248,8 +1326,9 @@ public class PortalServer {
         Main.ensureSemanticVectors(targets.stream().map(Project::projectDir).toList());
 
         invalidatePrerequisiteOfIndex();
-        System.out.println("Update all projects complete: " + total + " project(s)");
-        return total;
+        System.out.println("Update all projects complete: " + total + " project(s), "
+                + scan[1] + " added, " + scan[2] + " removed");
+        return new int[]{total, scan[1], scan[2]};
     }
 
     /** Records one step of a long job, on the job the browser polls and on the server console. */
@@ -2194,11 +2273,11 @@ public class PortalServer {
                 if (j.state === 'done') {
                   status.textContent = j.message + ' (' + Math.round(j.ms / 1000) + 's)';
                   status.style.color = 'var(--accent-green)';
-                  // The rescan can register projects this page never drew. Reload only then, so
-                  // that an ordinary update leaves the page — and the doc pane — as it was.
-                  const drawn = document.querySelectorAll('.project-row').length;
-                  const updated = parseInt(j.message, 10);
-                  if (!isNaN(updated) && updated !== drawn) {
+                  // The rescan can register a project this page never drew, or drop one it still
+                  // shows. Reload only then, so that an ordinary update leaves the page — and
+                  // whatever the doc pane is showing — as it was. Counting the rows would miss the
+                  // case of one project added and another dropped in the same run.
+                  if (j.listChanged) {
                     setTimeout(() => location.reload(), 1500);
                   }
                 } else {

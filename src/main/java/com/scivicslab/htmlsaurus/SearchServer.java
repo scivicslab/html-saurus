@@ -154,7 +154,7 @@ public class SearchServer {
                 rebuild.run();
                 return System.currentTimeMillis() - start;
             };
-            var mcpHandler = new McpHandler(docsDir, searcher, localeSearchers, null,
+            var mcpHandler = new McpHandler(docsDir, () -> searcher, localeSearchers, null,
                 textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
                 null, null, stageBuilder, null, null, null, null, this::translateCore);
             server.createContext("/mcp", mcpHandler::handle);

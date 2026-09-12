@@ -423,6 +423,47 @@ class ModeTest {
                 http.stop(0);
             }
         }
+
+        @Test
+        @DisplayName("scan works dir API drops a project whose directory was renamed away")
+        void scanWorksDirApi_dropsRenamedProject() throws Exception {
+            Path staying = createProject("staying");
+            Path renamed = createProject("renamed-away");
+            for (Path p : List.of(staying, renamed)) {
+                Main.build(p.resolve("docs"), p.resolve("static-html"), false);
+                Main.reindex(p.resolve("docs"), p.resolve("search-index"));
+            }
+
+            PortalServer ps = new PortalServer(tempDir, List.of(staying, renamed), 0, false, null, 0);
+            HttpServer http = ps.start();
+            int port = http.getAddress().getPort();
+
+            // Rename after startup, the way a documentation project is renamed on disk
+            Path newName = tempDir.resolve("renamed-away-newname");
+            Files.move(renamed, newName);
+
+            try {
+                var client = HttpClient.newHttpClient();
+                var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/scan-works-dir"))
+                        .POST(HttpRequest.BodyPublishers.noBody())
+                        .build();
+                String response = client.send(request, HttpResponse.BodyHandlers.ofString()).body();
+                assertTrue(response.contains("\"added\":1"), "the new name must be added: " + response);
+                assertTrue(response.contains("\"removed\":1"), "the old name must be removed: " + response);
+                assertTrue(response.contains("\"total\":2"), "two projects must remain: " + response);
+
+                String html = httpGet("http://localhost:" + port + "/");
+                assertFalse(html.contains(">renamed-away<"),
+                        "the portal must stop listing a project whose directory is gone");
+                assertTrue(html.contains(">renamed-away-newname<"), "the new name must be listed");
+                assertTrue(html.contains(">staying<"), "the untouched project must stay listed");
+
+                assertFalse(Files.exists(renamed),
+                        "nothing may recreate the directory the project was renamed away from");
+            } finally {
+                http.stop(0);
+            }
+        }
     }
 
     // ---- Production mode security: closed API surface --------------

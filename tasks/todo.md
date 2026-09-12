@@ -72,6 +72,46 @@
       新しいエンドポイントとツールを追記する。段階の選択理由は `RebuildStageChoice_260901_oo01` の
       範囲なので、必要ならそちらにも追記する
 
+## 追記: ディレクトリが消えたプロジェクトを登録から外す
+
+### 現状（追記時点）
+
+`projects` リストから項目を取り除く処理がどこにも無く、起動時とスキャン時に足すだけだった。
+そのため `doc_SCIVICS000` を `doc_Base001` へ改名したあと、稼働中のポータルは消えたディレクトリを
+指す行を出し続け、その行のリンクはすべて404を返した。検索も、索引のパスごと消えた対象を返した。
+さらに `Update All Projects` を押すと、消えたプロジェクトに対しても `Main.reindexAll` が走り、
+`Files.createDirectories` が `~/works/doc_SCIVICS000/search-index` を作り直した。
+
+### 設計判断
+
+- **判定は `Main.findProjects` の結果との突き合わせで行う**。ディレクトリの存在を個別に確かめるのではなく、
+  「今スキャンが見つけた名前の集合に無い登録を外す」とする。ディレクトリが消えた場合と、
+  ディレクトリは在るが `docs/` か Docusaurus 設定を失った場合の両方が、これ1つで拾える。
+- **外すのはスキャン処理の中**。`Update All Projects` は先頭でスキャンを呼ぶので、押せば追従する。
+- **searcher は閉じてから actor を止める**。`LuceneSearcher` は無同期で actor が所有するため、
+  閉じる操作もメッセージとして送る。actor を先に止めるとメッセージが破棄され、開いたままの
+  Lucene reader が残る。プロジェクトは自分の名前の searcher に加えてロケールごとに
+  `<project>:<locale>` の searcher を持つので、全部外す。
+- **MCP の既定 searcher を `Supplier` にする**。`McpHandler` は起動時の先頭 searcher を保持していたが、
+  それが外された actor だと MCP の検索が止まる。読むたびに現在値を返す形にし、スキャンが
+  追加・削除をしたときに再計算する。
+- **画面の再読み込みはジョブの `listChanged` で判定する**。行数の比較では、1つ増えて1つ減った回
+  （まさに改名の場合）に変化を見逃す。実際に使い捨てのポータルで再現した。
+
+### 手順
+
+- [x] 1. `PortalServer.removeVanishedProjects` を追加し、`scanWorksDirCore` から呼ぶ
+- [x] 2. `closeSearcher` を追加し、searcher を閉じてから actor を止める
+- [x] 3. `scanWorksDirCore` の戻り値を `{total, added, removed}` にし、`/api/scan-works-dir` の
+      JSON と MCP の結果文に `removed` を足す
+- [x] 4. `defaultSearcher` をフィールドにして、`McpHandler` へ `Supplier` で渡す
+- [x] 5. `BuildJob` に `listChanged` を足し、JSON に出す。JavaScript の再読み込み判定を差し替える
+- [x] 6. `ModeTest` に、改名したプロジェクトが一覧から消えることを確認するユニットテストを足す
+- [x] 7. `rm -rf target && mvn install`（283件 GREEN）
+- [x] 8. 使い捨てのポータルで、起動後にプロジェクトを改名してからボタンを押し、一覧が
+      `[proj-a, proj-b]` から `[proj-a, proj-b-renamed]` へ描き直ることを確認
+- [x] 9. `HtmlSaurusApi_260802_oo01` と `HtmlSaurusMcp_260803_oo01` に `removed` と `listChanged` を追記
+
 ## Review
 
 ### 画面
@@ -112,3 +152,15 @@ MCP ツール `update-all-projects` は同じ core を `BuildJob` 無しで呼�
 - 起動後に `proj-c` を置いてから押すと、再走査が登録し、ページが再読み込みされて行が2から3に増えた
 
 稼働中のポータル（28001）への配備と、そこでの実行は行っていない。
+
+### 追記分の検証
+
+ユニットテストを1件足して283件 GREEN。新しいテストは、プロジェクト2個でポータルを起動したあと
+一方のディレクトリを改名し、`POST /api/scan-works-dir` が `"added":1,"removed":1,"total":2` を返すこと、
+ポータルの画面から古い名前が消えて新しい名前が出ること、改名元のディレクトリが作り直されていないことを
+確認する。
+
+使い捨てのポータルでも同じ筋を実機で確認した。ボタンを押すと状態表示が
+`2 project(s) updated (1 added, 1 removed)` になり、一覧が `[proj-a, proj-b]` から
+`[proj-a, proj-b-renamed]` へ描き直った。追加も削除も無い回は再読み込みが起きず、表示中の文書が
+そのまま残ることも確認した。
