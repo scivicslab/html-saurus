@@ -47,6 +47,7 @@ public class PortalSearchE2E {
                     new BrowserType.LaunchOptions().setHeadless(true));
 
             runSidebarWidget(browser);
+            runWholePortalUpdateButton(browser);
             runSearchResultsPage(browser);
             runFindRelatedResultsPage(browser);
         }
@@ -104,6 +105,37 @@ public class PortalSearchE2E {
             page.click("#search-btn");
             String url = waitForFrameUrlContains(page, "/search-semantic?q=");
             check(url.contains(KNOWN_KEYWORD), "doc-frame URL must carry the query, got: " + url);
+        });
+    }
+
+    // ---- Update All Projects: the one whole-portal action, in the sidebar --------------------
+
+    /**
+     * Checks where the whole-portal update lives, not what it does. The button rescans the works
+     * directory and rebuilds the HTML, index and embedding of every project, which runs for tens
+     * of minutes against the portal this test is pointed at — so these checks stop at the markup
+     * and never click it. What it does is covered by running it against a scratch portal
+     * (see {@code RunningE2ETests_260902_oo01}).
+     */
+    private static void runWholePortalUpdateButton(Browser browser) {
+        withPage("U-1: Update All Projects button sits inside the collapsible sidebar", browser, page -> {
+            page.navigate(BASE_URL + "/");
+            page.waitForLoadState();
+            check(page.isVisible("#update-all-projects-btn"),
+                    "#update-all-projects-btn must be visible on load");
+            check(page.querySelector("#portal-sidebar #update-all-projects-btn") != null,
+                    "#update-all-projects-btn must be inside #portal-sidebar, not in the header");
+            check(page.querySelector("#update-all-projects-status") != null,
+                    "#update-all-projects-status must be present to report progress");
+        });
+
+        withPage("U-2: the two buttons it replaced are gone from the page", browser, page -> {
+            page.navigate(BASE_URL + "/");
+            page.waitForLoadState();
+            check(page.querySelector("#scan-works-dir-btn") == null,
+                    "Scan Works Dir was folded into Update All Projects and must be gone");
+            check(page.querySelector("#reindex-all-btn") == null,
+                    "Reindex All was folded into Update All Projects and must be gone");
         });
     }
 

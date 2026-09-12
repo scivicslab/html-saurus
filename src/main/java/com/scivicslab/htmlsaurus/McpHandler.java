@@ -51,6 +51,8 @@ import java.util.stream.Stream;
  *       in sequence for one project</li>
  *   <li>{@code reindex-all} — rebuild the full-text index for every project</li>
  *   <li>{@code scan-works-dir} — discover and build new (not yet known) projects</li>
+ *   <li>{@code update-all-projects} — discover new projects, then regenerate HTML, index and
+ *       embedding vectors for every project</li>
  *   <li>{@code navbar-labels} — read a project's Docusaurus navbar labels</li>
  *   <li>{@code translate} — on-demand translation of one block of text</li>
  * </ul>
@@ -94,6 +96,7 @@ class McpHandler {
     private final StageBuilder stageBuilder;
     private final Callable<Integer> reindexAllRunner;
     private final Callable<int[]> scanWorksDirRunner;
+    private final Callable<Integer> updateAllProjectsRunner;
     private final Function<String, List<String>> navbarLabelsResolver;
     private final BiFunction<String, String, String> translateFn;
 
@@ -134,6 +137,11 @@ class McpHandler {
      * @param scanWorksDirRunner      discovers and builds new projects under the works directory,
      *                                returning {@code {total, added}}; same as
      *                                {@code /api/scan-works-dir}. {@code null} in single-project mode.
+     * @param updateAllProjectsRunner rescans the works directory and then rebuilds the HTML, index
+     *                                and embedding of every project, returning the project count;
+     *                                the work {@code /api/update-all-projects-async} starts in the
+     *                                background, run to completion here. {@code null} in
+     *                                single-project mode.
      * @param navbarLabelsResolver    a project's Docusaurus navbar labels, or {@code null} if the
      *                                project is unknown; same as {@code /api/navbar-labels/<project>}.
      *                                {@code null} in single-project mode.
@@ -151,6 +159,7 @@ class McpHandler {
                StageBuilder stageBuilder,
                Callable<Integer> reindexAllRunner,
                Callable<int[]> scanWorksDirRunner,
+               Callable<Integer> updateAllProjectsRunner,
                Function<String, List<String>> navbarLabelsResolver,
                BiFunction<String, String, String> translateFn) {
         this.docsDir = docsDir;
@@ -165,6 +174,7 @@ class McpHandler {
         this.stageBuilder = stageBuilder;
         this.reindexAllRunner = reindexAllRunner;
         this.scanWorksDirRunner = scanWorksDirRunner;
+        this.updateAllProjectsRunner = updateAllProjectsRunner;
         this.navbarLabelsResolver = navbarLabelsResolver;
         this.translateFn = translateFn;
     }
@@ -314,6 +324,10 @@ class McpHandler {
                 "Rescan the works directory for project subdirectories not yet known to this server, and build and index each one found. Existing projects are left untouched. Portal mode only.",
                 """
                 {"type":"object","properties":{},"required":[]}"""),
+            toolDef("update-all-projects",
+                "Bring the whole portal up to date: rescan the works directory for new projects, then regenerate static HTML, the full-text index and embedding vectors for every project. Runs to completion before answering, which takes tens of minutes on a large portal. Portal mode only.",
+                """
+                {"type":"object","properties":{},"required":[]}"""),
             toolDef("navbar-labels",
                 "Read a project's Docusaurus navbar labels, re-read live from its docusaurus.config.ts. Portal mode only.",
                 """
@@ -350,6 +364,7 @@ class McpHandler {
             case "build-all"           -> toolBuildStage(args, "all");
             case "reindex-all"         -> toolReindexAll();
             case "scan-works-dir"      -> toolScanWorksDir();
+            case "update-all-projects" -> toolUpdateAllProjects();
             case "navbar-labels"       -> toolNavbarLabels(args);
             case "translate"           -> toolTranslate(args);
             case null -> errorJson(-32602, "Missing tool name");
@@ -670,6 +685,18 @@ class McpHandler {
             return toolResult("Scan complete: " + result[0] + " total project(s), " + result[1] + " newly added.");
         } catch (Exception e) {
             return toolError("Scan failed: " + e.getMessage());
+        }
+    }
+
+    private String toolUpdateAllProjects() {
+        if (updateAllProjectsRunner == null) {
+            return toolError("update-all-projects is not available in single-project mode");
+        }
+        try {
+            int total = updateAllProjectsRunner.call();
+            return toolResult("Updated " + total + " project(s): HTML, full-text index and embedding vectors.");
+        } catch (Exception e) {
+            return toolError("Update all projects failed: " + e.getMessage());
         }
     }
 

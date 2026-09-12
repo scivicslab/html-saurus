@@ -273,8 +273,8 @@ class ModeTest {
         }
 
         @Test
-        @DisplayName("portal page (dev) contains Theme selector and Scan Works Dir button")
-        void devPortalPage_hasThemeAndScanWorksDir() throws Exception {
+        @DisplayName("portal page (dev) contains Theme selector and Update All Projects button")
+        void devPortalPage_hasThemeAndUpdateAllProjects() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
             PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null, 0);
@@ -283,8 +283,12 @@ class ModeTest {
                 String html = httpGet("http://localhost:" + http.getAddress().getPort() + "/");
                 assertTrue(html.contains("id=\"theme-select\""),
                         "Dev portal page must render Theme selector element");
-                assertTrue(html.contains("id=\"scan-works-dir-btn\""),
-                        "Dev portal page must render Scan Works Dir button element");
+                assertTrue(html.contains("id=\"update-all-projects-btn\""),
+                        "Dev portal page must render Update All Projects button element");
+                assertFalse(html.contains("id=\"scan-works-dir-btn\""),
+                        "Scan Works Dir button was folded into Update All Projects and must be gone");
+                assertFalse(html.contains("id=\"reindex-all-btn\""),
+                        "Reindex All button was folded into Update All Projects and must be gone");
             } finally {
                 http.stop(0);
             }

@@ -221,6 +221,8 @@ public class PortalServer {
         };
         java.util.concurrent.Callable<Integer> reindexAllRunner = this::reindexAllCore;
         java.util.concurrent.Callable<int[]> scanWorksDirRunner = this::scanWorksDirCore;
+        // No BuildJob: an MCP caller waits for the answer, so there is nobody polling for progress.
+        java.util.concurrent.Callable<Integer> updateAllProjectsRunner = () -> updateAllProjectsCore(null);
         java.util.function.Function<String, List<String>> navbarLabelsResolver = name -> {
             Project proj = projectMap.get(name);
             return proj == null ? null : readNavbarLabels(proj.projectDir());
@@ -228,7 +230,7 @@ public class PortalServer {
         this.mcpHandler = new McpHandler(worksDir, defaultSearcher, searchers, this::resolveDocRef,
             textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
             siblingsResolver, prerequisiteOfResolver, stageBuilder, reindexAllRunner, scanWorksDirRunner,
-            navbarLabelsResolver, this::translateCore);
+            updateAllProjectsRunner, navbarLabelsResolver, this::translateCore);
     }
 
     /**
@@ -381,6 +383,16 @@ public class PortalServer {
         // Reindex all API: POST /api/reindex-all (development mode only)
         if (!production && path.equals("/api/reindex-all")) {
             handleReindexAll(ex);
+            return;
+        }
+
+        // Update all projects API (development mode only): POST /api/update-all-projects-async
+        //   Rescan, HTML, index and embedding for every project, started in the background and
+        //   polled through GET /api/build-status?jobId=... This is what the portal's single
+        //   "Update All Projects" button calls; /api/scan-works-dir and /api/reindex-all above
+        //   remain for callers that want one stage on its own.
+        if (!production && path.equals("/api/update-all-projects-async")) {
+            handleUpdateAllProjectsAsync(ex);
             return;
         }
 
@@ -1150,6 +1162,105 @@ public class PortalServer {
     }
 
     /**
+     * Handles {@code POST /api/update-all-projects-async}. Starts {@link #updateAllProjectsCore}
+     * on its own thread and answers at once with a job id to poll {@link #handleBuildStatus} with,
+     * in the same shape {@link #handleBuildAsync} answers with. Updating the whole portal takes
+     * tens of minutes, far longer than a browser holds a request open.
+     */
+    private void handleUpdateAllProjectsAsync(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        String id = java.util.UUID.randomUUID().toString();
+        BuildJob job = new BuildJob(ALL_PROJECTS, "update-all-projects");
+        buildJobs.put(id, job);
+        System.out.println("Update all projects started in background (job " + id + ")");
+        Thread worker = new Thread(() -> {
+            try {
+                int total = updateAllProjectsCore(job);
+                // The count leads the message: the page reads it back to tell whether the rescan
+                // registered a project it has not drawn a row for.
+                job.message = total + " project(s) updated";
+                job.state = "done";
+            } catch (Exception e) {
+                System.err.println("Update all projects error: " + e.getMessage());
+                job.message = String.valueOf(e.getMessage());
+                job.state = "error";
+            } finally {
+                job.finishedAt = System.currentTimeMillis();
+            }
+        }, "update-all-projects");
+        worker.setDaemon(true);
+        worker.start();
+        respond(ex, 202, "application/json", job.json(id));
+    }
+
+    /** The {@code project} a whole-portal job reports itself under, where one name will not do. */
+    private static final String ALL_PROJECTS = "(all projects)";
+
+    /**
+     * Updates every project: rescans {@link #worksDir} for projects that are not registered yet,
+     * rebuilds each registered project's static HTML, rebuilds each one's Lucene index, and
+     * finally refreshes the embedding vectors of all projects in one pass. This is what the
+     * portal's single "Update All Projects" button runs, and it subsumes what the former
+     * {@code Scan Works Dir} and {@code Reindex All} buttons did separately.
+     *
+     * <p>The stages run in the order {@link Main#runSteps} uses — HTML for every project, then the
+     * index for every project, then the embeddings — because the index reflects the built docs and
+     * {@link SemanticIndexer} decides staleness by comparing against {@code search-index/}. The
+     * embedding stage takes a list of projects and runs once, not once per project.</p>
+     *
+     * <p>A project the rescan discovers is built twice within the one run: {@link #scanWorksDirCore}
+     * has to build its HTML and index before it can register it (a project's {@link LuceneSearcher}
+     * actor opens the index directory when it is constructed), and the pass that follows rebuilds
+     * it along with the rest. Discovery is rare and the outcome is correct, so registration is not
+     * restructured to avoid the repeat.</p>
+     *
+     * <p>Shared by {@link #handleUpdateAllProjectsAsync} (REST) and the MCP
+     * {@code update-all-projects} tool.</p>
+     *
+     * @param job the job whose {@code message} carries progress to the browser, or {@code null}
+     *            to run without reporting progress
+     * @return the number of projects updated
+     * @throws Exception if the rescan or any build stage fails
+     */
+    private int updateAllProjectsCore(BuildJob job) throws Exception {
+        System.out.println("Update all projects requested");
+        reportProgress(job, "scanning " + worksDir);
+        scanWorksDirCore();
+
+        // Copied because the rescan above appends to the live list.
+        List<Project> targets = List.copyOf(projects);
+        int total = targets.size();
+
+        for (int i = 0; i < total; i++) {
+            Project p = targets.get(i);
+            reportProgress(job, "(" + (i + 1) + "/" + total + ") " + p.name() + " html");
+            Main.build(p.projectDir().resolve("docs"), p.staticDir(), production, threads);
+        }
+        for (int i = 0; i < total; i++) {
+            Project p = targets.get(i);
+            reportProgress(job, "(" + (i + 1) + "/" + total + ") " + p.name() + " index");
+            Main.reindexAll(p.projectDir(), production);
+        }
+        reportProgress(job, "embedding (" + total + " projects)");
+        Main.ensureSemanticVectors(targets.stream().map(Project::projectDir).toList());
+
+        invalidatePrerequisiteOfIndex();
+        System.out.println("Update all projects complete: " + total + " project(s)");
+        return total;
+    }
+
+    /** Records one step of a long job, on the job the browser polls and on the server console. */
+    private static void reportProgress(BuildJob job, String message) {
+        if (job != null) {
+            job.message = message;
+        }
+        System.out.println("  " + message);
+    }
+
+    /**
      * Runs one build stage ({@code html}, {@code index}, {@code embedding}, or {@code all}) for a
      * project. Shared by {@link #handleBuildStage} (REST) and the MCP {@code build-*} tools.
      *
@@ -1274,6 +1385,9 @@ public class PortalServer {
                               border: 1px solid var(--border-color); font-family: monospace; }
                 .project-actions { display: flex; flex: 1 1 100%%; flex-wrap: wrap;
                                    gap: 0.5rem; align-items: center; }
+                /* The one whole-portal action, directly above the list it acts on. */
+                .project-actions-all { display: flex; flex-wrap: wrap; gap: 0.5rem;
+                                       align-items: center; margin-bottom: 0.6rem; }
                 .action-select { padding: 0.28rem 0.5rem; border-radius: 5px; font-size: 0.8rem;
                                  border: 1px solid var(--border-color); background: var(--bg-tertiary);
                                  color: var(--text-primary); cursor: pointer; }
@@ -1394,10 +1508,6 @@ public class PortalServer {
                     <option value="light-red">Light Red</option>
                   </select>
                 </label>
-                <button class="btn btn-reload" id="scan-works-dir-btn" onclick="doScanWorksDir(this)">Scan Works Dir</button>
-                <span class="build-status" id="scan-works-dir-status"></span>
-                <button class="btn" id="reindex-all-btn" onclick="doReindexAll(this)">Reindex All</button>
-                <span class="build-status" id="reindex-all-status"></span>
             """);
         }
         sb.append("""
@@ -1434,6 +1544,12 @@ public class PortalServer {
                 <span id="search-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
               </div>
               <h2>Projects</h2>
+              <div class="project-actions-all">
+                <button class="btn btn-reload" id="update-all-projects-btn"
+                        title="Rescan the works directory, then rebuild every project's HTML, index and embedding"
+                        onclick="doUpdateAllProjects(this)">Update All Projects</button>
+                <span class="build-status" id="update-all-projects-status"></span>
+              </div>
               <div class="project-list">
             """);
         } else {
@@ -2055,47 +2171,38 @@ public class PortalServer {
               // shows whatever is running, including imports this browser never started.
               if (pdfBtn) refreshImportJobs();
             })();
-            async function doReindexAll(btn) {
-              const status = document.getElementById('reindex-all-status');
+            async function doUpdateAllProjects(btn) {
+              const status = document.getElementById('update-all-projects-status');
+              const label = btn.textContent;
               btn.disabled = true;
-              btn.textContent = 'Reindexing...';
+              btn.textContent = 'Updating...';
               status.textContent = '';
+              status.style.color = 'var(--text-secondary)';
               try {
-                const r = await fetch('/api/reindex-all', {method: 'POST'});
-                const j = await r.json();
-                if (j.status === 'ok') {
-                  status.textContent = j.total + ' project(s) (' + j.ms + 'ms)';
-                  status.style.color = 'var(--accent-green)';
-                } else {
-                  status.textContent = 'Error: ' + (j.error || 'unknown');
-                  status.style.color = '#e06060';
+                // Started, then polled: a rescan followed by HTML, index and embedding over every
+                // project runs for tens of minutes, which no held request survives. The job says
+                // which project and which stage it is on.
+                const started = await fetch('/api/update-all-projects-async', {method: 'POST'});
+                const s0 = await started.json();
+                let j = s0;
+                while (j.state === 'running') {
+                  status.textContent = (j.message || 'starting') + ' ' + Math.round(j.ms / 1000) + 's...';
+                  await new Promise(res => setTimeout(res, 1500));
+                  const r2 = await fetch('/api/build-status?jobId=' + encodeURIComponent(s0.jobId));
+                  j = await r2.json();
                 }
-              } catch (e) {
-                status.textContent = 'Error: ' + e.message;
-                status.style.color = '#e06060';
-              }
-              btn.disabled = false;
-              btn.textContent = 'Reindex All';
-            }
-            async function doScanWorksDir(btn) {
-              const status = document.getElementById('scan-works-dir-status');
-              btn.disabled = true;
-              btn.textContent = 'Scanning...';
-              status.textContent = '';
-              try {
-                const r = await fetch('/api/scan-works-dir', {method: 'POST'});
-                const j = await r.json();
-                if (j.status === 'ok') {
-                  if (j.added > 0) {
-                    status.textContent = '+' + j.added + ' project(s) (' + j.ms + 'ms)';
-                    status.style.color = 'var(--accent-green)';
-                    setTimeout(() => location.reload(), 800);
-                  } else {
-                    status.textContent = 'No new projects';
-                    status.style.color = 'var(--text-secondary)';
+                if (j.state === 'done') {
+                  status.textContent = j.message + ' (' + Math.round(j.ms / 1000) + 's)';
+                  status.style.color = 'var(--accent-green)';
+                  // The rescan can register projects this page never drew. Reload only then, so
+                  // that an ordinary update leaves the page — and the doc pane — as it was.
+                  const drawn = document.querySelectorAll('.project-row').length;
+                  const updated = parseInt(j.message, 10);
+                  if (!isNaN(updated) && updated !== drawn) {
+                    setTimeout(() => location.reload(), 1500);
                   }
                 } else {
-                  status.textContent = 'Error: ' + (j.error || 'unknown');
+                  status.textContent = 'Error: ' + (j.message || 'unknown');
                   status.style.color = '#e06060';
                 }
               } catch (e) {
@@ -2103,7 +2210,7 @@ public class PortalServer {
                 status.style.color = '#e06060';
               }
               btn.disabled = false;
-              btn.textContent = 'Scan Works Dir';
+              btn.textContent = label;
             }
             </script>
             """);
