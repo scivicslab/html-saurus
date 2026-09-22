@@ -304,6 +304,27 @@ main pre { background: var(--c-pre-bg); border: 1px solid var(--c-border); borde
 .pre-nowrap > pre { white-space: pre; }
 main code { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.875em; }
 main p code, main li code, main td code { background: var(--c-code-bg); padding: 1px 5px; border-radius: 3px; }
+
+/* ---- The kind of a reference (## 参考資料) ----
+   The kind lives in data-relation, which a browser does not draw, so a reader saw a list of
+   documents with no word for why any of them was listed. Drawn from the attribute rather than
+   asked of the author a second time: a visible copy written by hand can disagree with the
+   attribute the tools read, and there are hundreds of entries. */
+main li > span[data-relation]::before {
+  content: attr(data-relation);
+  display: inline-block;
+  margin-right: .5em;
+  padding: 0 .45em;
+  border: 1px solid var(--c-border);
+  border-radius: 3px;
+  background: var(--c-code-bg);
+  color: var(--c-cat-label);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .8em;
+  line-height: 1.7;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
 main table { border-collapse: collapse; width: 100%; margin: 1rem 0; display: block; overflow-x: auto; }
 main th, main td { border: 1px solid var(--c-border); padding: 8px 12px; text-align: left; }
 main th { background: var(--c-th-bg); font-weight: 600; }
