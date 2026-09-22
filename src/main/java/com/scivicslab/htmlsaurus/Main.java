@@ -24,6 +24,12 @@ import java.util.*;
 public class Main {
 
     /**
+     * Set by {@code --no-diagrams}. The figures next to the Markdown are normally rebuilt as part of
+     * the HTML step; this turns that off for a run that only needs the pages.
+     */
+    private static boolean skipDiagrams = false;
+
+    /**
      * Parses command-line arguments and launches either single-project or portal mode.
      *
      * @param args command-line arguments
@@ -58,6 +64,7 @@ public class Main {
             else if (args[i].equals("--html")) stepHtml = true;
             else if (args[i].equals("--index")) stepIndex = true;
             else if (args[i].equals("--embedding") || args[i].equals("--embed")) stepEmbedding = true;
+            else if (args[i].equals("--no-diagrams")) skipDiagrams = true;
             else if (!args[i].startsWith("--")) rootDir = Path.of(args[i]).toAbsolutePath();
         }
 
@@ -315,6 +322,9 @@ public class Main {
      */
     static void build(Path docsDir, Path outDir, boolean production, int threads) {
         try {
+            // Figures first: the .png a page embeds is regenerated from its .jsh when out of date,
+            // so a document and its diagrams are never out of step (DiagramBuilder).
+            if (!skipDiagrams) DiagramBuilder.rebuild(docsDir);
             Path projectDir = docsDir.getParent();
             String[] i18n = readI18nConfig(projectDir);
             String defaultLocale = i18n.length > 0 ? i18n[0] : null;
