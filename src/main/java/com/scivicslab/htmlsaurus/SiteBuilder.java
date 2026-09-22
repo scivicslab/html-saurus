@@ -48,6 +48,9 @@ public class SiteBuilder {
 
     private final PageRenderer pageRenderer;
 
+    /** Writes the visible name of each ## 参考資料 entry from its data-doc-id. */
+    private final ReferenceLabels referenceLabels;
+
     /** Default parallelism of {@link #build}'s page-conversion {@code ActorSystem}, overridable
      *  via {@link #threads}/{@code --threads} -- deliberately not {@code Runtime.availableProcessors()}
      *  (see {@code BuildParallelization_260822_oo01}: a shared machine should not be saturated by
@@ -132,6 +135,7 @@ public class SiteBuilder {
         }
         this.navBuilder = new NavTreeBuilder(docsDir, production, converter, currentLocale, defaultLocale, fallbackDocsDir);
         this.pageRenderer = new PageRenderer(production, config, currentLocale, defaultLocale, this.allLocales);
+        this.referenceLabels = ReferenceLabels.forProject(projectRoot);
     }
 
     /**
@@ -429,7 +433,7 @@ public class SiteBuilder {
             ? stripNumericPrefix(stripExtension(mdFile.getFileName().toString())) : fm[0];
         String body = fm[1];
         String fmId = fm[2]; // frontmatter id (may be empty)
-        String contentHtml = converter.convertMarkdown(body);
+        String contentHtml = referenceLabels.apply(converter.convertMarkdown(body));
 
         // Detect same-name pattern: dir/dir.md (Docusaurus convention).
         // Also used below to fix relative asset paths in dev mode.
@@ -545,7 +549,7 @@ public class SiteBuilder {
         String title = fm[0].isBlank()
             ? stripNumericPrefix(stripExtension(mdFile.getFileName().toString())) : fm[0];
         String body = fm[1];
-        String contentHtml = converter.convertMarkdown(body);
+        String contentHtml = referenceLabels.apply(converter.convertMarkdown(body));
 
         // Root page: depth is 0 in production (/index.html), prefix is "./"
         String prefix = "./";
