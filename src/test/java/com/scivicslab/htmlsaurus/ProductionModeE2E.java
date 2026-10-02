@@ -202,7 +202,7 @@ public class ProductionModeE2E {
 
         withPage("B-3: no copy bar", page -> {
             page.navigate(url("/guides/top_page/"));
-            check(page.querySelector("#copy-text-btn") == null,
+            check(page.querySelector(".copy-bar") == null,
                 "Production mode must not render copy bar buttons");
         });
     }

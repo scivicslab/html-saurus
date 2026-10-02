@@ -14,7 +14,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -199,6 +202,47 @@ class ModeTest {
     @Tag("S3")
     @DisplayName("Mode 3 – Portal mode")
     class PortalMode {
+
+        @Test
+        @DisplayName("every button id the page script names is rendered on the page")
+        void pageScript_namesOnlyRenderedButtonIds() throws Exception {
+            Path proj = createProject("proj");
+            // The doc id button is rendered only for a document carrying a frontmatter id, so the
+            // fixture carries one; without it the script would name a button that is absent for a reason.
+            Files.writeString(proj.resolve("docs/intro.md"),
+                    "---\nid: Intro_261002_oo01\ntitle: Introduction\n---\n\n# Introduction\n\nHello world.");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
+            // The generated file is named from the document id, so the page is located, not guessed.
+            Path page;
+            try (var files = Files.list(proj.resolve("static-html"))) {
+                page = files.filter(f -> f.getFileName().toString().endsWith(".html")).findFirst().orElseThrow();
+            }
+            String html = Files.readString(page);
+            Matcher named = Pattern.compile("'([a-z0-9-]+-btn)'").matcher(html);
+            List<String> missing = new ArrayList<>();
+            while (named.find()) {
+                String id = named.group(1);
+                if (!html.contains("id=\"" + id + "\"") && !missing.contains(id)) missing.add(id);
+            }
+            assertEquals(List.of(), missing,
+                    "A script naming a button that no element carries leaves that button inert on click");
+        }
+
+        @Test
+        @DisplayName("every copy bar button id is named by the page script")
+        void copyBar_buttonIdsAreNamedByTheScript() throws Exception {
+            Path proj = createProject("proj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
+            String html = Files.readString(proj.resolve("static-html/intro.html"));
+            Matcher m = Pattern.compile("<button class=\"copy-btn\" id=\"([a-z0-9-]+)\"").matcher(html);
+            List<String> ids = new ArrayList<>();
+            while (m.find()) ids.add(m.group(1));
+            assertFalse(ids.isEmpty(), "A dev-mode page must render the copy bar");
+            for (String id : ids) {
+                assertTrue(html.contains("'" + id + "'"),
+                        "The page script must name " + id + ": a button no script names does nothing when clicked");
+            }
+        }
 
         @Test
         @DisplayName("/api/source (dev) returns the Markdown source, the LaTeX form, the converted HTML and the text")

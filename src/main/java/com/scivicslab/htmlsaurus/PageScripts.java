@@ -184,7 +184,7 @@ class PageScripts {
             })();
             // Copy buttons
             (function() {
-              if (!document.getElementById('copy-text-btn')) return;
+              if (!document.querySelector('.copy-bar')) return;
               function flash(btn, label) {
                 btn.classList.add('copied');
                 var orig = btn.innerHTML;
