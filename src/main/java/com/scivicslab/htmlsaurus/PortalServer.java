@@ -537,6 +537,13 @@ public class PortalServer {
             return;
         }
 
+        // One representation of a document (text/plain): GET /api/source?path=...&format=... (development
+        // mode only). The copy bar opens this in a new tab for each of the three full-text formats.
+        if (!production && path.equals("/api/source")) {
+            handleSource(ex);
+            return;
+        }
+
         // Table-of-contents proximity: docs in the same grouping directory (JSON): GET
         // /api/siblings?id=... (development mode only)
         if (!production && path.equals("/api/siblings")) {
@@ -788,6 +795,46 @@ public class PortalServer {
         }
         invalidatePrerequisiteOfIndex();
         return projects.size();
+    }
+
+    /**
+     * Handles {@code GET /api/source?path=<siteName>/docs/<relativePath>&format=<md-om|md-latex|html>}
+     * and returns one representation of that document as {@code text/plain}, so the browser shows the
+     * markup instead of drawing it. {@code md-om} is the file on disk, whose formulas are om blocks.
+     * {@code md-latex} is the same text with the formulas written as LaTeX, which is the form a reader
+     * sees. {@code html} is that LaTeX form converted, without the surrounding page. Development mode
+     * only, and limited to {@code .md} files under the works directory.
+     */
+    private void handleSource(HttpExchange ex) throws IOException {
+        String rel = queryParam(ex, "path");
+        String format = queryParam(ex, "format");
+        if (format.isBlank()) format = "md-om";
+        if (rel.isBlank()) {
+            respond(ex, 400, "text/plain; charset=UTF-8", "missing path");
+            return;
+        }
+        Path file = worksDir.resolve(rel).normalize();
+        boolean servable = file.startsWith(worksDir)
+            && file.getFileName().toString().endsWith(".md")
+            && Files.isRegularFile(file);
+        if (!servable) {
+            respond(ex, 404, "text/plain; charset=UTF-8", "not found");
+            return;
+        }
+        String body;
+        switch (format) {
+            case "md-om" -> body = Files.readString(file, StandardCharsets.UTF_8);
+            case "md-latex" -> body = FormulaSource.readAsLatex(file);
+            case "html" -> {
+                MarkdownConverter converter = new MarkdownConverter();
+                body = converter.convertMarkdown(converter.parseFrontmatter(FormulaSource.readAsLatex(file))[1]);
+            }
+            default -> {
+                respond(ex, 400, "text/plain; charset=UTF-8", "unknown format: " + format);
+                return;
+            }
+        }
+        respond(ex, 200, "text/plain; charset=UTF-8", body);
     }
 
     /**

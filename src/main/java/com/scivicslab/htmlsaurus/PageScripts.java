@@ -208,13 +208,22 @@ class PageScripts {
                 var text = clone.innerText || clone.textContent;
                 navigator.clipboard.writeText(text.trim()).then(function() { flash(btn); });
               });
-              // Markdown copy
-              document.getElementById('copy-md-btn').addEventListener('click', function() {
-                var btn = this;
-                var clone = getContent();
-                var md = htmlToMd(clone);
-                navigator.clipboard.writeText(md.trim()).then(function() { flash(btn); });
-              });
+              // The three full-text formats open a new tab showing the markup as text. The server
+              // reads the source file for them, so the frontmatter and every inline construct are
+              // present; rebuilding Markdown from the rendered DOM could not recover them.
+              function openSource(btnId, format) {
+                var btn = document.getElementById(btnId);
+                if (!btn) return;
+                btn.addEventListener('click', function() {
+                  var pathBtn = document.getElementById('copy-path-btn');
+                  var src = pathBtn ? pathBtn.dataset.path : '';
+                  if (!src) return;
+                  window.open('/api/source?path=' + encodeURIComponent(src) + '&format=' + format, '_blank');
+                });
+              }
+              openSource('view-md-om-btn', 'md-om');
+              openSource('view-md-latex-btn', 'md-latex');
+              openSource('view-html-btn', 'html');
               // Doc id copy — absent on documents without a frontmatter id.
               var idBtn = document.getElementById('copy-id-btn');
               if (idBtn) {
@@ -228,119 +237,6 @@ class PageScripts {
                 var btn = this;
                 navigator.clipboard.writeText(btn.dataset.path).then(function() { flash(btn); });
               });
-              function htmlToMd(el) {
-                var out = '';
-                var children = el.childNodes;
-                for (var i = 0; i < children.length; i++) {
-                  var n = children[i];
-                  if (n.nodeType === 3) { out += n.textContent; continue; }
-                  if (n.nodeType !== 1) continue;
-                  var tag = n.tagName;
-                  if (tag === 'H2') { out += '\\n## ' + n.textContent.trim() + '\\n\\n'; }
-                  else if (tag === 'H3') { out += '\\n### ' + n.textContent.trim() + '\\n\\n'; }
-                  else if (tag === 'H4') { out += '\\n#### ' + n.textContent.trim() + '\\n\\n'; }
-                  else if (tag === 'P') { out += mdInline(n) + '\\n\\n'; }
-                  else if (tag === 'PRE') {
-                    var code = n.querySelector('code');
-                    var lang = '';
-                    if (code && code.className) {
-                      var m = code.className.match(/language-(\\S+)/);
-                      if (m) lang = m[1];
-                    }
-                    out += '```' + lang + '\\n' + (code || n).textContent + '```\\n\\n';
-                  }
-                  else if (tag === 'UL') { out += mdList(n, '- ', 0) + '\\n'; }
-                  else if (tag === 'OL') { out += mdOList(n, 0) + '\\n'; }
-                  else if (tag === 'BLOCKQUOTE') { out += n.textContent.trim().split('\\n').map(function(l) { return '> ' + l; }).join('\\n') + '\\n\\n'; }
-                  else if (tag === 'TABLE') { out += mdTable(n) + '\\n'; }
-                  else if (tag === 'DIV' && n.classList.contains('admonition')) {
-                    var title = n.querySelector('.admonition-title');
-                    var body = n.querySelector('.admonition-body');
-                    var type = 'note';
-                    n.classList.forEach(function(c) { if (c.startsWith('admonition-') && c !== 'admonition-title' && c !== 'admonition-body') type = c.replace('admonition-', ''); });
-                    out += ':::' + type + (title ? '[' + title.textContent.trim() + ']' : '') + '\\n';
-                    if (body) out += body.textContent.trim();
-                    out += '\\n:::\\n\\n';
-                  }
-                  else { out += htmlToMd(n); }
-                }
-                return out;
-              }
-              function mdInline(el) {
-                var r = '';
-                el.childNodes.forEach(function(n) {
-                  if (n.nodeType === 3) { r += n.textContent; }
-                  else if (n.nodeType === 1) {
-                    var t = n.tagName;
-                    if (t === 'CODE') r += '`' + n.textContent + '`';
-                    else if (t === 'STRONG' || t === 'B') r += '**' + n.textContent + '**';
-                    else if (t === 'EM' || t === 'I') r += '*' + n.textContent + '*';
-                    else if (t === 'A') r += '[' + n.textContent + '](' + n.getAttribute('href') + ')';
-                    else if (t === 'IMG') r += '![' + (n.getAttribute('alt')||'') + '](' + n.getAttribute('src') + ')';
-                    else r += n.textContent;
-                  }
-                });
-                return r;
-              }
-              function mdList(ul, marker, depth) {
-                var r = '';
-                var items = ul.children;
-                for (var i = 0; i < items.length; i++) {
-                  if (items[i].tagName !== 'LI') continue;
-                  var indent = '  '.repeat(depth);
-                  var sub = items[i].querySelector('ul,ol');
-                  var text = '';
-                  items[i].childNodes.forEach(function(c) {
-                    if (c === sub) return;
-                    if (c.nodeType === 1 && (c.tagName === 'UL' || c.tagName === 'OL')) return;
-                    text += c.textContent;
-                  });
-                  r += indent + marker + text.trim() + '\\n';
-                  if (sub) {
-                    if (sub.tagName === 'OL') r += mdOList(sub, depth + 1);
-                    else r += mdList(sub, '- ', depth + 1);
-                  }
-                }
-                return r;
-              }
-              function mdOList(ol, depth) {
-                var r = '';
-                var items = ol.children;
-                var num = 1;
-                for (var i = 0; i < items.length; i++) {
-                  if (items[i].tagName !== 'LI') continue;
-                  var indent = '  '.repeat(depth);
-                  var sub = items[i].querySelector('ul,ol');
-                  var text = '';
-                  items[i].childNodes.forEach(function(c) {
-                    if (c.nodeType === 1 && (c.tagName === 'UL' || c.tagName === 'OL')) return;
-                    text += c.textContent;
-                  });
-                  r += indent + (num++) + '. ' + text.trim() + '\\n';
-                  if (sub) {
-                    if (sub.tagName === 'OL') r += mdOList(sub, depth + 1);
-                    else r += mdList(sub, '- ', depth + 1);
-                  }
-                }
-                return r;
-              }
-              function mdTable(table) {
-                var rows = table.querySelectorAll('tr');
-                if (!rows.length) return '';
-                var r = '';
-                rows.forEach(function(row, ri) {
-                  var cells = row.querySelectorAll('th,td');
-                  var line = '|';
-                  cells.forEach(function(c) { line += ' ' + c.textContent.trim() + ' |'; });
-                  r += line + '\\n';
-                  if (ri === 0) {
-                    var sep = '|';
-                    cells.forEach(function() { sep += ' --- |'; });
-                    r += sep + '\\n';
-                  }
-                });
-                return r;
-              }
             })();
             // On-demand translation: paragraphs, headings, list items, and table rows
             (function() {

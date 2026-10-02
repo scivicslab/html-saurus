@@ -345,7 +345,9 @@ class PageRenderer {
             String mdSourcePath = config.docusaurus().siteName() + "/docs/" + rawRelPath;
             sb.append("<div class=\"copy-bar\">");
             sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
-            sb.append("<button class=\"copy-btn\" id=\"copy-md-btn\" title=\"Copy as Markdown\">&#x1F4DD; Markdown</button>");
+            sb.append("<button class=\"copy-btn\" id=\"view-md-om-btn\" title=\"Show the Markdown source, formulas as om blocks, in a new tab\">&#x1F4DD; Markdown (OpenMath)</button>");
+            sb.append("<button class=\"copy-btn\" id=\"view-md-latex-btn\" title=\"Show the Markdown source, formulas as LaTeX, in a new tab\">&#x1F4DD; Markdown (LaTeX)</button>");
+            sb.append("<button class=\"copy-btn\" id=\"view-html-btn\" title=\"Show the converted HTML in a new tab\">&#x1F4C4; HTML</button>");
             sb.append("<button class=\"copy-btn\" id=\"copy-path-btn\" data-path=\"").append(escapeHtml(mdSourcePath))
               .append("\" title=\"").append(escapeHtml(mdSourcePath)).append("\">&#x1F4C2; Path</button>");
             // Between Path and Translate: the id is the name every other document refers to this

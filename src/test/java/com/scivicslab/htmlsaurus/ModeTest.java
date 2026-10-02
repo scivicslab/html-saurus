@@ -201,6 +201,36 @@ class ModeTest {
     class PortalMode {
 
         @Test
+        @DisplayName("/api/source (dev) returns the Markdown source, the LaTeX form and the converted HTML")
+        void devSourceEndpoint_returnsEachFormat() throws Exception {
+            Path proj = createProject("proj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, false, null, 0);
+            HttpServer http = ps.start();
+            try {
+                String base = "http://localhost:" + http.getAddress().getPort()
+                        + "/api/source?path=proj/docs/intro.md";
+                String md = httpGet(base + "&format=md-om");
+                assertTrue(md.startsWith("---"),
+                        "md-om must be the file on disk, frontmatter included; the rendered page has no frontmatter");
+                assertTrue(md.contains("# Introduction"),
+                        "md-om must keep the heading as Markdown, not as the text the heading renders to");
+                assertTrue(httpGet(base + "&format=md-latex").contains("Hello world."),
+                        "md-latex must return the same document with its formulas written as LaTeX");
+                String html = httpGet(base + "&format=html");
+                assertTrue(html.contains("<p>"), "html must be the converted body");
+                assertFalse(html.startsWith("---"), "html must not carry the frontmatter");
+                assertEquals("unknown format: bogus", httpGet(base + "&format=bogus"),
+                        "An unknown format must be refused rather than guessed");
+                assertEquals("not found", httpGet("http://localhost:" + http.getAddress().getPort()
+                        + "/api/source?path=proj/docs/../../outside.md&format=md-om"),
+                        "A path that leaves the works directory must be refused");
+            } finally {
+                http.stop(0);
+            }
+        }
+
+        @Test
         @DisplayName("startup builds only projects missing static-html or search-index")
         void startup_buildsOnlyMissingOutputs() throws IOException {
             Path proj1 = createProject("proj1");
@@ -504,6 +534,22 @@ class ModeTest {
     @Tag("S_prod")
     @DisplayName("Production mode security — closed API surface")
     class ProductionSecurity {
+
+        @Test
+        @DisplayName("PortalServer (production): /api/source is closed")
+        void portalProduction_closesSourceEndpoint() throws Exception {
+            Path proj = createProject("proj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), true);
+            PortalServer ps = new PortalServer(tempDir, List.of(proj), 0, true, null, 0);
+            HttpServer http = ps.start();
+            try {
+                int code = status(HttpClient.newHttpClient(), "http://localhost:"
+                        + http.getAddress().getPort() + "/api/source?path=proj/docs/intro.md&format=md-om", false);
+                assertNotEquals(200, code, "/api/source must be closed in production");
+            } finally {
+                http.stop(0);
+            }
+        }
 
         private int status(HttpClient client, String url, boolean post) throws Exception {
             var builder = HttpRequest.newBuilder(URI.create(url));
