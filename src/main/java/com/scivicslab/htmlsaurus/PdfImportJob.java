@@ -108,7 +108,9 @@ class PdfImportJob {
         // no subdirectory.
         Path batchDocDir = destDir.resolve(batchStem);
         Files.createDirectories(batchDocDir);
-        Files.writeString(batchDocDir.resolve(filename), markdown, StandardCharsets.UTF_8);
+        // OCR returns formulas as LaTeX; the document stores them as om blocks (FormulaSource).
+        Path batchFile = batchDocDir.resolve(filename);
+        Files.writeString(batchFile, FormulaSource.toOmBlocks(markdown, batchFile), StandardCharsets.UTF_8);
         for (var e : images.entrySet()) {
             Files.write(batchDocDir.resolve(e.getKey()), e.getValue());
         }

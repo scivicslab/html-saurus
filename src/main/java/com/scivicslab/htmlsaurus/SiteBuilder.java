@@ -427,7 +427,7 @@ public class SiteBuilder {
      * @throws IOException if file I/O fails
      */
     private void convertPage(Path mdFile, Path rel, SiteNode root, List<SiteNode> pageOrder) throws IOException {
-        String source = Files.readString(mdFile);
+        String source = FormulaSource.readAsLatex(mdFile);
         String[] fm = converter.parseFrontmatter(source);
         String title = fm[0].isBlank()
             ? stripNumericPrefix(stripExtension(mdFile.getFileName().toString())) : fm[0];
@@ -544,7 +544,7 @@ public class SiteBuilder {
      * The page is also generated at its normal location by {@link #convertPage}.
      */
     private void convertPageAsRoot(Path mdFile, Path rel, SiteNode root, List<SiteNode> pageOrder) throws IOException {
-        String source = Files.readString(mdFile);
+        String source = FormulaSource.readAsLatex(mdFile);
         String[] fm = converter.parseFrontmatter(source);
         String title = fm[0].isBlank()
             ? stripNumericPrefix(stripExtension(mdFile.getFileName().toString())) : fm[0];

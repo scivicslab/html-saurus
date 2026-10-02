@@ -163,7 +163,9 @@ public class SearchIndexer {
      * strips Markdown formatting from the body, and adds the document to the index.
      */
     private void indexFile(IndexWriter writer, Path mdFile) throws IOException {
-        String source = Files.readString(mdFile);
+        // The formula source is indexed as the LaTeX the page shows, so that a search for what the reader
+        // sees finds the page (FormulaSource).
+        String source = FormulaSource.readAsLatex(mdFile);
 
         // Extract title, id, and metadata from frontmatter
         String title = "";
