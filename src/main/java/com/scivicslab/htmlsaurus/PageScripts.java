@@ -191,24 +191,7 @@ class PageScripts {
                 btn.innerHTML = '&#x2713; Copied';
                 setTimeout(function() { btn.classList.remove('copied'); btn.innerHTML = orig; }, 1500);
               }
-              function getContent() {
-                var main = document.querySelector('main');
-                var clone = main.cloneNode(true);
-                // Remove h1 and copy-bar from clone
-                var h1 = clone.querySelector('h1');
-                if (h1) h1.remove();
-                var bar = clone.querySelector('.copy-bar');
-                if (bar) bar.remove();
-                return clone;
-              }
-              // Plain text copy
-              document.getElementById('copy-text-btn').addEventListener('click', function() {
-                var btn = this;
-                var clone = getContent();
-                var text = clone.innerText || clone.textContent;
-                navigator.clipboard.writeText(text.trim()).then(function() { flash(btn); });
-              });
-              // The three full-text formats open a new tab showing the markup as text. The server
+              // The four full-text formats each open a new tab showing what the server returns. The server
               // reads the source file for them, so the frontmatter and every inline construct are
               // present; rebuilding Markdown from the rendered DOM could not recover them.
               function openSource(btnId, format) {
@@ -221,6 +204,7 @@ class PageScripts {
                   window.open('/api/source?path=' + encodeURIComponent(src) + '&format=' + format, '_blank');
                 });
               }
+              openSource('view-text-btn', 'text');
               openSource('view-md-om-btn', 'md-om');
               openSource('view-md-latex-btn', 'md-latex');
               openSource('view-html-btn', 'html');

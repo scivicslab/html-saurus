@@ -798,12 +798,13 @@ public class PortalServer {
     }
 
     /**
-     * Handles {@code GET /api/source?path=<siteName>/docs/<relativePath>&format=<md-om|md-latex|html>}
+     * Handles {@code GET /api/source?path=<siteName>/docs/<relativePath>&format=<md-om|md-latex|html|text>}
      * and returns one representation of that document as {@code text/plain}, so the browser shows the
      * markup instead of drawing it. {@code md-om} is the file on disk, whose formulas are om blocks.
      * {@code md-latex} is the same text with the formulas written as LaTeX, which is the form a reader
-     * sees. {@code html} is that LaTeX form converted, without the surrounding page. Development mode
-     * only, and limited to {@code .md} files under the works directory.
+     * sees. {@code html} is that LaTeX form converted, without the surrounding page, and {@code text} is
+     * that HTML with the tags removed. Development mode only, and limited to {@code .md} files under
+     * the works directory.
      */
     private void handleSource(HttpExchange ex) throws IOException {
         String rel = queryParam(ex, "path");
@@ -825,9 +826,11 @@ public class PortalServer {
         switch (format) {
             case "md-om" -> body = Files.readString(file, StandardCharsets.UTF_8);
             case "md-latex" -> body = FormulaSource.readAsLatex(file);
-            case "html" -> {
+            case "html", "text" -> {
                 MarkdownConverter converter = new MarkdownConverter();
-                body = converter.convertMarkdown(converter.parseFrontmatter(FormulaSource.readAsLatex(file))[1]);
+                String html = converter.convertMarkdown(
+                        converter.parseFrontmatter(FormulaSource.readAsLatex(file))[1]);
+                body = format.equals("text") ? htmlToPlainText(html) : html;
             }
             default -> {
                 respond(ex, 400, "text/plain; charset=UTF-8", "unknown format: " + format);
@@ -835,6 +838,28 @@ public class PortalServer {
             }
         }
         respond(ex, 200, "text/plain; charset=UTF-8", body);
+    }
+
+    /**
+     * The visible text of converted HTML, for pasting where Markdown is not read, an email being the
+     * case this exists for. The end of a block becomes a newline and table cells are separated by a tab,
+     * so a table keeps its reading order; the rest is removing the tags and then unescaping the entities
+     * the converter writes. {@code &amp;amp;} is unescaped last, so that an escaped entity in the source
+     * does not turn into the character it names.
+     */
+    private static String htmlToPlainText(String html) {
+        String text = html
+            .replaceAll("(?is)<br\\s*/?>", "\n")
+            .replaceAll("(?is)</(p|h[1-6]|li|pre|blockquote|div|tr)>", "\n")
+            .replaceAll("(?is)</(td|th)>", "\t")
+            .replaceAll("(?is)<[^>]+>", "");
+        text = text.replace("&nbsp;", " ")
+                   .replace("&lt;", "<")
+                   .replace("&gt;", ">")
+                   .replace("&quot;", "\"")
+                   .replace("&#39;", "'")
+                   .replace("&amp;", "&");
+        return text.replaceAll("\t+\n", "\n").replaceAll("\n{3,}", "\n\n").strip() + "\n";
     }
 
     /**

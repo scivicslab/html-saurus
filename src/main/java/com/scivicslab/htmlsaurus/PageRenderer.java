@@ -344,7 +344,7 @@ class PageRenderer {
         if (!production) {
             String mdSourcePath = config.docusaurus().siteName() + "/docs/" + rawRelPath;
             sb.append("<div class=\"copy-bar\">");
-            sb.append("<button class=\"copy-btn\" id=\"copy-text-btn\" title=\"Copy as plain text\">&#x1F4CB; Text</button>");
+            sb.append("<button class=\"copy-btn\" id=\"view-text-btn\" title=\"Show the text, tags removed, in a new tab\">&#x1F4CB; Text</button>");
             sb.append("<button class=\"copy-btn\" id=\"view-md-om-btn\" title=\"Show the Markdown source, formulas as om blocks, in a new tab\">&#x1F4DD; Markdown (OpenMath)</button>");
             sb.append("<button class=\"copy-btn\" id=\"view-md-latex-btn\" title=\"Show the Markdown source, formulas as LaTeX, in a new tab\">&#x1F4DD; Markdown (LaTeX)</button>");
             sb.append("<button class=\"copy-btn\" id=\"view-html-btn\" title=\"Show the converted HTML in a new tab\">&#x1F4C4; HTML</button>");

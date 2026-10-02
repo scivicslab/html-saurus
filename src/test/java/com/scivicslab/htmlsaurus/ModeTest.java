@@ -201,7 +201,7 @@ class ModeTest {
     class PortalMode {
 
         @Test
-        @DisplayName("/api/source (dev) returns the Markdown source, the LaTeX form and the converted HTML")
+        @DisplayName("/api/source (dev) returns the Markdown source, the LaTeX form, the converted HTML and the text")
         void devSourceEndpoint_returnsEachFormat() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
@@ -220,6 +220,10 @@ class ModeTest {
                 String html = httpGet(base + "&format=html");
                 assertTrue(html.contains("<p>"), "html must be the converted body");
                 assertFalse(html.startsWith("---"), "html must not carry the frontmatter");
+                String text = httpGet(base + "&format=text");
+                assertTrue(text.contains("Hello world."), "text must carry the document's words");
+                assertFalse(text.contains("<p>"), "text must not carry tags");
+                assertFalse(text.startsWith("---"), "text must not carry the frontmatter");
                 assertEquals("unknown format: bogus", httpGet(base + "&format=bogus"),
                         "An unknown format must be refused rather than guessed");
                 assertEquals("not found", httpGet("http://localhost:" + http.getAddress().getPort()
