@@ -2,7 +2,7 @@ package com.scivicslab.htmlsaurus;
 
 import com.scivicslab.openmathlisp.markdown.DocumentIdentifier;
 import com.scivicslab.openmathlisp.markdown.MarkdownDocument;
-import com.scivicslab.openmathlisp.project.Projector;
+import com.scivicslab.openmathlisp.write.TermWriter;
 import com.scivicslab.openmathlisp.symbols.SymbolTable;
 import com.scivicslab.openmathlisp.term.TermFactory;
 
@@ -37,7 +37,7 @@ final class FormulaSource {
 
     private static SymbolTable symbols;
     private static TermFactory factory;
-    private static Projector projector;
+    private static TermWriter writer;
 
     private FormulaSource() {
     }
@@ -47,7 +47,7 @@ final class FormulaSource {
         if (symbols == null) {
             symbols = SymbolTable.loadBundled();
             factory = new TermFactory(symbols);
-            projector = new Projector(symbols);
+            writer = new TermWriter(symbols);
         }
     }
 
@@ -78,7 +78,7 @@ final class FormulaSource {
         }
         try {
             load();
-            return MarkdownDocument.parse(markdown, factory).render(projector);
+            return MarkdownDocument.parse(markdown, factory).render(writer);
         } catch (RuntimeException e) {
             LOG.log(Level.WARNING, "Formula source in " + source + " could not be written as LaTeX: "
                     + e.getMessage() + "; leaving the page as it is.", e);
