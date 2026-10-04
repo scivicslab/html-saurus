@@ -6,7 +6,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Function;
 
 import com.scivicslab.gpubroker.client.GpuBrokerClient;
 import com.scivicslab.gpubroker.client.GpuBrokerClientException;
@@ -38,11 +37,19 @@ class GpuBrokerOcrClient implements OcrClient {
         MultipartRequest build(byte[] onePagePdfBytes) throws IOException;
     }
 
+    /** Turns the backend's raw reply body into a {@link Result}. May reject the body with an
+     *  {@link IOException} when the backend reports a failure inside an HTTP 200 reply, the way
+     *  Marker does with {@code {"success":false,"error":...}}. */
+    @FunctionalInterface
+    interface ResultParser {
+        Result parse(String responseBody) throws IOException;
+    }
+
     private final GpuBrokerClient client;
     private final String queueName;
     private final String backendId;
     private final RequestBuilder buildRequest;
-    private final Function<String, Result> parseResult;
+    private final ResultParser parseResult;
 
     /**
      * @param client       shared across every backend -- one {@code GpuBrokerClient} per {@code PortalServer}
@@ -54,7 +61,7 @@ class GpuBrokerOcrClient implements OcrClient {
      *                     or {@link MarkerOcrClient#parseResult}, the same parsing the direct client uses
      */
     GpuBrokerOcrClient(GpuBrokerClient client, String queueName, String backendId,
-                        RequestBuilder buildRequest, Function<String, Result> parseResult) {
+                        RequestBuilder buildRequest, ResultParser parseResult) {
         this.client = client;
         this.queueName = queueName;
         this.backendId = backendId;
@@ -70,7 +77,7 @@ class GpuBrokerOcrClient implements OcrClient {
     @Override
     public Result ocrPage(byte[] onePagePdfBytes) throws IOException {
         MultipartRequest req = buildRequest.build(onePagePdfBytes);
-        return parseResult.apply(submitRaw(client, queueName, backendId, req));
+        return parseResult.parse(submitRaw(client, queueName, backendId, req));
     }
 
     /** Submits one already-built request through gpu-broker and returns the backend's raw

@@ -149,7 +149,7 @@ class MergedOcrClientTest {
     /** The exact response shape Marker's /marker/upload returns for output_format=json: output is
      *  a JSON *string* holding a Document whose Page children carry block_type/bbox/html. */
     @Test
-    void parseMarkerMathBlocks_readsEquationBlocksFromTheDocumentTree() {
+    void parseMarkerMathBlocks_readsEquationBlocksFromTheDocumentTree() throws Exception {
         String inner = """
                 {"block_type": "Document", "children": [
                   {"block_type": "Page", "bbox": [0.0, 0.0, 409.0, 593.0], "children": [
@@ -171,15 +171,16 @@ class MergedOcrClientTest {
     }
 
     @Test
-    void parseMarkerMathBlocks_withoutOutput_returnsEmpty() {
-        assertEquals(List.of(), MergedOcrClient.parseMarkerMathBlocks("{\"success\": false}"));
+    void parseMarkerMathBlocks_successFalse_throws() {
+        assertThrows(java.io.IOException.class,
+                () -> MergedOcrClient.parseMarkerMathBlocks("{\"success\": false}"));
     }
 
     /** With force_ocr, a formula inside a sentence arrives as an inline math element in a Text
      *  block — that block is taken from Marker too, converted with $...$ in place. A Text block
      *  without math is not collected. */
     @Test
-    void parseMarkerMathBlocks_collectsTextBlocksWithInlineMath() {
+    void parseMarkerMathBlocks_collectsTextBlocksWithInlineMath() throws Exception {
         String inner = """
                 {"block_type": "Document", "children": [
                   {"block_type": "Page", "bbox": [0.0, 0.0, 409.0, 593.0], "children": [
@@ -216,7 +217,7 @@ class MergedOcrClientTest {
      *  item's own children are NOT descended into — its html already carries the nested item's
      *  text (the real page-51 shape), and collecting the child too would duplicate it. */
     @Test
-    void parseMarkerMathBlocks_descendsIntoListGroups_butNotIntoCollectedItems() {
+    void parseMarkerMathBlocks_descendsIntoListGroups_butNotIntoCollectedItems() throws Exception {
         String inner = """
                 {"block_type": "Document", "children": [
                   {"block_type": "Page", "bbox": [0.0, 0.0, 409.0, 593.0], "children": [

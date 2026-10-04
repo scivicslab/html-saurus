@@ -66,7 +66,7 @@ class MarkerOcrClientTest {
     }
 
     @Test
-    void parseResult_combinesOutputAndImages_fromARawJsonBody() {
+    void parseResult_combinesOutputAndImages_fromARawJsonBody() throws Exception {
         byte[] raw = {0x01, 0x02};
         String body = "{\"output\":\"First.\\n\\nSecond.\",\"images\":{\"a.jpeg\":\""
                 + Base64.getEncoder().encodeToString(raw) + "\"}}";
@@ -78,9 +78,24 @@ class MarkerOcrClientTest {
     }
 
     @Test
-    void parseResult_missingOutputField_isEmptyParagraphs() {
+    void parseResult_missingOutputField_isEmptyParagraphs() throws Exception {
         OcrClient.Result result = MarkerOcrClient.parseResult("{\"success\":true}");
         assertEquals(List.of(), result.paragraphs());
         assertTrue(result.images().isEmpty());
+    }
+
+    /** Marker answers HTTP 200 with {@code success:false} when the conversion failed (seen live as
+     *  a CUDA out-of-memory on one of two endpoints behind gpu-broker). Such a body must not read as
+     *  an empty page: the import would store a blank page and drop its figure. */
+    @Test
+    void parseResult_successFalse_throwsWithMarkersErrorText() {
+        String body = "{\"success\":false,\"error\":\"CUDA out of memory. Tried to allocate 88.00 MiB.\"}";
+        java.io.IOException e = assertThrows(java.io.IOException.class, () -> MarkerOcrClient.parseResult(body));
+        assertTrue(e.getMessage().contains("CUDA out of memory"), e.getMessage());
+    }
+
+    @Test
+    void parseResult_successFalseWithoutErrorField_stillThrows() {
+        assertThrows(java.io.IOException.class, () -> MarkerOcrClient.parseResult("{\"success\":false}"));
     }
 }

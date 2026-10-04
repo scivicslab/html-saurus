@@ -86,8 +86,24 @@ class MarkerOcrClient implements OcrClient {
 
     /** Parses a Marker {@code /marker/upload} response body, shared with {@link GpuBrokerOcrClient}
      *  (whose job result carries the same body Marker itself returned). */
-    static Result parseResult(String responseBody) {
+    /**
+     * Parses one Marker reply body and rejects a failure reply. Marker answers HTTP 200 even when
+     * the conversion failed; the failure is only visible as {@code {"success":false,"error":"..."}}
+     * with no {@code output}. Treating such a body as a page with no text would store a blank page
+     * and lose the figure on it, so the error text is raised instead.
+     */
+    static Map<String, Object> parseReply(String responseBody) throws IOException {
         Map<String, Object> root = McpJsonParser.parseObject(responseBody);
+        if (Boolean.FALSE.equals(root.get("success"))) {
+            Object error = root.get("error");
+            throw new IOException("Marker reported failure: "
+                    + (error == null ? "(no error message)" : error.toString()));
+        }
+        return root;
+    }
+
+    static Result parseResult(String responseBody) throws IOException {
+        Map<String, Object> root = parseReply(responseBody);
         String markdown = root.get("output") == null ? "" : root.get("output").toString();
         return new Result(splitParagraphs(markdown), parseImages(root));
     }

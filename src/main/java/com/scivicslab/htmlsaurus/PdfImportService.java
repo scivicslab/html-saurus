@@ -36,7 +36,14 @@ final class PdfImportService {
      */
     static PageResult ocrOnePage(byte[] pdfBytes, OcrClient ocr, int page) throws IOException, InterruptedException {
         byte[] onePage = PdfPageSplitter.singlePage(pdfBytes, page);
-        OcrClient.Result result = ocr.ocrPage(onePage);
+        OcrClient.Result result;
+        try {
+            result = ocr.ocrPage(onePage);
+        } catch (IOException e) {
+            // The job's error string is all the browser shows; name the page so the operator
+            // knows which one to re-import.
+            throw new IOException("page " + (page + 1) + ": " + e.getMessage(), e);
+        }
         String markdown = String.join("\n\n", result.paragraphs());
         if (result.images().isEmpty()) {
             return new PageResult(markdown, Map.of());

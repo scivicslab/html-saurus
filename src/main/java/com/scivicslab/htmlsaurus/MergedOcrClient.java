@@ -200,8 +200,8 @@ class MergedOcrClient implements OcrClient {
      * {@code Document} whose {@code Page} children carry {@code block_type}, {@code bbox}
      * (PDF points) and {@code html}; only single pages are ever sent.
      */
-    static List<MarkerBlock> parseMarkerMathBlocks(String responseBody) {
-        Map<String, Object> root = McpJsonParser.parseObject(responseBody);
+    static List<MarkerBlock> parseMarkerMathBlocks(String responseBody) throws IOException {
+        Map<String, Object> root = MarkerOcrClient.parseReply(responseBody);
         Object output = root.get("output");
         if (output == null) return List.of();
         Object tree = output instanceof String s ? McpJsonParser.parse(s) : output;
