@@ -34,7 +34,9 @@ class MarkerOcrClient implements OcrClient {
     private static final Logger logger = Logger.getLogger(MarkerOcrClient.class.getName());
 
     /** Default Marker server (W206 GPU host). Node/port may move — see config. */
-    public static final String DEFAULT_BASE_URL = "http://192.168.5.13:8001";
+    /** Direct-mode fallback only (no {@code GPU_BROKER_URL}): one of the two DGX Spark nodes that
+     *  host Marker since 2026-10-05; the 4080 hosts 5.13/5.14 no longer run it. */
+    public static final String DEFAULT_BASE_URL = "http://192.168.5.16:8001";
 
     private final String baseUrl;
     private final HttpClient httpClient;
