@@ -100,7 +100,22 @@ class PageRenderer {
                       String nextHref, String nextLabel,
                       String lastUpdated, String docId) {
         return renderPage(title, content, root, prefix, currentPath, topSection, rawRelPath,
-                          prevHref, prevLabel, nextHref, nextLabel, lastUpdated, docId, null);
+                          prevHref, prevLabel, nextHref, nextLabel, lastUpdated, docId, false);
+    }
+
+    /**
+     * @param hasLisp whether a rule file ({@code <name>.lisp}, the rst-on-xml source the Markdown
+     *                was generated from) sits beside the Markdown file; when it does, the copy
+     *                bar's format list offers it
+     */
+    String renderPage(String title, String content, SiteNode root,
+                      String prefix, String currentPath, String topSection,
+                      String rawRelPath,
+                      String prevHref, String prevLabel,
+                      String nextHref, String nextLabel,
+                      String lastUpdated, String docId, boolean hasLisp) {
+        return renderPage(title, content, root, prefix, currentPath, topSection, rawRelPath,
+                          prevHref, prevLabel, nextHref, nextLabel, lastUpdated, docId, hasLisp, null);
     }
 
     /**
@@ -111,7 +126,7 @@ class PageRenderer {
     String renderSearchPage(String title, String content, SiteNode root,
                             String prefix, String currentPath) {
         return renderPage(title, content, root, prefix, currentPath, null, "",
-                          null, null, null, null, "", "", searchHelpHtml());
+                          null, null, null, null, "", "", false, searchHelpHtml());
     }
 
     /**
@@ -123,7 +138,7 @@ class PageRenderer {
                       String rawRelPath,
                       String prevHref, String prevLabel,
                       String nextHref, String nextLabel,
-                      String lastUpdated, String docId, String sidebarOverride) {
+                      String lastUpdated, String docId, boolean hasLisp, String sidebarOverride) {
         StringBuilder sb = new StringBuilder();
         sb.append("""
             <!DOCTYPE html>
@@ -344,20 +359,24 @@ class PageRenderer {
         if (!production) {
             String mdSourcePath = config.docusaurus().siteName() + "/docs/" + rawRelPath;
             sb.append("<div class=\"copy-bar\">");
-            sb.append("<button class=\"copy-btn\" id=\"view-text-btn\" title=\"Show the text, tags removed, in a new tab\">&#x1F4CB; Text</button>");
-            sb.append("<button class=\"copy-btn\" id=\"view-md-om-btn\" title=\"Show the Markdown source, formulas as om blocks, in a new tab\">&#x1F4DD; Markdown (OpenMath)</button>");
-            sb.append("<button class=\"copy-btn\" id=\"view-md-latex-btn\" title=\"Show the Markdown source, formulas as LaTeX, in a new tab\">&#x1F4DD; Markdown (LaTeX)</button>");
-            sb.append("<button class=\"copy-btn\" id=\"view-html-btn\" title=\"Show the converted HTML in a new tab\">&#x1F4C4; HTML</button>");
-            sb.append("<button class=\"copy-btn\" id=\"copy-path-btn\" data-path=\"").append(escapeHtml(mdSourcePath))
-              .append("\" title=\"").append(escapeHtml(mdSourcePath)).append("\">&#x1F4C2; Path</button>");
-            // Between Path and Translate: the id is the name every other document refers to this
-            // one by, so it is wanted in the same moment as the path. Left out when the document
-            // has no frontmatter id, rather than offering a button that copies nothing.
-            if (docId != null && !docId.isEmpty()) {
-                sb.append("<button class=\"copy-btn\" id=\"copy-id-btn\" data-doc-id=\"")
-                  .append(escapeHtml(docId)).append("\" title=\"").append(escapeHtml(docId))
-                  .append("\">&#x1F194; doc ID</button>");
-            }
+            // One list for everything that shows or copies a representation of this document: the
+            // full-text formats open a tab on /api/source, the two copy entries write the clipboard.
+            // Translate stays a button because it changes this page rather than hands it over.
+            sb.append("<select class=\"copy-select\" id=\"view-format\" data-path=\"").append(escapeHtml(mdSourcePath))
+              .append("\" data-doc-id=\"").append(escapeHtml(docId == null ? "" : docId))
+              .append("\" title=\"").append(escapeHtml(mdSourcePath)).append("\">");
+            sb.append("<option value=\"\">&#x1F4C4; Source / Copy\u2026</option>");
+            sb.append("<option value=\"text\">&#x1F4CB; Text</option>");
+            sb.append("<option value=\"md-om\">&#x1F4DD; Markdown (OpenMath)</option>");
+            sb.append("<option value=\"md-latex\">&#x1F4DD; Markdown (LaTeX)</option>");
+            sb.append("<option value=\"html\">&#x1F4C4; HTML</option>");
+            // The rule file is the source this Markdown was generated from; offered only when it exists.
+            if (hasLisp) sb.append("<option value=\"lisp\">&#x3BB; Lisp</option>");
+            sb.append("<option value=\"copy-path\">&#x1F4C2; Copy path</option>");
+            // The id is the name every other document refers to this one by. Left out when the
+            // document has no frontmatter id, rather than offering an entry that copies nothing.
+            if (docId != null && !docId.isEmpty()) sb.append("<option value=\"copy-id\">&#x1F194; Copy doc ID</option>");
+            sb.append("</select>");
             sb.append("<button class=\"copy-btn\" id=\"translate-btn\" ")
               .append("title=\"Translate paragraphs, headings, lists, and tables on demand\">")
               .append("&#x1F310; Translate</button>");

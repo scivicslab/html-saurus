@@ -798,13 +798,14 @@ public class PortalServer {
     }
 
     /**
-     * Handles {@code GET /api/source?path=<siteName>/docs/<relativePath>&format=<md-om|md-latex|html|text>}
+     * Handles {@code GET /api/source?path=<siteName>/docs/<relativePath>&format=<md-om|md-latex|html|text|lisp>}
      * and returns one representation of that document as {@code text/plain}, so the browser shows the
      * markup instead of drawing it. {@code md-om} is the file on disk, whose formulas are om blocks.
      * {@code md-latex} is the same text with the formulas written as LaTeX, which is the form a reader
      * sees. {@code html} is that LaTeX form converted, without the surrounding page, and {@code text} is
-     * that HTML with the tags removed. Development mode only, and limited to {@code .md} files under
-     * the works directory.
+     * that HTML with the tags removed. {@code lisp} is the rule file {@code <name>.lisp} beside the
+     * Markdown file, the rst-on-xml source the Markdown was generated from; 404 when there is none.
+     * Development mode only, and limited to {@code .md} files under the works directory.
      */
     private void handleSource(HttpExchange ex) throws IOException {
         String rel = queryParam(ex, "path");
@@ -825,6 +826,14 @@ public class PortalServer {
         String body;
         switch (format) {
             case "md-om" -> body = Files.readString(file, StandardCharsets.UTF_8);
+            case "lisp" -> {
+                Path lisp = file.resolveSibling(file.getFileName().toString().replaceFirst("\\.md$", ".lisp"));
+                if (!Files.isRegularFile(lisp)) {
+                    respond(ex, 404, "text/plain; charset=UTF-8", "not found");
+                    return;
+                }
+                body = Files.readString(lisp, StandardCharsets.UTF_8);
+            }
             case "md-latex" -> body = FormulaSource.readAsLatex(file);
             case "html", "text" -> {
                 MarkdownConverter converter = new MarkdownConverter();

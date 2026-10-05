@@ -533,7 +533,7 @@ public class SiteBuilder {
         }
 
         String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath,
-                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated, fm[2]);
+                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated, fm[2], hasRuleFile(mdFile));
         Files.writeString(outFile, html);
         System.out.println("  " + outFile);
     }
@@ -604,7 +604,7 @@ public class SiteBuilder {
 
         String lastUpdated = gitLastModified(mdFile);
         String html = renderPage(title, contentHtml, root, prefix, currentPath, topSection, rawRelPath,
-                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated, fm[2]);
+                                  prevHref, prevLabel, nextHref, nextLabel, lastUpdated, fm[2], hasRuleFile(mdFile));
         Path outFile = outDir.resolve("index.html");
         Files.writeString(outFile, html);
         System.out.println("  " + outFile + " (root)");
@@ -639,16 +639,34 @@ public class SiteBuilder {
                           prevHref, prevLabel, nextHref, nextLabel, lastUpdated, "");
     }
 
-    /** @param docId the document's frontmatter id, offered as its own button in the copy bar */
+    /** @param docId the document's frontmatter id, offered in the copy bar's list */
     String renderPage(String title, String content, SiteNode root,
                       String prefix, String currentPath, String topSection,
                       String rawRelPath,
                       String prevHref, String prevLabel,
                       String nextHref, String nextLabel,
                       String lastUpdated, String docId) {
+        return renderPage(title, content, root, prefix, currentPath, topSection, rawRelPath,
+                          prevHref, prevLabel, nextHref, nextLabel, lastUpdated, docId, false);
+    }
+
+    /** @param hasLisp whether the rule file {@code <name>.lisp} sits beside the Markdown file */
+    String renderPage(String title, String content, SiteNode root,
+                      String prefix, String currentPath, String topSection,
+                      String rawRelPath,
+                      String prevHref, String prevLabel,
+                      String nextHref, String nextLabel,
+                      String lastUpdated, String docId, boolean hasLisp) {
         return pageRenderer.renderPage(title, content, root, prefix, currentPath, topSection,
                                         rawRelPath, prevHref, prevLabel, nextHref, nextLabel,
-                                        lastUpdated, docId);
+                                        lastUpdated, docId, hasLisp);
+    }
+
+    /** The rst-on-xml rule file a Markdown file was generated from: the same name with {@code .lisp}. */
+    static boolean hasRuleFile(Path mdFile) {
+        String name = mdFile.getFileName().toString();
+        return name.endsWith(".md")
+            && Files.isRegularFile(mdFile.resolveSibling(name.substring(0, name.length() - 3) + ".lisp"));
     }
 
     /**

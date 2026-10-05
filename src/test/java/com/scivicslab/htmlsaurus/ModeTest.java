@@ -229,19 +229,33 @@ class ModeTest {
         }
 
         @Test
-        @DisplayName("every copy bar button id is named by the page script")
-        void copyBar_buttonIdsAreNamedByTheScript() throws Exception {
+        @DisplayName("every copy bar control id is named by the page script")
+        void copyBar_controlIdsAreNamedByTheScript() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
             String html = Files.readString(proj.resolve("static-html/intro.html"));
-            Matcher m = Pattern.compile("<button class=\"copy-btn\" id=\"([a-z0-9-]+)\"").matcher(html);
+            Matcher m = Pattern.compile("<(?:button|select) class=\"copy-(?:btn|select)\" id=\"([a-z0-9-]+)\"").matcher(html);
             List<String> ids = new ArrayList<>();
             while (m.find()) ids.add(m.group(1));
-            assertFalse(ids.isEmpty(), "A dev-mode page must render the copy bar");
+            assertTrue(ids.contains("view-format"), "A dev-mode page must render the format list, got: " + ids);
+            assertTrue(ids.contains("translate-btn"), "A dev-mode page must render the Translate button, got: " + ids);
             for (String id : ids) {
                 assertTrue(html.contains("'" + id + "'"),
-                        "The page script must name " + id + ": a button no script names does nothing when clicked");
+                        "The page script must name " + id + ": a control no script names does nothing when used");
             }
+        }
+
+        @Test
+        @DisplayName("the format list offers Lisp only when a rule file sits beside the Markdown file")
+        void copyBar_offersLispOnlyWhenTheRuleFileExists() throws Exception {
+            Path proj = createProject("proj");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
+            String without = Files.readString(proj.resolve("static-html/intro.html"));
+            assertFalse(without.contains("value=\"lisp\""), "No rule file beside intro.md: no Lisp entry");
+            Files.writeString(proj.resolve("docs/intro.lisp"), "(in-package :rst)\n");
+            Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
+            String with = Files.readString(proj.resolve("static-html/intro.html"));
+            assertTrue(with.contains("value=\"lisp\""), "intro.lisp beside intro.md: the list must offer Lisp");
         }
 
         @Test
@@ -268,6 +282,11 @@ class ModeTest {
                 assertTrue(text.contains("Hello world."), "text must carry the document's words");
                 assertFalse(text.contains("<p>"), "text must not carry tags");
                 assertFalse(text.startsWith("---"), "text must not carry the frontmatter");
+                assertEquals("not found", httpGet(base + "&format=lisp"),
+                        "lisp must be refused while no intro.lisp sits beside intro.md");
+                Files.writeString(proj.resolve("docs/intro.lisp"), "(in-package :rst)\n(defrule title -> \"Introduction\")\n");
+                assertTrue(httpGet(base + "&format=lisp").startsWith("(in-package :rst)"),
+                        "lisp must return the rule file beside the Markdown file");
                 assertEquals("unknown format: bogus", httpGet(base + "&format=bogus"),
                         "An unknown format must be refused rather than guessed");
                 assertEquals("not found", httpGet("http://localhost:" + http.getAddress().getPort()

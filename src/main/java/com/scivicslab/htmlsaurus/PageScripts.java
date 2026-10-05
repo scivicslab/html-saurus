@@ -191,36 +191,29 @@ class PageScripts {
                 btn.innerHTML = '&#x2713; Copied';
                 setTimeout(function() { btn.classList.remove('copied'); btn.innerHTML = orig; }, 1500);
               }
-              // The four full-text formats each open a new tab showing what the server returns. The server
-              // reads the source file for them, so the frontmatter and every inline construct are
-              // present; rebuilding Markdown from the rendered DOM could not recover them.
-              function openSource(btnId, format) {
-                var btn = document.getElementById(btnId);
-                if (!btn) return;
-                btn.addEventListener('click', function() {
-                  var pathBtn = document.getElementById('copy-path-btn');
-                  var src = pathBtn ? pathBtn.dataset.path : '';
+              // One list: the full-text formats each open a new tab showing what the server returns
+              // for /api/source (the server reads the source file, so the frontmatter and every inline
+              // construct are present; rebuilding Markdown from the rendered DOM could not recover
+              // them), and the two copy entries write the clipboard. The list springs back to its
+              // first entry after each choice, so the same entry can be chosen again.
+              var sel = document.getElementById('view-format');
+              if (sel) {
+                function flashSelect() {
+                  var first = sel.options[0], orig = first.text;
+                  sel.classList.add('copied'); first.text = '\u2713 Copied';
+                  setTimeout(function() { sel.classList.remove('copied'); first.text = orig; }, 1500);
+                }
+                sel.addEventListener('change', function() {
+                  var choice = sel.value;
+                  sel.value = '';
+                  if (!choice) return;
+                  if (choice === 'copy-path') { navigator.clipboard.writeText(sel.dataset.path).then(flashSelect); return; }
+                  if (choice === 'copy-id') { navigator.clipboard.writeText(sel.dataset.docId).then(flashSelect); return; }
+                  var src = sel.dataset.path;
                   if (!src) return;
-                  window.open('/api/source?path=' + encodeURIComponent(src) + '&format=' + format, '_blank');
+                  window.open('/api/source?path=' + encodeURIComponent(src) + '&format=' + choice, '_blank');
                 });
               }
-              openSource('view-text-btn', 'text');
-              openSource('view-md-om-btn', 'md-om');
-              openSource('view-md-latex-btn', 'md-latex');
-              openSource('view-html-btn', 'html');
-              // Doc id copy — absent on documents without a frontmatter id.
-              var idBtn = document.getElementById('copy-id-btn');
-              if (idBtn) {
-                idBtn.addEventListener('click', function() {
-                  var btn = this;
-                  navigator.clipboard.writeText(btn.dataset.docId).then(function() { flash(btn); });
-                });
-              }
-              // Path copy
-              document.getElementById('copy-path-btn').addEventListener('click', function() {
-                var btn = this;
-                navigator.clipboard.writeText(btn.dataset.path).then(function() { flash(btn); });
-              });
             })();
             // On-demand translation: paragraphs, headings, list items, and table rows
             (function() {
