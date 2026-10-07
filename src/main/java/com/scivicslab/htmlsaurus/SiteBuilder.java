@@ -134,7 +134,8 @@ public class SiteBuilder {
             if (Files.isDirectory(defaultDocs)) fallbackDocsDir = defaultDocs;
         }
         this.navBuilder = new NavTreeBuilder(docsDir, production, converter, currentLocale, defaultLocale, fallbackDocsDir);
-        this.pageRenderer = new PageRenderer(production, config, currentLocale, defaultLocale, this.allLocales);
+        this.pageRenderer = new PageRenderer(production, config, projectRoot.getFileName().toString(),
+                                             currentLocale, defaultLocale, this.allLocales);
         this.referenceLabels = ReferenceLabels.forProject(projectRoot);
     }
 

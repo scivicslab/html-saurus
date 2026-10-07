@@ -14,16 +14,17 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * E2E test verifying that one project is called the same thing in the three places that have to
- * agree: the directory it lives in, the {@code projectName} its Docusaurus configuration states,
- * and the name baked into every page the site builder wrote.
+ * E2E test verifying that one project is called the same thing in the two places that have to
+ * agree: the directory it lives in and the name baked into every page the site builder wrote.
  *
- * <p>Two projects were renamed on disk and their configuration was not. The name a page carries
- * comes from the configuration, so every rebuild put the old name back: the Path button offered
- * {@code doc_SCIVICS000/docs/...} for a file that is now under {@code doc_Base010/}, and the
- * Rebuild button on those pages asked the portal to build a project by a name the portal does not
- * have, which answers 404. Both survived any number of rebuilds because a build that writes the
- * wrong name still succeeds.
+ * <p>A page addresses the portal by the directory name, and the portal resolves a project by the
+ * directory it lives in, so the two agree whatever the navbar says. Twice they did not. Two
+ * projects were renamed on disk and their configuration was not, and later every project whose
+ * navbar title is a display name rather than its directory name ({@code nigsc_homepage2}, titled
+ * "NIG Supercomputer") posted that title: the Path button offered a path under a directory that
+ * does not exist and the Rebuild button asked for a project the portal does not have, which
+ * answers 404. Both survived any number of rebuilds because a build that writes the wrong name
+ * still succeeds.
  *
  * <p>This does not start a server: per the testing standard (see
  * {@code TestingStandard_260404_oo01}, doc_SCIVICS001), an E2E test connects to an environment
@@ -55,20 +56,8 @@ public class ProjectNameConsistencyE2E {
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
 
     /** What the portal's front page links to, which is the set of projects it knows about. */
-    private static final Pattern PORTAL_LINK = Pattern.compile("href=\"/(doc_[A-Za-z0-9_-]+)");
-    /**
-     * {@code navbar: { title: '...' }} in docusaurus.config.ts / .js — the value {@code ConfigReader}
-     * reads as the site name and {@code PageRenderer} puts in front of every source path. Not
-     * {@code projectName}, which Docusaurus uses for GitHub Pages and html-saurus never reads.
-     */
-    private static final Pattern NAVBAR_TITLE =
-            Pattern.compile("navbar:\\s*\\{[^}]*?title:\\s*['\"]([^'\"]+)['\"]", Pattern.DOTALL);
-    /** {@code "title": {"message": "..."}} in i18n/<locale>/docusaurus-theme-classic/navbar.json, which wins. */
-    private static final Pattern NAVBAR_JSON_TITLE =
-            Pattern.compile("\"title\":\\s*\\{\\s*\"message\":\\s*\"([^\"]+)\"");
-    /** {@code defaultLocale: 'ja'} — the locale the pages under static-html were built for. */
-    private static final Pattern DEFAULT_LOCALE =
-            Pattern.compile("defaultLocale:\\s*['\"]([^'\"]+)['\"]");
+    private static final Pattern PORTAL_LINK =
+            Pattern.compile("class=\"project-link\" href=\"/([A-Za-z0-9_.-]+)/\"");
     /** The Path button's value: the repository-relative path of the Markdown source. */
     private static final Pattern DATA_PATH = Pattern.compile("data-path=\"([^/\"]+)/");
     /** The argument the Rebuild button posts to /api/build-async. */
@@ -90,54 +79,12 @@ public class ProjectNameConsistencyE2E {
                         "no directory " + dir);
                 continue;
             }
-            checkConfigName(project, dir);
             checkBuiltPages(project, dir);
             checkRebuildIsAccepted(project, dir);
         }
 
         System.out.printf("%nResults: %d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
-    }
-
-    /**
-     * The site name is where a built page gets the name it carries, so it must be the directory's
-     * name. Read the way {@code ConfigReader} reads it: a translated navbar wins over the
-     * configuration.
-     */
-    private static void checkConfigName(String project, Path dir) throws IOException {
-        String stated = siteNameOf(dir);
-        if (stated == null) {
-            System.out.println("SKIP: " + project + ": no navbar title to read");
-            return;
-        }
-        check(project + ": the site name is its own directory name",
-                project.equals(stated),
-                "the navbar title is '" + stated + "'");
-    }
-
-    /**
-     * As {@code ConfigReader.readSiteNameFromConfig}: the navbar translated into the locale the
-     * pages were built for, then the configuration.
-     *
-     * <p>Only that one locale. A project whose default locale is {@code ja} may also carry an
-     * {@code i18n/en} navbar naming something else entirely -- five of them do, left over from the
-     * template they were copied from -- and reading it would report a fault in pages that are
-     * correct.
-     */
-    private static String siteNameOf(Path dir) throws IOException {
-        Path config = configOf(dir);
-        String configText = config == null ? "" : Files.readString(config, StandardCharsets.UTF_8);
-
-        Matcher locale = DEFAULT_LOCALE.matcher(configText);
-        if (locale.find()) {
-            Path navbar = dir.resolve("i18n/" + locale.group(1) + "/docusaurus-theme-classic/navbar.json");
-            if (Files.isRegularFile(navbar)) {
-                Matcher m = NAVBAR_JSON_TITLE.matcher(Files.readString(navbar, StandardCharsets.UTF_8));
-                if (m.find()) return m.group(1);
-            }
-        }
-        Matcher m = NAVBAR_TITLE.matcher(configText);
-        return m.find() ? m.group(1) : null;
     }
 
     /**
@@ -191,14 +138,6 @@ public class ProjectNameConsistencyE2E {
         check(project + ": the portal accepts the name its own pages post",
                 status == 202,
                 "POST /api/build-async/html/" + named + " answered " + status);
-    }
-
-    private static Path configOf(Path dir) {
-        for (String name : List.of("docusaurus.config.ts", "docusaurus.config.js")) {
-            Path p = dir.resolve(name);
-            if (Files.isRegularFile(p)) return p;
-        }
-        return null;
     }
 
     /** Any one page the site builder wrote, other than the front page. */

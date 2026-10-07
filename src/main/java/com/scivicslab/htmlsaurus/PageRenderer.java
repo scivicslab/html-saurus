@@ -36,11 +36,20 @@ class PageRenderer {
     private final String currentLocale;
     private final String defaultLocale;
     private final List<String> allLocales;
+    /**
+     * The name of the directory the project lives in, which is how the portal addresses it.
+     * Distinct from {@code config.docusaurus().siteName()}, the title shown on the navbar: a
+     * published site names itself for its readers ("NIG Supercomputer") while its repository is
+     * called something else ({@code nigsc_homepage2}). The page's own controls call the portal,
+     * so they carry this one.
+     */
+    private final String projectDirName;
 
-    PageRenderer(boolean production, ProjectConfig config,
+    PageRenderer(boolean production, ProjectConfig config, String projectDirName,
                  String currentLocale, String defaultLocale, List<String> allLocales) {
         this.production = production;
         this.config = config;
+        this.projectDirName = projectDirName;
         this.currentLocale = currentLocale;
         this.defaultLocale = defaultLocale;
         this.allLocales = allLocales != null ? allLocales : List.of();
@@ -357,7 +366,7 @@ class PageRenderer {
 
         sb.append("<main>\n<h1>").append(escapeHtml(title)).append("</h1>\n");
         if (!production) {
-            String mdSourcePath = config.docusaurus().siteName() + "/docs/" + rawRelPath;
+            String mdSourcePath = projectDirName + "/docs/" + rawRelPath;
             sb.append("<div class=\"copy-bar\">");
             // One list for everything that shows or copies a representation of this document: the
             // full-text formats open a tab on /api/source, the two copy entries write the clipboard.
@@ -427,8 +436,8 @@ class PageRenderer {
         return sb.toString()
             .replace("YADOC_SEARCH_URL", escapeJs(siteRootPrefix + "search"
                 + (isNonDefaultLocale ? "?locale=" + currentLocale : "")))
-            .replace("YADOC_BUILD_SITE", escapeJs(config.docusaurus().siteName()))
-            .replace("YADOC_PROJECT", escapeJs(config.docusaurus().siteName()))
+            .replace("YADOC_BUILD_SITE", escapeJs(projectDirName))
+            .replace("YADOC_PROJECT", escapeJs(projectDirName))
             .replace("YADOC_LANG", escapeHtml(langAttr))
             .replace("YADOC_FAVICON", faviconHref);
     }
