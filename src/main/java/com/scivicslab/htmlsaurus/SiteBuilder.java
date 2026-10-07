@@ -133,7 +133,7 @@ public class SiteBuilder {
             Path defaultDocs = projectRoot.resolve("docs");
             if (Files.isDirectory(defaultDocs)) fallbackDocsDir = defaultDocs;
         }
-        this.navBuilder = new NavTreeBuilder(docsDir, production, converter, currentLocale, defaultLocale, fallbackDocsDir);
+        this.navBuilder = new NavTreeBuilder(docsDir, converter, currentLocale, defaultLocale, fallbackDocsDir);
         this.pageRenderer = new PageRenderer(production, config, projectDirName(projectRoot),
                                              currentLocale, defaultLocale, this.allLocales);
         this.referenceLabels = ReferenceLabels.forProject(projectRoot);
@@ -157,7 +157,7 @@ public class SiteBuilder {
         List<Path[]> mdFiles = collectSourceFilesAndCopyAssets();
 
         convertMarkdownFiles(mdFiles, root, pageOrder);
-        if (production) copySiblingAssetsIntoPageDirectories(mdFiles);
+        copySiblingAssetsIntoPageDirectories(mdFiles);
         if (production) writeSearchPage(root);
         writeRootIndex(mdFiles, root, pageOrder);
         writeFeeds();
@@ -289,45 +289,29 @@ public class SiteBuilder {
     }
 
     /**
-     * In production mode a page that does not follow the same-name pattern lands in
-     * {@code dir/file/index.html}, one level deeper than its source directory. Copies each page's
-     * sibling assets into that directory so a relative {@code src="./img.png"} still resolves.
+     * A page that does not follow the same-name pattern lands in {@code dir/file/index.html}, one
+     * level deeper than its source directory. Copies each page's sibling assets into that directory
+     * so a relative {@code src="./img.png"} or {@code href="./paper.pdf"} resolves.
      */
     private void copySiblingAssetsIntoPageDirectories(List<Path[]> mdFiles) throws IOException {
         for (Path[] pair : mdFiles) {
             Path rel = pair[1];
-            // Same-name pattern files already land in the source directory itself.
-            boolean isSameName = false;
-            if (rel.getNameCount() >= 2) {
-                String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
-                String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
-                if (fileBase.equals(parentBase)) isSameName = true;
-            }
-            if (isSameName) continue;
-
             String[] fm = converter.parseFrontmatter(Files.readString(pair[0]));
-            String fmId = fm[2];
-            String cleanBase;
-            if (!fmId.isEmpty()) {
-                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
-                cleanBase = parentPath.isEmpty() ? fmId : cleanRelPath(parentPath) + "/" + fmId;
-            } else {
-                cleanBase = cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
-            }
-            Path pageOutDir = outDir.resolve(cleanBase);
+            Path pageOutDir = outDir.resolve(cleanBaseFor(rel, fm[2]));
 
             Path srcDir = pair[0].getParent();
-            try (var siblings = Files.list(srcDir)) {
-                siblings.filter(f -> !Files.isDirectory(f) && !f.toString().endsWith(".md"))
-                        .forEach(asset -> {
-                            try {
-                                Path dest = pageOutDir.resolve(asset.getFileName().toString());
-                                if (!Files.exists(dest)) {
-                                    Files.createDirectories(dest.getParent());
-                                    Files.copy(asset, dest);
-                                }
-                            } catch (IOException ignored) {}
-                        });
+            // A same-name page whose id does not rename its directory is written into the very
+            // directory the files were mirrored to, so there is nothing to copy.
+            if (pageOutDir.equals(outDir.resolve(cleanRelPath(
+                    rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/'))))) {
+                continue;
+            }
+            for (String name : referencedSiblings(pair[0])) {
+                Path asset = srcDir.resolve(name);
+                Path dest = pageOutDir.resolve(name);
+                if (Files.exists(dest)) continue;
+                Files.createDirectories(dest.getParent());
+                Files.copy(asset, dest);
             }
         }
     }
@@ -449,48 +433,18 @@ public class SiteBuilder {
             }
         }
 
-        String cleanBase;
-        if (!fmId.isEmpty()) {
-            // Frontmatter id overrides the filename segment (Docusaurus compatibility).
-            // Strip numeric prefix from id so that "010_Foo" becomes "Foo" (consistent with filename handling).
-            String cleanId = stripNumericPrefix(fmId);
-            // For same-name files, id replaces the last directory segment.
-            // For regular files, id replaces the filename.
-            if (isSameName) {
-                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
-                int lastSlash = parentPath.lastIndexOf('/');
-                String parentDir = lastSlash >= 0 ? cleanRelPath(parentPath.substring(0, lastSlash)) + "/" : "";
-                cleanBase = parentDir + cleanId;
-            } else {
-                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
-                cleanBase = parentPath.isEmpty() ? cleanId : cleanRelPath(parentPath) + "/" + cleanId;
-            }
-        } else {
-            cleanBase = isSameName
-                ? cleanRelPath(rel.getParent().toString().replace('\\', '/'))
-                : cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
-        }
-        // In dev mode, same-name HTML is output one level up from the asset directory.
-        // Rewrite relative src in content so that "img.png" becomes "dirName/img.png".
-        if (isSameName && !production) {
-            // Use the cleaned directory name (where assets are copied), not fmId
-            String assetDir = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
-            String assetPrefix = assetDir + "/";
-            contentHtml = contentHtml.replaceAll(
-                "(src=\")(?!https?://|data:|/|#)([^\"]+\")",
-                "$1" + assetPrefix.replace("$", "\\$") + "$2");
-        }
-
-        String relStr = production ? cleanBase + "/index.html" : cleanBase + ".html";
+        String cleanBase = cleanBaseFor(rel, fmId);
+        // The page is the index of its own directory, and the files beside its Markdown source are
+        // copied into that directory, so a relative src or href in the body resolves as written.
+        String relStr = cleanBase + "/index.html";
         Path outFile = outDir.resolve(relStr);
         Files.createDirectories(outFile.getParent());
 
-        long depth = production ? (long) cleanBase.split("/").length
-                                : (long) cleanBase.split("/").length - 1;
+        long depth = cleanBase.split("/").length;
         String prefix = "../".repeat((int) depth);
         if (prefix.isEmpty()) prefix = "./";
 
-        String currentPath = production ? "/" + cleanBase + "/" : "/" + cleanBase + ".html";
+        String currentPath = "/" + cleanBase + "/";
 
         // Determine which top-level section this page belongs to
         String topSection = rel.getNameCount() > 1
@@ -567,24 +521,8 @@ public class SiteBuilder {
             String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
             if (fileBase.equals(parentBase)) isSameName = true;
         }
-        String fmId = fm[2];
-        String cleanFmId = stripNumericPrefix(fmId);
-        String normalCleanBase;
-        if (!fmId.isEmpty()) {
-            if (isSameName) {
-                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
-                int lastSlash = parentPath.lastIndexOf('/');
-                String parentDir = lastSlash >= 0 ? cleanRelPath(parentPath.substring(0, lastSlash)) + "/" : "";
-                normalCleanBase = parentDir + cleanFmId;
-            } else {
-                normalCleanBase = rel.getParent() == null ? cleanFmId : cleanRelPath(rel.getParent().toString().replace('\\', '/')) + "/" + cleanFmId;
-            }
-        } else {
-            normalCleanBase = isSameName
-                ? cleanRelPath(rel.getParent().toString().replace('\\', '/'))
-                : cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
-        }
-        String normalPath = production ? "/" + normalCleanBase + "/" : "/" + normalCleanBase + ".html";
+        String normalCleanBase = cleanBaseFor(rel, fm[2]);
+        String normalPath = "/" + normalCleanBase + "/";
         String prevHref = null, prevLabel = null, nextHref = null, nextLabel = null;
         int pageIdx = -1;
         for (int i = 0; i < pageOrder.size(); i++) {
@@ -694,30 +632,84 @@ public class SiteBuilder {
      * @param fmId  frontmatter id (may be empty)
      */
     private String hrefForRel(Path rel, String fmId) {
-        boolean isSameName = false;
-        if (rel.getNameCount() >= 2) {
-            String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
-            String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
-            if (fileBase.equals(parentBase)) isSameName = true;
-        }
-        String cleanBase;
-        String cleanId = fmId != null ? stripNumericPrefix(fmId) : "";
+        return cleanBaseFor(rel, fmId) + "/";
+    }
+
+    /** The {@code dir/dir.md} convention: the page is its own directory's index. */
+    static boolean isSameNamePattern(Path rel) {
+        if (rel.getNameCount() < 2) return false;
+        String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
+        String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
+        return fileBase.equals(parentBase);
+    }
+
+    /**
+     * The output path of a page, without the trailing {@code /index.html}: every segment stripped of
+     * its numeric prefix, and the frontmatter id replacing the last segment where one is given.
+     *
+     * <p>One method rather than one per caller. The page writer, the previous/next links, the URL the
+     * navigation tree states and the copy of a page's own files all have to name the same directory;
+     * when the copy computed it separately it used the raw id where the others stripped its numeric
+     * prefix, and a page whose id renames its directory got no files at all.
+     *
+     * @param rel   the Markdown source path, relative to {@code docs/}
+     * @param fmId  the frontmatter id, empty when the page states none
+     * @return the page's directory path under {@code static-html/}
+     */
+    static String cleanBaseFor(Path rel, String fmId) {
+        boolean isSameName = isSameNamePattern(rel);
+        String cleanId = fmId == null ? "" : stripNumericPrefix(fmId);
+        String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
         if (!cleanId.isEmpty()) {
             if (isSameName) {
-                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
                 int lastSlash = parentPath.lastIndexOf('/');
                 String parentDir = lastSlash >= 0 ? cleanRelPath(parentPath.substring(0, lastSlash)) + "/" : "";
-                cleanBase = parentDir + cleanId;
-            } else {
-                String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
-                cleanBase = parentPath.isEmpty() ? cleanId : cleanRelPath(parentPath) + "/" + cleanId;
+                return parentDir + cleanId;
             }
-        } else {
-            cleanBase = isSameName
-                ? cleanRelPath(rel.getParent().toString().replace('\\', '/'))
-                : cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
+            return parentPath.isEmpty() ? cleanId : cleanRelPath(parentPath) + "/" + cleanId;
         }
-        return production ? cleanBase + "/" : cleanBase + ".html";
+        return isSameName
+                ? cleanRelPath(parentPath)
+                : cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", ""));
+    }
+
+    /** A relative reference in a page body: the value of src= or href= in HTML, or the target of a
+     *  Markdown link or image. */
+    private static final java.util.regex.Pattern REFERENCE = java.util.regex.Pattern.compile(
+            "(?:src|href)=[\"']([^\"'>]+)[\"']|\\]\\(([^)\\s]+)\\)");
+
+    /**
+     * The names of the files this page refers to that sit beside its Markdown source.
+     *
+     * <p>Asked of the filesystem, because the value alone does not say what it is: {@code paper.pdf}
+     * and {@code interactive_jobs} are both relative, and only one of them is a file lying next to
+     * the source. Values that address something else are skipped by their own form — an absolute URL,
+     * a {@code data:} URL, a site-root path, a fragment — and whatever survives that is kept only if
+     * a file of that name is really there.
+     *
+     * @param mdFile the page's Markdown source
+     * @return the file names, each existing in {@code mdFile}'s own directory
+     */
+    private Set<String> referencedSiblings(Path mdFile) throws IOException {
+        Path dir = mdFile.getParent();
+        Set<String> names = new LinkedHashSet<>();
+        java.util.regex.Matcher m = REFERENCE.matcher(Files.readString(mdFile, StandardCharsets.UTF_8));
+        while (m.find()) {
+            String value = m.group(1) != null ? m.group(1) : m.group(2);
+            int hash = value.indexOf('#');
+            if (hash >= 0) value = value.substring(0, hash);
+            int query = value.indexOf('?');
+            if (query >= 0) value = value.substring(0, query);
+            if (value.isEmpty() || value.contains("://") || value.startsWith("data:")
+                    || value.startsWith("/") || value.startsWith("#") || value.startsWith("mailto:")) {
+                continue;
+            }
+            if (value.startsWith("./")) value = value.substring(2);
+            if (value.contains("/")) continue;   // not a sibling: it names another directory
+            Path candidate = dir.resolve(value);
+            if (Files.isRegularFile(candidate)) names.add(value);
+        }
+        return names;
     }
 
     /**

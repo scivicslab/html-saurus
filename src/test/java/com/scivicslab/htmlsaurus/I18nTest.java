@@ -65,7 +65,7 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html"), "intro.html");
+            String html = readHtml(proj.resolve("static-html"), "intro/index.html");
             // Check that no dropdown element is rendered (CSS rule contains "lang-dropdown" too,
             // so check for the actual HTML attribute class="lang-btn" which only appears in elements)
             assertFalse(html.contains("class=\"lang-btn\""),
@@ -81,7 +81,7 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html"), "intro.html");
+            String html = readHtml(proj.resolve("static-html"), "intro/index.html");
             assertTrue(html.contains("lang=\"ja\""),
                     "html lang attribute must be set to the defaultLocale 'ja'");
         }
@@ -111,8 +111,8 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            assertTrue(Files.exists(proj.resolve("static-html/intro.html")),
-                    "Default locale (ja) page must be at static-html/intro.html");
+            assertTrue(Files.exists(proj.resolve("static-html/intro/index.html")),
+                    "Default locale (ja) page must be at static-html/intro/index.html");
         }
 
         @Test
@@ -123,8 +123,8 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            assertTrue(Files.exists(proj.resolve("static-html/en/intro.html")),
-                    "Alternate locale (en) page must be at static-html/en/intro.html");
+            assertTrue(Files.exists(proj.resolve("static-html/en/intro/index.html")),
+                    "Alternate locale (en) page must be at static-html/en/intro/index.html");
         }
 
         @Test
@@ -159,7 +159,7 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html"), "intro.html");
+            String html = readHtml(proj.resolve("static-html"), "intro/index.html");
             assertTrue(html.contains("lang=\"ja\""),
                     "Japanese page must have lang=\"ja\"");
         }
@@ -172,7 +172,7 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html/en"), "intro.html");
+            String html = readHtml(proj.resolve("static-html/en"), "intro/index.html");
             assertTrue(html.contains("lang=\"en\""),
                     "English page must have lang=\"en\"");
         }
@@ -185,7 +185,7 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html"), "intro.html");
+            String html = readHtml(proj.resolve("static-html"), "intro/index.html");
             assertTrue(html.contains("class=\"lang-btn\""),
                     "Multi-locale project must render a language switcher dropdown button");
         }
@@ -198,8 +198,8 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html"), "intro.html");
-            assertTrue(html.contains("en/intro.html"),
+            String html = readHtml(proj.resolve("static-html"), "intro/index.html");
+            assertTrue(html.contains("en/intro/"),
                     "Japanese page dropdown must link to English version");
         }
 
@@ -211,7 +211,7 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html/en"), "intro.html");
+            String html = readHtml(proj.resolve("static-html/en"), "intro/index.html");
             // The Japanese version link should NOT have /en/ prefix
             assertTrue(html.contains("class=\"lang-btn\""),
                     "English page must also have a language switcher dropdown");
@@ -327,7 +327,7 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html"), "guides/intro.html");
+            String html = readHtml(proj.resolve("static-html"), "guides/intro/index.html");
             assertTrue(html.contains("ガイド"),
                 "Japanese navbar must use the original label from docusaurus.config");
         }
@@ -343,7 +343,7 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html/en"), "guides/intro.html");
+            String html = readHtml(proj.resolve("static-html/en"), "guides/intro/index.html");
             assertTrue(html.contains("Guides"),
                 "English navbar must use the translated label from navbar.json");
         }
@@ -356,7 +356,7 @@ class I18nTest {
 
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html/en"), "guides/intro.html");
+            String html = readHtml(proj.resolve("static-html/en"), "guides/intro/index.html");
             assertTrue(html.contains("ガイド"),
                 "English navbar must fall back to the config label when navbar.json is absent");
         }

@@ -18,9 +18,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>Rules under test:
  * <ul>
  *   <li>Numeric prefix is stripped from every segment of the path (directories AND filenames).</li>
- *   <li>Dev mode: {@code .html} suffix — e.g. {@code /project/page.html}</li>
- *   <li>Production mode: clean URL with trailing slash — e.g. {@code /project/page/},
- *       internally stored as {@code page/index.html}</li>
+ *   <li>Every mode: clean URL with trailing slash — e.g. {@code /project/page/}, stored as
+ *       {@code page/index.html}. The two modes used to differ, which put a page one level
+ *       above the files copied beside it and broke a relative link written in the body.</li>
  * </ul>
  */
 @Tag("S1.01")
@@ -51,11 +51,11 @@ class UrlRuleTest {
     class FlatFileStructure {
 
         @Nested
-        @DisplayName("Dev mode (.html suffix)")
+        @DisplayName("Dev mode (same layout as production)")
         class DevMode {
 
             @Test
-            @DisplayName("docs/intro.md -> static-html/intro.html")
+            @DisplayName("docs/intro.md -> static-html/intro/index.html")
             void introMd_producesIntroHtml() throws IOException {
                 Path proj = createProject("proj");
                 Path docsDir = proj.resolve("docs");
@@ -63,13 +63,13 @@ class UrlRuleTest {
 
                 Main.build(docsDir, proj.resolve("static-html"), false);
 
-                assertTrue(Files.exists(proj.resolve("static-html/intro.html")),
-                        "intro.md must produce static-html/intro.html in dev mode");
+                assertTrue(Files.exists(proj.resolve("static-html/intro/index.html")),
+                        "intro.md must produce static-html/intro/index.html in dev mode");
             }
 
             @Test
             @DisplayName("docs/010_terms_and_policies/user_account_issurance_criteria.md"
-                    + " -> static-html/terms_and_policies/user_account_issurance_criteria.html")
+                    + " -> static-html/terms_and_policies/user_account_issurance_criteria/index.html")
             void numericPrefixDirStripped_devMode() throws IOException {
                 Path proj = createProject("proj");
                 Path docsDir = proj.resolve("docs");
@@ -80,7 +80,7 @@ class UrlRuleTest {
                 Main.build(docsDir, proj.resolve("static-html"), false);
 
                 Path expected = proj.resolve(
-                        "static-html/terms_and_policies/user_account_issurance_criteria.html");
+                        "static-html/terms_and_policies/user_account_issurance_criteria/index.html");
                 assertTrue(Files.exists(expected),
                         "Numeric prefix of directory must be stripped; expected: " + expected);
             }
@@ -97,7 +97,7 @@ class UrlRuleTest {
                 Main.build(docsDir, proj.resolve("static-html"), false);
 
                 Path unexpected = proj.resolve(
-                        "static-html/010_terms_and_policies/user_account_issurance_criteria.html");
+                        "static-html/010_terms_and_policies/user_account_issurance_criteria/index.html");
                 assertFalse(Files.exists(unexpected),
                         "Numeric prefix must be stripped; file must not exist at: " + unexpected);
             }
@@ -193,11 +193,11 @@ class UrlRuleTest {
          * Prod: terms_and_policies/UserAccountIssuanceCriteria_260401_oo01/  (index.html inside)
          */
         @Nested
-        @DisplayName("Dev mode (.html suffix)")
+        @DisplayName("Dev mode (same layout as production)")
         class DevMode {
 
             @Test
-            @DisplayName("dir/dir.md collapses to directory path: terms_and_policies/UserAccountIssuanceCriteria_260401_oo01.html")
+            @DisplayName("dir/dir.md collapses to directory path: terms_and_policies/UserAccountIssuanceCriteria_260401_oo01/index.html")
             void dirDirMd_collapsesToDirPath_devMode() throws IOException {
                 Path proj = createProject("proj");
                 Path docsDir = proj.resolve("docs");
@@ -211,13 +211,13 @@ class UrlRuleTest {
 
                 Path expected = proj.resolve(
                         "static-html/terms_and_policies/"
-                                + "UserAccountIssuanceCriteria_260401_oo01.html");
+                                + "UserAccountIssuanceCriteria_260401_oo01/index.html");
                 assertTrue(Files.exists(expected),
                         "dir/dir.md must collapse to directory URL in dev mode; expected: " + expected);
             }
 
             @Test
-            @DisplayName("dir/dir.md collapsed: deep path (dir/file.html) must NOT exist")
+            @DisplayName("dir/dir.md collapsed: deep path (dir/dir/index.html) must NOT exist")
             void dirDirMd_deepPathDoesNotExist_devMode() throws IOException {
                 Path proj = createProject("proj");
                 Path docsDir = proj.resolve("docs");
@@ -232,7 +232,7 @@ class UrlRuleTest {
                 Path notExpected = proj.resolve(
                         "static-html/terms_and_policies/"
                                 + "UserAccountIssuanceCriteria_260401_oo01/"
-                                + "UserAccountIssuanceCriteria_260401_oo01.html");
+                                + "UserAccountIssuanceCriteria_260401_oo01/index.html");
                 assertFalse(Files.exists(notExpected),
                         "dir/dir.md must collapse; deep path must not exist: " + notExpected);
             }
@@ -302,11 +302,11 @@ class UrlRuleTest {
          * Pattern 2 rule: same-name .md collapses to directory URL, even when subdirs exist.
          */
         @Nested
-        @DisplayName("Dev mode (.html suffix)")
+        @DisplayName("Dev mode (same layout as production)")
         class DevMode {
 
             @Test
-            @DisplayName("same-name .md collapses to guide.html even when subdirs present")
+            @DisplayName("same-name .md collapses to guide/index.html even when subdirs present")
             void dirDirMd_withSubdirs_collapsesToDir_devMode() throws IOException {
                 Path proj = createProject("proj");
                 Path docsDir = proj.resolve("docs");
@@ -315,13 +315,13 @@ class UrlRuleTest {
 
                 Main.build(docsDir, proj.resolve("static-html"), false);
 
-                Path expected = proj.resolve("static-html/guide.html");
+                Path expected = proj.resolve("static-html/guide/index.html");
                 assertTrue(Files.exists(expected),
-                        "Pattern 2: same-name .md must collapse to guide.html; expected: " + expected);
+                        "Pattern 2: same-name .md must collapse to guide/index.html; expected: " + expected);
             }
 
             @Test
-            @DisplayName("deep path guide/guide.html must NOT exist")
+            @DisplayName("deep path guide/guide/index.html must NOT exist")
             void dirDirMd_withSubdirs_deepPathAbsent_devMode() throws IOException {
                 Path proj = createProject("proj");
                 Path docsDir = proj.resolve("docs");
@@ -330,13 +330,13 @@ class UrlRuleTest {
 
                 Main.build(docsDir, proj.resolve("static-html"), false);
 
-                Path notExpected = proj.resolve("static-html/guide/guide.html");
+                Path notExpected = proj.resolve("static-html/guide/guide/index.html");
                 assertFalse(Files.exists(notExpected),
                         "Pattern 2: deep path must not exist: " + notExpected);
             }
 
             @Test
-            @DisplayName("sibling subpage renders at guide/subpage.html")
+            @DisplayName("sibling subpage renders at guide/subpage/index.html")
             void subpage_rendersAtCorrectPath_devMode() throws IOException {
                 Path proj = createProject("proj");
                 Path docsDir = proj.resolve("docs");
@@ -345,9 +345,9 @@ class UrlRuleTest {
 
                 Main.build(docsDir, proj.resolve("static-html"), false);
 
-                Path expected = proj.resolve("static-html/guide/subpage.html");
+                Path expected = proj.resolve("static-html/guide/subpage/index.html");
                 assertTrue(Files.exists(expected),
-                        "Subpage (Pattern 2 sibling) must render at guide/subpage.html; expected: " + expected);
+                        "Subpage (Pattern 2 sibling) must render at guide/subpage/index.html; expected: " + expected);
             }
         }
 
@@ -479,8 +479,8 @@ class UrlRuleTest {
         @DisplayName("normal page is also generated at its own path (dev)")
         void normalPage_alsoGenerated_devMode() throws IOException {
             Path proj = createProjectWithRootPage(false);
-            assertTrue(Files.exists(proj.resolve("static-html/guides/top_page.html")),
-                    "slug:/ page must also be generated at its normal path (guides/top_page.html)");
+            assertTrue(Files.exists(proj.resolve("static-html/guides/top_page/index.html")),
+                    "slug:/ page must also be generated at its normal path (guides/top_page/index.html)");
         }
 
         @Test
@@ -536,9 +536,9 @@ class UrlRuleTest {
 
             Main.build(docsDir, proj.resolve("static-html"), false);
 
-            assertTrue(Files.exists(proj.resolve("static-html/intro.html")),
-                    "Numeric prefix on filename must be stripped; expected static-html/intro.html");
-            assertFalse(Files.exists(proj.resolve("static-html/010_intro.html")),
+            assertTrue(Files.exists(proj.resolve("static-html/intro/index.html")),
+                    "Numeric prefix on filename must be stripped; expected static-html/intro/index.html");
+            assertFalse(Files.exists(proj.resolve("static-html/010_intro/index.html")),
                     "File with numeric prefix must not exist; must be stripped");
         }
 
@@ -551,7 +551,7 @@ class UrlRuleTest {
 
             Main.build(docsDir, proj.resolve("static-html"), false);
 
-            assertTrue(Files.exists(proj.resolve("static-html/about.html")),
+            assertTrue(Files.exists(proj.resolve("static-html/about/index.html")),
                     "Filename without numeric prefix must remain unchanged");
         }
 
@@ -564,9 +564,9 @@ class UrlRuleTest {
 
             Main.build(docsDir, proj.resolve("static-html"), false);
 
-            assertTrue(Files.exists(proj.resolve("static-html/section/subsection/page.html")),
+            assertTrue(Files.exists(proj.resolve("static-html/section/subsection/page/index.html")),
                     "All segments must have numeric prefix stripped");
-            assertFalse(Files.exists(proj.resolve("static-html/010_section/020_subsection/030_page.html")),
+            assertFalse(Files.exists(proj.resolve("static-html/010_section/020_subsection/030_page/index.html")),
                     "No segment should retain its numeric prefix");
         }
 

@@ -100,6 +100,6 @@ class FaviconTest {
 
         Path staticHtml = projectDir.resolve("static-html");
         new SiteBuilder(docsDir, staticHtml).build();
-        return staticHtml.resolve("Intro_260902_oo01.html");
+        return staticHtml.resolve("Intro_260902_oo01/index.html");
     }
 }

@@ -44,7 +44,7 @@ class PageProjectNameTest {
         Path proj = createProject("nigsc_homepage2", "NIG Supercomputer");
         Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-        String html = Files.readString(proj.resolve("static-html/intro.html"));
+        String html = Files.readString(proj.resolve("static-html/intro/index.html"));
 
         assertTrue(html.contains("encodeURIComponent('nigsc_homepage2')"),
                 "the Rebuild button must post the directory name");
@@ -72,7 +72,7 @@ class PageProjectNameTest {
         Path proj = createProject("nigsc_homepage2", "NIG Supercomputer");
         Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
 
-        String html = Files.readString(proj.resolve("static-html/intro.html"));
+        String html = Files.readString(proj.resolve("static-html/intro/index.html"));
 
         assertTrue(html.contains(">NIG Supercomputer</a>"),
                 "the reader still sees the site's own name on the bar");

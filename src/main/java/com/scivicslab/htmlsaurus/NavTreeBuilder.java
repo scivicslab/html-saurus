@@ -36,7 +36,6 @@ class NavTreeBuilder {
 
     private final Path docsDir;
     private final Path projectRoot;
-    private final boolean production;
     private final MarkdownConverter converter;
     private final String currentLocale;
     private final String defaultLocale;
@@ -48,17 +47,15 @@ class NavTreeBuilder {
 
     /**
      * @param docsDir         source directory containing Markdown files
-     * @param production      {@code true} to generate production-style directory URLs
      * @param converter       Markdown converter used for frontmatter extraction during tree building
      * @param currentLocale   locale code of this build (e.g., "en"), or null for default
      * @param defaultLocale   default locale from docusaurus.config (e.g., "ja"), or null
      * @param fallbackDocsDir default-locale docs root for sidebar fallback; null if not needed
      */
-    NavTreeBuilder(Path docsDir, boolean production, MarkdownConverter converter,
+    NavTreeBuilder(Path docsDir, MarkdownConverter converter,
                    String currentLocale, String defaultLocale, Path fallbackDocsDir) {
         this.docsDir = docsDir;
         this.projectRoot = findProjectRoot(docsDir);
-        this.production = production;
         this.converter = converter;
         this.currentLocale = currentLocale;
         this.defaultLocale = defaultLocale;
@@ -268,9 +265,9 @@ class NavTreeBuilder {
             if (!fmId.isEmpty()) {
                 String parentPath = dirRel.getParent() == null ? "" : dirRel.getParent().toString().replace('\\', '/');
                 String parentClean = parentPath.isEmpty() ? "" : SiteBuilder.cleanRelPath(parentPath) + "/";
-                href = "/" + parentClean + fmId + (production ? "/" : ".html");
+                href = "/" + parentClean + fmId + "/";
             } else {
-                href = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
+                href = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + "/";
             }
             return new SiteNode(title, href, false, List.of(), null);
         }
@@ -287,9 +284,9 @@ class NavTreeBuilder {
             if (!fmId.isEmpty()) {
                 String parentPath = dirRel.getParent() == null ? "" : dirRel.getParent().toString().replace('\\', '/');
                 String parentClean = parentPath.isEmpty() ? "" : SiteBuilder.cleanRelPath(parentPath) + "/";
-                catHref = "/" + parentClean + fmId + (production ? "/" : ".html");
+                catHref = "/" + parentClean + fmId + "/";
             } else {
-                catHref = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
+                catHref = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + "/";
             }
         } else {
             // Prefer locale _category_.json label, fall back to default
@@ -317,9 +314,9 @@ class NavTreeBuilder {
                 if (!fmId.isEmpty()) {
                     String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
                     String parentClean = parentPath.isEmpty() ? "" : SiteBuilder.cleanRelPath(parentPath) + "/";
-                    href = "/" + parentClean + fmId + (production ? "/" : ".html");
+                    href = "/" + parentClean + fmId + "/";
                 } else {
-                    href = "/" + SiteBuilder.cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", "")) + (production ? "/" : ".html");
+                    href = "/" + SiteBuilder.cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", "")) + "/";
                 }
                 children.add(new SiteNode(title, href, false, List.of(), null));
             }
@@ -373,9 +370,9 @@ class NavTreeBuilder {
                 // id overrides the last directory segment (same-name pattern)
                 String parentPath = dirRel.getParent() == null ? "" : dirRel.getParent().toString().replace('\\', '/');
                 String parentClean = parentPath.isEmpty() ? "" : SiteBuilder.cleanRelPath(parentPath) + "/";
-                href = "/" + parentClean + fmId + (production ? "/" : ".html");
+                href = "/" + parentClean + fmId + "/";
             } else {
-                href = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
+                href = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + "/";
             }
             return new SiteNode(title, href, false, List.of(), null);
         }
@@ -395,9 +392,9 @@ class NavTreeBuilder {
             if (!fmId.isEmpty()) {
                 String parentPath = dirRel.getParent() == null ? "" : dirRel.getParent().toString().replace('\\', '/');
                 String parentClean = parentPath.isEmpty() ? "" : SiteBuilder.cleanRelPath(parentPath) + "/";
-                catHref = "/" + parentClean + fmId + (production ? "/" : ".html");
+                catHref = "/" + parentClean + fmId + "/";
             } else {
-                catHref = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + (production ? "/" : ".html");
+                catHref = "/" + SiteBuilder.cleanRelPath(dirRel.toString().replace('\\', '/')) + "/";
             }
         } else {
             label = readCategoryLabel(dir);
@@ -417,9 +414,9 @@ class NavTreeBuilder {
                 if (!fmId.isEmpty()) {
                     String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
                     String parentClean = parentPath.isEmpty() ? "" : SiteBuilder.cleanRelPath(parentPath) + "/";
-                    href = "/" + parentClean + fmId + (production ? "/" : ".html");
+                    href = "/" + parentClean + fmId + "/";
                 } else {
-                    href = "/" + SiteBuilder.cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", "")) + (production ? "/" : ".html");
+                    href = "/" + SiteBuilder.cleanRelPath(rel.toString().replace('\\', '/').replaceAll("\\.md$", "")) + "/";
                 }
                 children.add(new SiteNode(title, href, false, List.of(), null));
             }

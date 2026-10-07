@@ -99,7 +99,7 @@ class SidebarTest {
             Main.build(docsDir, proj.resolve("static-html"), false);
 
             String indexHtml = Files.readString(proj.resolve("static-html/index.html"));
-            assertTrue(indexHtml.contains("section/intro.html"),
+            assertTrue(indexHtml.contains("section/intro/"),
                     "index.html must redirect to the first page, not '#'");
             assertFalse(indexHtml.contains("url=#") || indexHtml.contains("url=\"#\""),
                     "index.html must not redirect to '#'");
@@ -121,10 +121,11 @@ class SidebarTest {
 
             Main.build(docsDir, proj.resolve("static-html"), false);
 
-            // Any generated page's sidebar should contain an <a> link to section.html,
+            // Any generated page's sidebar should contain an <a> link to the section,
             // not a cat-header with no link.
-            String html = readHtml(proj.resolve("static-html"), "section.html");
-            assertTrue(html.contains("href=\"section.html\"") || html.contains("href=\"./section.html\""),
+            String html = readHtml(proj.resolve("static-html"), "section/index.html");
+            assertTrue(html.contains("href=\"section/\"") || html.contains("href=\"./section/\"")
+                            || html.contains("href=\"../section/\""),
                     "Pattern 1: same-name .md must produce a plain <a> link in the sidebar");
             assertFalse(html.contains("cat-header") && !html.contains("cat-label"),
                     "Pattern 1: must not produce a non-linked category header");
@@ -167,7 +168,7 @@ class SidebarTest {
             Main.build(docsDir, proj.resolve("static-html"), false);
 
             // detail page is inside section/guide → sidebar shows Guide as a sub-category
-            String html = readHtml(proj.resolve("static-html"), "section/guide/detail.html");
+            String html = readHtml(proj.resolve("static-html"), "section/guide/detail/index.html");
             // Check that a clickable link with class="cat-label" is rendered in the cat-header
             // (href comes before class in the generated markup: <a href="..." class="cat-label">)
             assertTrue(html.contains("class=\"cat-label\"") && html.contains("cat-header"),
@@ -185,8 +186,8 @@ class SidebarTest {
 
             Main.build(docsDir, proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html"), "section/guide/detail.html");
-            assertTrue(html.contains("section/guide.html") || html.contains("guide.html"),
+            String html = readHtml(proj.resolve("static-html"), "section/guide/detail/index.html");
+            assertTrue(html.contains("section/guide/") || html.contains("guide/"),
                     "Pattern 2: category header must link to guide.html (dir URL)");
         }
 
@@ -199,10 +200,10 @@ class SidebarTest {
 
             Main.build(docsDir, proj.resolve("static-html"), false);
 
-            String html = readHtml(proj.resolve("static-html"), "section/guide/detail.html");
+            String html = readHtml(proj.resolve("static-html"), "section/guide/detail/index.html");
             // The sidebar must NOT contain a plain link to guide/guide.html (deep path)
-            assertFalse(html.contains("guide/guide.html"),
-                    "Pattern 2: same-name .md must not appear as a child link (guide/guide.html)");
+            assertFalse(html.contains("guide/guide/"),
+                    "Pattern 2: same-name .md must not appear as a child link (guide/guide/)");
         }
 
         @Test
@@ -231,10 +232,10 @@ class SidebarTest {
             Main.build(docsDir, proj.resolve("static-html"), false);
 
             // section/guide.html must exist (collapsed dir URL)
-            assertTrue(Files.exists(proj.resolve("static-html/section/guide.html")),
-                    "Pattern 2: same-name .md must produce section/guide.html (not section/guide/guide.html)");
+            assertTrue(Files.exists(proj.resolve("static-html/section/guide/index.html")),
+                    "Pattern 2: same-name .md must produce section/guide/index.html (not section/guide/guide/index.html)");
             // section/guide/guide.html must NOT exist
-            assertFalse(Files.exists(proj.resolve("static-html/section/guide/guide.html")),
+            assertFalse(Files.exists(proj.resolve("static-html/section/guide/guide/index.html")),
                     "Pattern 2: deep path section/guide/guide.html must not exist");
         }
 

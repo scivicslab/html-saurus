@@ -30,7 +30,7 @@ class MarkdownConverterTest {
         Files.writeString(docs.resolve("page.md"), markdownBody);
         Path out = proj.resolve("static-html");
         new SiteBuilder(docs, out).build();
-        return Files.readString(out.resolve("page.html"));
+        return Files.readString(out.resolve("page/index.html"));
     }
 
     @Nested

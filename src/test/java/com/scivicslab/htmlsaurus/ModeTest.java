@@ -135,8 +135,8 @@ class ModeTest {
         void build_generatesHtmlFromMarkdown() throws IOException {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
-            assertTrue(Files.exists(proj.resolve("static-html/intro.html")),
-                    "intro.md must produce intro.html");
+            assertTrue(Files.exists(proj.resolve("static-html/intro/index.html")),
+                    "intro.md must produce intro/index.html");
         }
     }
 
@@ -233,7 +233,7 @@ class ModeTest {
         void copyBar_controlIdsAreNamedByTheScript() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
-            String html = Files.readString(proj.resolve("static-html/intro.html"));
+            String html = Files.readString(proj.resolve("static-html/intro/index.html"));
             Matcher m = Pattern.compile("<(?:button|select) class=\"copy-(?:btn|select)\" id=\"([a-z0-9-]+)\"").matcher(html);
             List<String> ids = new ArrayList<>();
             while (m.find()) ids.add(m.group(1));
@@ -250,11 +250,11 @@ class ModeTest {
         void copyBar_offersLispOnlyWhenTheRuleFileExists() throws Exception {
             Path proj = createProject("proj");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
-            String without = Files.readString(proj.resolve("static-html/intro.html"));
+            String without = Files.readString(proj.resolve("static-html/intro/index.html"));
             assertFalse(without.contains("value=\"lisp\""), "No rule file beside intro.md: no Lisp entry");
             Files.writeString(proj.resolve("docs/intro.lisp"), "(in-package :rst)\n");
             Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
-            String with = Files.readString(proj.resolve("static-html/intro.html"));
+            String with = Files.readString(proj.resolve("static-html/intro/index.html"));
             assertTrue(with.contains("value=\"lisp\""), "intro.lisp beside intro.md: the list must offer Lisp");
         }
 
