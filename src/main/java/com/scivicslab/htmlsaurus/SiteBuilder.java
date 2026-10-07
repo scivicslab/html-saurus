@@ -134,7 +134,7 @@ public class SiteBuilder {
             if (Files.isDirectory(defaultDocs)) fallbackDocsDir = defaultDocs;
         }
         this.navBuilder = new NavTreeBuilder(docsDir, production, converter, currentLocale, defaultLocale, fallbackDocsDir);
-        this.pageRenderer = new PageRenderer(production, config, projectRoot.getFileName().toString(),
+        this.pageRenderer = new PageRenderer(production, config, projectDirName(projectRoot),
                                              currentLocale, defaultLocale, this.allLocales);
         this.referenceLabels = ReferenceLabels.forProject(projectRoot);
     }
@@ -664,6 +664,21 @@ public class SiteBuilder {
     }
 
     /** The rst-on-xml rule file a Markdown file was generated from: the same name with {@code .lisp}. */
+    /**
+     * The name of the directory a project lives in, which is how the portal addresses it.
+     *
+     * <p>Resolved against the working directory first: building with a relative path, as
+     * {@code java -jar html-saurus.jar . --html} does, gives a project root of {@code .}, whose
+     * file name is {@code .} and not the name of anything.
+     *
+     * @param projectRoot the directory holding {@code docs/}
+     * @return that directory's own name, or the empty string if it has none (a filesystem root)
+     */
+    static String projectDirName(Path projectRoot) {
+        Path name = projectRoot.toAbsolutePath().normalize().getFileName();
+        return name == null ? "" : name.toString();
+    }
+
     static boolean hasRuleFile(Path mdFile) {
         String name = mdFile.getFileName().toString();
         return name.endsWith(".md")

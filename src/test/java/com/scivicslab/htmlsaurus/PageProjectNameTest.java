@@ -54,6 +54,19 @@ class PageProjectNameTest {
                 "the navbar title is not a project id");
     }
 
+    /**
+     * {@code java -jar html-saurus.jar . --html}, the way the project is built by hand and in its
+     * Dockerfile, hands the builder a relative path. Its file name is {@code .}, so the page posted
+     * {@code /api/build-async/html/.} until the root was resolved against the working directory.
+     */
+    @Test
+    void aRelativeProjectRootStillYieldsTheDirectoryName() {
+        assertEquals(Path.of("").toAbsolutePath().getFileName().toString(),
+                SiteBuilder.projectDirName(Path.of(".")));
+        assertEquals("proj", SiteBuilder.projectDirName(Path.of("proj/docs").getParent()));
+        assertEquals("proj", SiteBuilder.projectDirName(Path.of("/tmp/proj")));
+    }
+
     @Test
     void theNavbarStillShowsTheTitle() throws IOException {
         Path proj = createProject("nigsc_homepage2", "NIG Supercomputer");
