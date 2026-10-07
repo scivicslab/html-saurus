@@ -40,8 +40,10 @@ class BlogBuilder {
     }
 
     /** Represents a parsed Docusaurus blog post. */
+    /** @param source the Markdown file the post was read from, whose own directory holds the
+     *                files the post refers to by a bare name */
     record BlogPost(String slug, String title, LocalDate date,
-                    List<String> tags, String excerpt, String body) {}
+                    List<String> tags, String excerpt, String body, Path source) {}
 
     /** Parses a blog post Markdown file. */
     BlogPost parseBlogPost(Path file) throws IOException {
@@ -86,7 +88,7 @@ class BlogBuilder {
         if (ti < 0) ti = body.indexOf("<!--truncate-->");
         String excerpt = ti >= 0 ? body.substring(0, ti).trim() : body;
 
-        return new BlogPost(slug, title, date, List.copyOf(tags), excerpt, body);
+        return new BlogPost(slug, title, date, List.copyOf(tags), excerpt, body, file);
     }
 
     /**
@@ -222,6 +224,12 @@ class BlogBuilder {
 
         Path out = outDir.resolve("blog/" + post.slug() + "/index.html");
         Files.createDirectories(out.getParent());
+        // The post is published as its own directory, so a file it names by a bare name has to be
+        // there too: blog/ holds the sources side by side, and the page is one level below them.
+        for (String name : SiteBuilder.referencedSiblings(post.source())) {
+            Path dest = out.getParent().resolve(name);
+            if (!Files.exists(dest)) Files.copy(post.source().getParent().resolve(name), dest);
+        }
         Files.writeString(out, siteBuilder.renderPage(post.title(), c.toString(), navRoot,
                 "../../", "/blog/" + post.slug() + "/", "/blog",
                 "blog/" + post.slug() + ".md",

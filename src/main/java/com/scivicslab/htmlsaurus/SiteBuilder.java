@@ -690,7 +690,7 @@ public class SiteBuilder {
      * @param mdFile the page's Markdown source
      * @return the file names, each existing in {@code mdFile}'s own directory
      */
-    private Set<String> referencedSiblings(Path mdFile) throws IOException {
+    static Set<String> referencedSiblings(Path mdFile) throws IOException {
         Path dir = mdFile.getParent();
         Set<String> names = new LinkedHashSet<>();
         java.util.regex.Matcher m = REFERENCE.matcher(Files.readString(mdFile, StandardCharsets.UTF_8));

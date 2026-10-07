@@ -140,6 +140,32 @@ class OutputLayoutTest {
         }
     }
 
+    /**
+     * A blog post is published as its own directory, one level below the {@code blog/} folder its
+     * source and the images sit in side by side, so the files it names have to be copied there too.
+     * Nothing copied them: every image in a post that named one by a bare name answered 404, on the
+     * published site as well as locally.
+     */
+    @Test
+    void blogPostGetsTheFilesItNames() throws IOException {
+        Path proj = createProject();
+        Path blog = proj.resolve("blog");
+        Files.createDirectories(blog);
+        Files.writeString(blog.resolve("2022-07-05-news.md"),
+                "---\ntitle: News\n---\n\n![screen](login_JP.png)\n");
+        Files.writeString(blog.resolve("login_JP.png"), "png");
+        Files.writeString(blog.resolve("unused.png"), "png");
+        Files.writeString(proj.resolve("docs/intro.md"), "---\ntitle: Intro\n---\n\nContent.\n");
+
+        build(proj, false);
+
+        // The date prefix of the filename is not part of the slug.
+        Path post = proj.resolve("static-html/blog/news");
+        assertTrue(Files.isRegularFile(post.resolve("index.html")), "the post is published");
+        assertTrue(Files.isRegularFile(post.resolve("login_JP.png")), "the image it names is beside it");
+        assertFalse(Files.exists(post.resolve("unused.png")), "an image it never names is not copied");
+    }
+
     private void deleteTree(Path dir) throws IOException {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {
