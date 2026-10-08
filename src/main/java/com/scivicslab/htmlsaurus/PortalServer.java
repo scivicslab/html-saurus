@@ -55,10 +55,13 @@ public class PortalServer {
     private final int threads;
     private final Path worksDir;
     private McpHandler mcpHandler;
-    /** Precomputed semantic (embedding-based) related docs: portalPath -> list of {path,title,summary}. */
-    private final Map<String, List<Map<String, String>>> semanticRelated;
+    /**
+     * Precomputed semantic (embedding-based) related docs: portalPath -> list of {path,title,summary}.
+     * Replaced wholesale by {@link #reloadSemanticIndex()}; read through the field every time.
+     */
+    private volatile Map<String, List<Map<String, String>>> semanticRelated;
     /** In-memory semantic index (document vectors) for query-to-doc search; may be null. */
-    private final SemanticIndex semanticIndex;
+    private volatile SemanticIndex semanticIndex;
     /** Embedding client used to embed search queries at request time. */
     private final EmbeddingClient embed;
     /** Generation client used for on-demand paragraph translation. */
@@ -1370,6 +1373,7 @@ public class PortalServer {
         }
         reportProgress(job, "embedding (" + total + " projects)");
         Main.ensureSemanticVectors(targets.stream().map(Project::projectDir).toList());
+        reloadSemanticIndex();
 
         invalidatePrerequisiteOfIndex();
         System.out.println("Update all projects complete: " + total + " project(s), "
@@ -1402,11 +1406,15 @@ public class PortalServer {
         switch (stage) {
             case "html" -> Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false, threads);
             case "index" -> Main.reindexAll(proj.projectDir(), false);
-            case "embedding" -> Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
+            case "embedding" -> {
+                Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
+                reloadSemanticIndex();
+            }
             case "all" -> {
                 Main.build(proj.projectDir().resolve("docs"), proj.staticDir(), false, threads);
                 Main.reindexAll(proj.projectDir(), false);
                 Main.ensureSemanticVectors(java.util.List.of(proj.projectDir()));
+                reloadSemanticIndex();
             }
             default -> throw new IllegalArgumentException("Unknown stage: " + stage);
         }
@@ -2786,6 +2794,23 @@ public class PortalServer {
             }
         }
         return merged;
+    }
+
+    /**
+     * Reads the vector files from disk again and answers semantic questions from them hereafter.
+     *
+     * <p>Called after a build stage that rewrote them. The full-text side needs no such call: its
+     * searcher reopens the Lucene index when the files under it change. The vectors are read in one
+     * go into memory, so without this the portal answers from what it read at start-up, and a page
+     * that has since moved keeps being offered at an address that is no longer there.
+     */
+    void reloadSemanticIndex() {
+        List<Path> dirs = projects.stream().map(Project::projectDir).toList();
+        SemanticIndex loaded = SemanticIndex.load(dirs, Main.SEMANTIC_TOP_K);
+        this.semanticIndex = loaded;
+        this.semanticRelated = loaded == null ? Map.of()
+                : loaded.servedMap((projectName, path) -> "/" + projectName + path);
+        System.out.println("Semantic related-docs: " + semanticRelated.size() + " entries (reloaded)");
     }
 
     /** Queries a single project's Lucene index and appends matching results to the output list. */
