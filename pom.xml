@@ -5,9 +5,31 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.scivicslab</groupId>
-    <artifactId>html-saurus</artifactId>
+    <artifactId>html-saurus-parent</artifactId>
     <version>2.6.0-SNAPSHOT</version>
-    <packaging>jar</packaging>
+    <packaging>pom</packaging>
+
+    <!--
+      One module per mode, so a mode's code is not in the jar of a mode that must not run it.
+
+      html-saurus serves a public site in production mode and runs on the author's own machine in
+      portal mode. Both used to come out of one jar, with a boolean deciding which paths the
+      server registered. The portal's half of that jar reaches into the machine it runs on —
+      /mcp reads and writes files and rebuilds the site, and asks for no credential — so the
+      public deployment carried code it must never run, kept unreachable by a runtime flag.
+
+      It now carries none of it: html-saurus-production-server depends on html-saurus-lib and
+      nothing else, so McpHandler, the import services and the OCR clients are absent from its
+      jar, and with them PDFBox, POI and jsoup.
+
+      html-saurus-lib holds what every mode needs and declares no HTTP endpoint at all.
+    -->
+    <modules>
+        <module>html-saurus-lib</module>
+        <module>html-saurus-build-only</module>
+        <module>html-saurus-production-server</module>
+        <module>html-saurus-portal-server</module>
+    </modules>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
@@ -24,6 +46,12 @@
     -->
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.scivicslab</groupId>
+                <artifactId>html-saurus-lib</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
             <!-- via pojo-actor 4.2.0 — 2.20.0 carries 11 advisories (polymorphic-type-validator
                  bypasses, eager DNS resolution, parser DoS). -->
             <dependency>
@@ -46,141 +74,165 @@
                 <artifactId>log4j-api</artifactId>
                 <version>2.26.1</version>
             </dependency>
+
+            <!-- Lucene full-text search with Japanese (Kuromoji) analyzer -->
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-core</artifactId>
+                <version>${lucene.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-queryparser</artifactId>
+                <version>${lucene.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-analysis-kuromoji</artifactId>
+                <version>${lucene.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-queries</artifactId>
+                <version>${lucene.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-analysis-common</artifactId>
+                <version>${lucene.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-highlighter</artifactId>
+                <version>${lucene.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.commonmark</groupId>
+                <artifactId>commonmark</artifactId>
+                <version>0.30.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.commonmark</groupId>
+                <artifactId>commonmark-ext-gfm-tables</artifactId>
+                <version>0.30.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.commonmark</groupId>
+                <artifactId>commonmark-ext-gfm-strikethrough</artifactId>
+                <version>0.30.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.commonmark</groupId>
+                <artifactId>commonmark-ext-heading-anchor</artifactId>
+                <version>0.30.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.commonmark</groupId>
+                <artifactId>commonmark-ext-autolink</artifactId>
+                <version>0.30.0</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.scivicslab</groupId>
+                <artifactId>job-registry</artifactId>
+                <version>0.1.0</version>
+            </dependency>
+            <dependency>
+                <groupId>com.scivicslab</groupId>
+                <artifactId>openmath-lisp</artifactId>
+                <version>0.1.0-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>com.scivicslab</groupId>
+                <artifactId>pojo-actor</artifactId>
+                <version>4.2.0</version>
+            </dependency>
+            <dependency>
+                <groupId>com.scivicslab</groupId>
+                <artifactId>gpu-broker-client</artifactId>
+                <version>0.2.0</version>
+            </dependency>
+
+            <!-- PDF text extraction — the PDF import only, which is portal mode's -->
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>pdfbox</artifactId>
+                <version>3.0.8</version>
+            </dependency>
+            <!-- Word (.docx) text and embedded-image extraction — the Word import only -->
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi-ooxml</artifactId>
+                <version>5.5.1</version>
+            </dependency>
+            <!-- HTML fetch and article-text extraction — the Web page import only -->
+            <dependency>
+                <groupId>org.jsoup</groupId>
+                <artifactId>jsoup</artifactId>
+                <version>1.23.2</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>5.11.4</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.microsoft.playwright</groupId>
+                <artifactId>playwright</artifactId>
+                <version>1.52.0</version>
+                <scope>test</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
     <dependencies>
-
-    <dependency>
-      <groupId>com.scivicslab</groupId>
-      <artifactId>job-registry</artifactId>
-      <version>0.1.0</version>
-    </dependency>
-
-    <!-- Formula source in markdown: om blocks to LaTeX for display, LaTeX to om blocks on import -->
-    <dependency>
-      <groupId>com.scivicslab</groupId>
-      <artifactId>openmath-lisp</artifactId>
-      <version>0.1.0-SNAPSHOT</version>
-    </dependency>
-        <!-- Lucene full-text search with Japanese (Kuromoji) analyzer -->
-        <dependency>
-            <groupId>org.apache.lucene</groupId>
-            <artifactId>lucene-core</artifactId>
-            <version>${lucene.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.lucene</groupId>
-            <artifactId>lucene-queryparser</artifactId>
-            <version>${lucene.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.lucene</groupId>
-            <artifactId>lucene-analysis-kuromoji</artifactId>
-            <version>${lucene.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.lucene</groupId>
-            <artifactId>lucene-queries</artifactId>
-            <version>${lucene.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.lucene</groupId>
-            <artifactId>lucene-analysis-common</artifactId>
-            <version>${lucene.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.lucene</groupId>
-            <artifactId>lucene-highlighter</artifactId>
-            <version>${lucene.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.commonmark</groupId>
-            <artifactId>commonmark</artifactId>
-            <version>0.30.0</version>
-        </dependency>
-        <dependency>
-            <groupId>org.commonmark</groupId>
-            <artifactId>commonmark-ext-gfm-tables</artifactId>
-            <version>0.30.0</version>
-        </dependency>
-        <dependency>
-            <groupId>org.commonmark</groupId>
-            <artifactId>commonmark-ext-gfm-strikethrough</artifactId>
-            <version>0.30.0</version>
-        </dependency>
-        <dependency>
-            <groupId>org.commonmark</groupId>
-            <artifactId>commonmark-ext-heading-anchor</artifactId>
-            <version>0.30.0</version>
-        </dependency>
-        <dependency>
-            <groupId>org.commonmark</groupId>
-            <artifactId>commonmark-ext-autolink</artifactId>
-            <version>0.30.0</version>
-        </dependency>
-
-        <!-- POJO-actor: lightweight actor framework -->
-        <dependency>
-            <groupId>com.scivicslab</groupId>
-            <artifactId>pojo-actor</artifactId>
-            <version>4.2.0</version>
-        </dependency>
-
-        <!-- gpu-broker-client: flow-controlled SDK for quarkus-gpu-broker's async job path -->
-        <dependency>
-            <groupId>com.scivicslab</groupId>
-            <artifactId>gpu-broker-client</artifactId>
-            <version>0.2.0</version>
-        </dependency>
-
-        <!-- PDF text extraction -->
-        <dependency>
-            <groupId>org.apache.pdfbox</groupId>
-            <artifactId>pdfbox</artifactId>
-            <version>3.0.8</version>
-        </dependency>
-
-        <!-- Word (.docx) text and embedded-image extraction -->
-        <dependency>
-            <groupId>org.apache.poi</groupId>
-            <artifactId>poi-ooxml</artifactId>
-            <version>5.5.1</version>
-        </dependency>
-
-        <!-- HTML fetch and article-text extraction for the Web page import -->
-        <dependency>
-            <groupId>org.jsoup</groupId>
-            <artifactId>jsoup</artifactId>
-            <version>1.23.2</version>
-        </dependency>
-
-        <!-- Test dependencies -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.11.4</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.microsoft.playwright</groupId>
-            <artifactId>playwright</artifactId>
-            <version>1.52.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
 
     <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.2</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>0.8.15</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>3.3.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-javadoc-plugin</artifactId>
+                    <version>3.6.3</version>
+                    <configuration>
+                        <doclint>none</doclint>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-shade-plugin</artifactId>
+                    <version>3.5.2</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.2</version>
-            </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.15</version>
                 <executions>
                     <execution>
                         <goals><goal>prepare-agent</goal></goals>
@@ -192,104 +244,6 @@
                     </execution>
                 </executions>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.3.0</version>
-                <configuration>
-                    <archive>
-                        <manifest>
-                            <mainClass>com.scivicslab.htmlsaurus.Main</mainClass>
-                        </manifest>
-                    </archive>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-javadoc-plugin</artifactId>
-                <version>3.6.3</version>
-                <configuration>
-                    <doclint>none</doclint>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>attach-javadocs</id>
-                        <goals><goal>jar</goal></goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.2</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals><goal>shade</goal></goals>
-                        <configuration>
-                            <shadedArtifactAttached>true</shadedArtifactAttached>
-                            <shadedClassifierName>shaded</shadedClassifierName>
-                            <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <finalName>html-saurus-${project.version}</finalName>
-                            <filters>
-                                <filter>
-                                    <artifact>*:*</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/*.SF</exclude>
-                                        <exclude>META-INF/*.DSA</exclude>
-                                        <exclude>META-INF/*.RSA</exclude>
-                                    </excludes>
-                                </filter>
-                            </filters>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.scivicslab.htmlsaurus.Main</mainClass>
-                                </transformer>
-                            </transformers>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
         </plugins>
     </build>
-
-    <profiles>
-        <profile>
-            <id>native</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.graalvm.buildtools</groupId>
-                        <artifactId>native-maven-plugin</artifactId>
-                        <version>0.10.3</version>
-                        <extensions>true</extensions>
-                        <executions>
-                            <execution>
-                                <id>build-native</id>
-                                <goals>
-                                    <goal>compile-no-fork</goal>
-                                </goals>
-                                <phase>package</phase>
-                            </execution>
-                        </executions>
-                        <configuration>
-                            <imageName>html-saurus</imageName>
-                            <mainClass>com.scivicslab.htmlsaurus.Main</mainClass>
-                            <buildArgs>
-                                <buildArg>--no-fallback</buildArg>
-                                <buildArg>-H:+ReportExceptionStackTraces</buildArg>
-                                <buildArg>--enable-url-protocols=http,https</buildArg>
-                                <buildArg>-H:IncludeResources=org/apache/lucene/.*|META-INF/services/.*|.*\.dict|.*\.fst|.*\.dat|com/scivicslab/htmlsaurus/.*\.css</buildArg>
-                                <!-- Defer Lucene classes that require runtime initialization -->
-                                <buildArg>--initialize-at-run-time=org.apache.lucene.internal.vectorization.PanamaVectorUtilSupport,org.apache.lucene.internal.vectorization.VectorizationProvider,org.apache.lucene.util.VectorUtil,org.apache.lucene.analysis.tokenattributes.PackedTokenAttributeImpl</buildArg>
-                                <!-- Allow NativeLibrary.findEntry0 to be reported at runtime (Lucene falls back to scalar) -->
-                                <buildArg>--report-unsupported-elements-at-runtime</buildArg>
-                            </buildArgs>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 </project>
