@@ -3,7 +3,11 @@ package com.scivicslab.htmlsaurus;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.pojoactor.core.ActorSystem;
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+
+import static com.scivicslab.htmlsaurus.Endpoint.Visibility.DEV_ONLY;
+import static com.scivicslab.htmlsaurus.Endpoint.Visibility.PUBLIC;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -32,6 +36,8 @@ public class SearchServer {
     private final ActorSystem searcherSystem = new ActorSystem("searcher-system");
     private final ActorRef<LuceneSearcher> searcher;
     private final Map<String, ActorRef<LuceneSearcher>> localeSearchers = new HashMap<>();
+    /** Every path declared in start(), whether or not this deployment registered its handler. */
+    private final List<Endpoint> endpoints = new ArrayList<>();
     /** Semantic related-docs keyed by served path; empty when no vectors are available. */
     private final Map<String, List<Map<String, String>>> semanticRelated;
     /** In-memory semantic index (document vectors) for query-to-doc search; may be null. */
@@ -112,31 +118,33 @@ public class SearchServer {
      */
     public HttpServer start() throws IOException {
         var server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
-        if (!production) {
-            server.createContext("/api/build-all", this::handleBuild);
-            // The page header offers HTML and All; single-project mode must answer both, since
-            // the same header markup is served here and by the portal (FastBuild_260901_oo01).
-            server.createContext("/api/build-html", ex -> handleBuildStage(ex, rebuildHtml));
-        }
-        server.createContext("/search", this::handleSearch);
+
+        register(server, "/api/build-all", DEV_ONLY, () -> this::handleBuild);
+        // The page header offers HTML and All; single-project mode must answer both, since
+        // the same header markup is served here and by the portal (FastBuild_260901_oo01).
+        register(server, "/api/build-html", DEV_ONLY, () -> ex -> handleBuildStage(ex, rebuildHtml));
+
+        register(server, "/search", PUBLIC, () -> this::handleSearch);
         // An English page's search box submits to /en/search, the results page that sits beside
         // the English pages. Without a handler there the request reached the static file, whose
         // results marker nothing had replaced, so the page listed nothing whatever was asked.
         for (String loc : localeSearchers.keySet()) {
-            server.createContext("/" + loc + "/search", this::handleSearch);
+            register(server, "/" + loc + "/search", PUBLIC, () -> this::handleSearch);
         }
-        if (!production) {
-            server.createContext("/api/related", this::handleRelated);
-            server.createContext("/api/find-related", this::handleFindRelated);
-            server.createContext("/api/related-semantic", this::handleRelatedSemantic);
-            server.createContext("/related-semantic", this::handleRelatedSemanticPage);
-            server.createContext("/api/search-semantic", this::handleSearchSemantic);
-            server.createContext("/search-semantic", this::handleSearchSemanticPage);
-            server.createContext("/api/translate", this::handleTranslate);
-        }
-        if (!production) {
-            // MCP endpoint for LLM tool access (development mode only — exposes unauthenticated
-            // file read/write/rebuild tools that must not be reachable from a production deployment)
+
+        register(server, "/api/related", DEV_ONLY, () -> this::handleRelated);
+        register(server, "/api/find-related", DEV_ONLY, () -> this::handleFindRelated);
+        register(server, "/api/related-semantic", DEV_ONLY, () -> this::handleRelatedSemantic);
+        register(server, "/related-semantic", DEV_ONLY, () -> this::handleRelatedSemanticPage);
+        register(server, "/api/search-semantic", DEV_ONLY, () -> this::handleSearchSemantic);
+        register(server, "/search-semantic", DEV_ONLY, () -> this::handleSearchSemanticPage);
+        register(server, "/api/translate", DEV_ONLY, () -> this::handleTranslate);
+
+        // MCP endpoint for LLM tool access. It reads and writes files and rebuilds the site, and
+        // asks for no credential, so a public deployment must not register it. The handler is
+        // built inside the supplier, which a public deployment never calls, so the object is not
+        // constructed there either.
+        register(server, "/mcp", DEV_ONLY, () -> {
             // Single-project mode has no id/path-fragment resolver (no /api/resolve equivalent),
             // so prerequisite-documents reports itself unavailable here rather than resolving.
             // find-related-documents also ignores locale here, matching handleFindRelated's own
@@ -157,15 +165,42 @@ public class SearchServer {
             var mcpHandler = new McpHandler(docsDir, () -> searcher, localeSearchers, null,
                 textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
                 null, null, stageBuilder, null, null, null, null, this::translateCore);
-            server.createContext("/mcp", mcpHandler::handle);
-        }
-        server.createContext("/", this::handleStatic);
+            return mcpHandler::handle;
+        });
+
+        register(server, "/", PUBLIC, () -> this::handleStatic);
+
         server.setExecutor(null);
         server.start();
         Runtime.getRuntime().addShutdownHook(new Thread(searcherSystem::terminate));
         System.out.println("Serving at http://localhost:" + server.getAddress().getPort());
         System.out.println("Press Ctrl+C to stop.");
         return server;
+    }
+
+    /**
+     * Declares one path this server knows about and, when this deployment may answer it, registers
+     * its handler.
+     *
+     * <p>Every path goes through here, and every call states its {@link Endpoint.Visibility}, so
+     * whether a public site answers a path is written at the line that adds the path instead of
+     * following from which {@code if} block the line sits in. {@link #endpoints()} hands the
+     * declarations to the test that checks the production surface, which therefore covers a new
+     * path from the moment it is written rather than when someone remembers to copy it.
+     *
+     * <p>The handler arrives as a supplier so a public deployment does not construct the handlers
+     * it will not register.
+     */
+    private void register(HttpServer server, String path, Endpoint.Visibility visibility,
+                          java.util.function.Supplier<HttpHandler> handler) {
+        endpoints.add(new Endpoint(path, visibility));
+        if (production && visibility != PUBLIC) return;
+        server.createContext(path, handler.get());
+    }
+
+    /** Every path this server declared, in the order it declared them. */
+    List<Endpoint> endpoints() {
+        return List.copyOf(endpoints);
     }
 
     // ---- Build endpoint -----------------------------------------
