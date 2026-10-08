@@ -22,6 +22,11 @@
             <groupId>com.scivicslab</groupId>
             <artifactId>html-saurus-lib</artifactId>
         </dependency>
+        <!-- Sub-command, option parsing and help -->
+        <dependency>
+            <groupId>com.scivicslab</groupId>
+            <artifactId>pluggable-cli</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

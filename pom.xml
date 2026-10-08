@@ -153,6 +153,12 @@
                 <artifactId>gpu-broker-client</artifactId>
                 <version>0.2.0</version>
             </dependency>
+            <!-- The command line of all three programs. Commons CLI arrives with it. -->
+            <dependency>
+                <groupId>com.scivicslab</groupId>
+                <artifactId>pluggable-cli</artifactId>
+                <version>1.2.0</version>
+            </dependency>
 
             <!-- PDF text extraction — the PDF import only, which is portal mode's -->
             <dependency>

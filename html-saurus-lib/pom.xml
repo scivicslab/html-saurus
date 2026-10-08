@@ -94,5 +94,10 @@
             <groupId>org.commonmark</groupId>
             <artifactId>commonmark-ext-autolink</artifactId>
         </dependency>
+        <!-- The command line every mode is driven by; Commons CLI arrives with it -->
+        <dependency>
+            <groupId>com.scivicslab</groupId>
+            <artifactId>pluggable-cli</artifactId>
+        </dependency>
     </dependencies>
 </project>

@@ -1,87 +1,156 @@
 package com.scivicslab.htmlsaurus;
 
+import com.scivicslab.pluggablecli.CommandRepository;
+
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Entry point for build-only mode: run the stages that were asked for and stop.
+ * Entry point for build-only mode: run one stage and stop. No server is started and no port is
+ * opened.
  *
- * <p>Usage: {@code java -jar html-saurus-build-only.jar <path> [--html] [--index] [--embedding]
- * [--all-projects] [--authoring-controls] [--no-diagrams] [--threads N]}
+ * <p>Usage: {@code java -jar html-saurus-build-only.jar <html|index|embedding|all> -d <path>}
  *
- * <p>No server is started and no port is opened. Naming no stage runs all three.
+ * <p>The three stages were {@code --html}, {@code --index} and {@code --embedding}, with "name
+ * none of them and all three run" as an unwritten rule. They are commands now, and that rule has
+ * a name: {@code all}.
  *
- * <p>The stages run in the order html, index, embedding, whichever subset was named, because each
- * reads what the one before it wrote: the index reflects the built pages, and the embedding cache
- * is keyed off the index. Running them separately lets an HTML refresh go ahead without waiting
- * on the embedding server, or failing because it is down.
+ * <p>A stage reads what the one before it wrote: the index reflects the built pages, and the
+ * embedding cache is keyed off the index. Running one at a time is what lets an HTML refresh go
+ * ahead without waiting on the embedding server, or failing because it is down.
  */
 public final class BuildOnlyMain {
 
-    private BuildOnlyMain() {}
+    private static final String SYNOPSIS =
+            "java -jar html-saurus-build-only-<VERSION>.jar <command> <options>";
 
-    public static void main(String[] args) throws IOException {
-        Options o = new Options("html-saurus-build-only")
-                .flag("--html").flag("--index").flag("--embedding").flag("--embed")
-                .flag("--all-projects")
-                // Whether the built pages carry the Rebuild button and the Source / Copy list.
-                // Those are for someone editing the Markdown, and portal mode is what serves them,
-                // so a build asks for them rather than getting them by default.
-                .flag("--authoring-controls")
-                // make-diagrams is given ten minutes to redraw the figures beside the Markdown.
-                // This is the way out when the pages are wanted and the figures can wait.
-                .flag("--no-diagrams")
-                .value("--threads")
-                // --portal-mode meant "every project under this directory" here, which is not what
-                // it meant to the server it was named after.
-                .renamed("--portal-mode", "--all-projects")
-                .obsolete("--production", false,
-                        "a build already leaves the authoring controls out; pass --authoring-controls to put them back")
-                .obsolete("--serve", false, "this program never starts a server")
-                .obsolete("--port", true, "this program never starts a server")
-                .parse(args);
+    private final CommandRepository cmds = new CommandRepository();
 
-        if (o.is("--no-diagrams")) BuildStages.skipDiagrams(true);
-        Path rootDir = o.path();
-        int threads = o.number("--threads", 0);
-
-        boolean doHtml = o.is("--html");
-        boolean doIndex = o.is("--index");
-        boolean doEmbedding = o.is("--embedding") || o.is("--embed");
-        if (!doHtml && !doIndex && !doEmbedding) doHtml = doIndex = doEmbedding = true;
-
-        List<Path> projects = o.is("--all-projects") ? Projects.findProjects(rootDir) : List.of(rootDir);
-        if (projects.isEmpty()) {
-            System.err.println("No Docusaurus projects found under " + rootDir);
-            return;
-        }
-
-        List<String> stages = new ArrayList<>();
-        if (doHtml) stages.add("html");
-        if (doIndex) stages.add("index");
-        if (doEmbedding) stages.add("embedding");
-        System.out.println("=== html-saurus build ===");
-        System.out.println("  root     : " + rootDir);
-        System.out.println("  projects : " + projects.size());
-        System.out.println("  stages   : " + String.join("+", stages));
-        System.out.println("=========================");
-
-        boolean production = !o.is("--authoring-controls");
-        if (doHtml) {
-            for (Path p : projects) {
-                BuildStages.build(p.resolve("docs"), p.resolve("static-html"), production, threads);
-            }
-        }
-        if (doIndex) {
-            for (Path p : projects) {
-                BuildStages.reindexAll(p, production);
-            }
-        }
-        if (doEmbedding) {
-            // Operates across all projects at once; non-fatal if the embedding server is unreachable.
-            BuildStages.ensureSemanticVectors(projects);
-        }
+    public static void main(String[] args) {
+        BuildOnlyMain app = new BuildOnlyMain();
+        app.setupCommands();
+        // Only on failure: a server returns from run() with its HttpServer threads still going,
+        // and System.exit(0) would take them with it.
+        int status = CliRunner.run(app.cmds, SYNOPSIS, args);
+        if (status != 0) System.exit(status);
     }
+
+    private void setupCommands() {
+        stageCommand("html", """
+                Converts the Markdown to static HTML under static-html/.
+
+                For example:
+                $ java -jar html-saurus-build-only.jar html -d ~/works/nigsc_homepage2
+                """);
+        stageCommand("index", """
+                Builds the Lucene full-text index under search-index/, for every locale the
+                project declares. Reads the built pages, so run html first when they are stale.
+                """);
+        stageCommand("embedding", """
+                Builds the embedding vectors under search-embedding/, asking the embedding
+                server named by EMBEDDING_SERVER_URL. Keyed off search-index/, so run index
+                first when it is stale. Reports and returns when that server is unreachable.
+                """);
+        stageCommand("all", """
+                Runs html, then index, then embedding, in that order.
+
+                For example:
+                $ java -jar html-saurus-build-only.jar all -d ~/works -a
+                """);
+    }
+
+    /** The four commands differ only in which stages they run; the options are the same. */
+    private void stageCommand(String name, String description) {
+        Options opts = new Options();
+
+        opts.addOption(Option.builder("d")
+                .longOpt("dir")
+                .hasArg(true)
+                .argName("dir")
+                .desc("The Docusaurus project to build, or the directory to scan with -a.")
+                .required(true)
+                .build());
+
+        opts.addOption(Option.builder("a")
+                .longOpt("all-projects")
+                .hasArg(false)
+                .desc("Treat -d as a directory holding many projects, and build every one.")
+                .required(false)
+                .build());
+
+        opts.addOption(Option.builder("t")
+                .longOpt("threads")
+                .hasArg(true)
+                .argName("threads")
+                .desc("Pages converted in parallel (default: 4).")
+                .required(false)
+                .build());
+
+        opts.addOption(Option.builder()
+                .longOpt("authoring-controls")
+                .hasArg(false)
+                .desc("""
+                        Put the Rebuild button and the Source / Copy list on each page. They are \
+                        for someone editing the Markdown, so a build leaves them out unless asked.""")
+                .required(false)
+                .build());
+
+        opts.addOption(Option.builder()
+                .longOpt("no-diagrams")
+                .hasArg(false)
+                .desc("""
+                        Skip redrawing the figures beside the Markdown. make-diagrams is given ten \
+                        minutes, which is the wait this is the way out of.""")
+                .required(false)
+                .build());
+
+        cmds.addCommand(name, opts, description, (CommandLine cl) -> {
+            if (cl.hasOption("no-diagrams")) BuildStages.skipDiagrams(true);
+            Path dir = Path.of(cl.getOptionValue("dir")).toAbsolutePath();
+            int threads = Integer.parseInt(cl.getOptionValue("threads", "0"));
+            boolean production = !cl.hasOption("authoring-controls");
+
+            List<Path> projects;
+            try {
+                projects = cl.hasOption("all-projects") ? Projects.findProjects(dir) : List.of(dir);
+            } catch (IOException e) {
+                System.err.println("Could not read " + dir + ": " + e.getMessage());
+                System.exit(1);
+                return;
+            }
+            if (projects.isEmpty()) {
+                System.err.println("No Docusaurus projects found under " + dir);
+                System.exit(1);
+                return;
+            }
+
+            System.out.println("=== html-saurus build ===");
+            System.out.println("  dir      : " + dir);
+            System.out.println("  projects : " + projects.size());
+            System.out.println("  stage    : " + name);
+            System.out.println("=========================");
+
+            boolean all = name.equals("all");
+            if (all || name.equals("html")) {
+                for (Path p : projects) {
+                    BuildStages.build(p.resolve("docs"), p.resolve("static-html"), production, threads);
+                }
+            }
+            if (all || name.equals("index")) {
+                for (Path p : projects) {
+                    BuildStages.reindexAll(p, production);
+                }
+            }
+            if (all || name.equals("embedding")) {
+                // Across all projects at once; non-fatal if the embedding server is unreachable.
+                BuildStages.ensureSemanticVectors(projects);
+            }
+        });
+    }
+
 }

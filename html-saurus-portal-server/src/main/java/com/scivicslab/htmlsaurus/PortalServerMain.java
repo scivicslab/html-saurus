@@ -1,5 +1,11 @@
 package com.scivicslab.htmlsaurus;
 
+import com.scivicslab.pluggablecli.CommandRepository;
+
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -8,7 +14,7 @@ import java.util.List;
  * Entry point for portal mode: serve every Docusaurus project under one root, on the machine the
  * documents are written on.
  *
- * <p>Usage: {@code java -jar html-saurus-portal-server.jar <works-dir> [--port N] [--threads N]}
+ * <p>Usage: {@code java -jar html-saurus-portal-server.jar serve -d <works-dir> [-p N] [-t N]}
  *
  * <p>This is the mode with the endpoints that reach into the machine: importing a PDF, reading and
  * writing the Markdown over MCP, rebuilding a project. None of that is reachable from the published
@@ -19,33 +25,88 @@ import java.util.List;
  */
 public final class PortalServerMain {
 
-    private PortalServerMain() {}
+    private static final String SYNOPSIS =
+            "java -jar html-saurus-portal-server-<VERSION>.jar <command> <options>";
 
-    public static void main(String[] args) throws Exception {
-        Options o = new Options("html-saurus-portal-server")
-                .value("--port")
-                // Page-conversion parallelism for every build this server runs: the ones at
-                // start-up, and the ones someone starts from the Projects tab. 0 keeps
-                // SiteBuilder's own default of 4 (BuildParallelization_260822_oo01).
-                .value("--threads")
-                .obsolete("--portal-mode", false, "running this jar is portal mode")
-                .obsolete("--serve", false, "this jar always serves")
-                .obsolete("--production", false, "the published site is html-saurus-production-server")
-                // Turning the figures off is a build-time choice, and the builds here are started
-                // by someone watching them, not by the command line that started the server.
-                .obsolete("--no-diagrams", false, "use html-saurus-build-only to build without figures")
-                .parse(args);
+    private final CommandRepository cmds = new CommandRepository();
 
-        Path worksDir = o.path();
-        int port = o.number("--port", 8080);
-        int threads = o.number("--threads", 0);
+    public static void main(String[] args) {
+        PortalServerMain app = new PortalServerMain();
+        app.setupCommands();
+        // Only on failure: a server returns from run() with its HttpServer threads still going,
+        // and System.exit(0) would take them with it.
+        int status = CliRunner.run(app.cmds, SYNOPSIS, args);
+        if (status != 0) System.exit(status);
+    }
 
+    private void setupCommands() {
+        serveCommand();
+    }
+
+    private void serveCommand() {
+        Options opts = new Options();
+
+        opts.addOption(Option.builder("d")
+                .longOpt("dir")
+                .hasArg(true)
+                .argName("dir")
+                .desc("The directory to scan for Docusaurus projects.")
+                .required(true)
+                .build());
+
+        opts.addOption(Option.builder("p")
+                .longOpt("port")
+                .hasArg(true)
+                .argName("port")
+                .desc("Port to listen on (default: 8080).")
+                .required(false)
+                .build());
+
+        opts.addOption(Option.builder("t")
+                .longOpt("threads")
+                .hasArg(true)
+                .argName("threads")
+                .desc("""
+                        Pages converted in parallel by every build this server runs (default: 4), \
+                        both the ones at start-up and the ones started from the Projects tab.""")
+                .required(false)
+                .build());
+
+        String description = """
+                Serves every Docusaurus project under one directory, to its author.
+
+                A project with no static-html/ is built at start-up, and one whose search-index/
+                this build of Lucene cannot read is rebuilt. Serving begins before the embedding
+                vectors are refreshed, because that can take minutes and the port has to open.
+
+                This is the server with the endpoints that reach into the machine it runs on:
+                /mcp reads and writes files and rebuilds projects without asking for a credential,
+                and the Import tab fetches PDFs, Word files, web pages and video transcripts. It
+                binds 0.0.0.0.
+
+                For example:
+                $ java -jar html-saurus-portal-server.jar serve -d ~/works -p 28001
+                """;
+
+        cmds.addCommand("serve", opts, description, (CommandLine cl) -> {
+            Path worksDir = Path.of(cl.getOptionValue("dir")).toAbsolutePath();
+            int port = Integer.parseInt(cl.getOptionValue("port", "8080"));
+            int threads = Integer.parseInt(cl.getOptionValue("threads", "0"));
+            try {
+                serve(worksDir, port, threads);
+            } catch (Exception e) {
+                System.err.println("Portal failed to start: " + e.getMessage());
+                System.exit(1);
+            }
+        });
+    }
+
+    private void serve(Path worksDir, int port, int threads) throws Exception {
         List<Path> projects = Projects.findProjects(worksDir);
         System.out.println("=== html-saurus portal ===");
         System.out.println("  root     : " + worksDir);
         System.out.println("  projects : " + projects.size());
         System.out.println("  port     : " + port);
-        System.out.println("  args     : " + String.join(" ", args));
         System.out.println("==========================");
         if (projects.isEmpty()) {
             // Still start the (empty) portal so the port binds and the process stays up for the
@@ -83,4 +144,5 @@ public final class PortalServerMain {
         BuildStages.ensureSemanticVectors(projects);
         System.out.println("Semantic vectors refresh complete.");
     }
+
 }
