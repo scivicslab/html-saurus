@@ -3646,15 +3646,26 @@ public class PortalServer {
      * widget into HTML pages.
      */
     private void handleStatic(HttpExchange ex, Project proj, String rest) throws IOException {
-        Path file = proj.staticDir().resolve(rest.replaceFirst("^/", "")).normalize();
+        // Strip the whole run of leading slashes, not just one. Path.resolve returns its argument
+        // verbatim when that argument is absolute, so a request path that still begins with "/"
+        // after the strip makes the lookup start at the filesystem root instead of the project's.
+        Path file = proj.staticDir().resolve(rest.replaceFirst("^/+", "")).normalize();
         if (!file.startsWith(proj.staticDir())) { respond(ex, 403, "text/plain", "Forbidden"); return; }
         if (Files.isDirectory(file)) {
-            file = file.resolve("index.html").normalize();
-            if (!file.startsWith(proj.staticDir()) || !Files.exists(file)) {
+            Path index = file.resolve("index.html").normalize();
+            if (!index.startsWith(proj.staticDir()) || !Files.exists(index)) {
                 respond(ex, 404, "text/html",
                     "<html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body><h1>404 Not Found</h1><p>" + escHtml(rest) + "</p></body></html>");
                 return;
             }
+            // Serve the page only under the "/"-terminated URL. Without the slash the browser
+            // resolves the page's relative references one directory too high, so same-directory
+            // images, PDFs and sibling links all come back 404.
+            if (!rest.endsWith("/")) {
+                HttpUtils.redirect(ex, HttpUtils.withTrailingSlash(ex.getRequestURI()));
+                return;
+            }
+            file = index;
         } else if (!Files.exists(file)) {
             respond(ex, 404, "text/html",
                 "<html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body><h1>404 Not Found</h1><p>" + escHtml(rest) + "</p></body></html>");

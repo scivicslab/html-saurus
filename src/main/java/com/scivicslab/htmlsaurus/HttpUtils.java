@@ -48,6 +48,45 @@ final class HttpUtils {
     }
 
     /**
+     * Sends a permanent redirect to {@code location} with no body. {@code location} must be a
+     * path on this same server: one leading "/" and no second one.
+     *
+     * <p>The check is the invariant, not a formality. A location beginning with "//" is a
+     * scheme-relative URL, and a browser reads everything up to the next "/" as the authority —
+     * so {@code //anything@evil.com/x} navigates to evil.com. Every caller here builds the
+     * location from the request, which an attacker writes, so the one place that emits the
+     * header enforces the rule for all of them.
+     */
+    static void redirect(HttpExchange ex, String location) throws IOException {
+        if (!location.startsWith("/") || location.startsWith("//")) {
+            respond(ex, 400, "text/plain", "Bad Request");
+            return;
+        }
+        ex.getResponseHeaders().set("Location", location);
+        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        ex.sendResponseHeaders(301, -1);
+        ex.close();
+    }
+
+    /**
+     * The request URI with a "/" appended to its path, keeping the percent-encoding of the path
+     * and the query string. Used to send a directory request to its canonical "/"-terminated
+     * form: a browser resolves the relative references in a page against everything up to the
+     * last "/" of the page's URL, so a page served at {@code /a/b} resolves {@code img.png} to
+     * {@code /a/img.png} instead of {@code /a/b/img.png}.
+     *
+     * <p>A run of leading slashes collapses to one. A request line may carry them — four of them
+     * leave {@link java.net.URI} with an empty authority and a path that itself starts with "//"
+     * — and copying that into the Location header would hand the browser a scheme-relative URL
+     * pointing at whatever host the attacker put after an "@".
+     */
+    static String withTrailingSlash(java.net.URI uri) {
+        String query = uri.getRawQuery();
+        String path = uri.getRawPath().replaceFirst("^/+", "/");
+        return path + "/" + (query == null ? "" : "?" + query);
+    }
+
+    /**
      * Shared responsive rules for every html-saurus-generated SSR page (portal, search,
      * related, semantic, upload). Kept in one place so responsiveness
      * is systematic rather than per-page: it protects unexpectedly wide content (tables,

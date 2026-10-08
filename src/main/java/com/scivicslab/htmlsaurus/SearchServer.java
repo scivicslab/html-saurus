@@ -571,15 +571,26 @@ public class SearchServer {
         String path = ex.getRequestURI().getPath();
         if (path.equals("/")) path = "/index.html";
 
-        Path file = staticDir.resolve(path.replaceFirst("^/", "")).normalize();
+        // Strip the whole run of leading slashes, not just one. Path.resolve returns its argument
+        // verbatim when that argument is absolute, so a request path that still begins with "/"
+        // after the strip makes the lookup start at the filesystem root instead of staticDir.
+        Path file = staticDir.resolve(path.replaceFirst("^/+", "")).normalize();
         if (!file.startsWith(staticDir)) { respond(ex, 403, "text/plain", "Forbidden"); return; }
         if (Files.isDirectory(file)) {
-            file = file.resolve("index.html").normalize();
-            if (!file.startsWith(staticDir) || !Files.exists(file)) {
+            Path index = file.resolve("index.html").normalize();
+            if (!index.startsWith(staticDir) || !Files.exists(index)) {
                 respond(ex, 404, "text/html",
                     "<html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body><h1>404 Not Found</h1><p>" + HttpUtils.escapeHtml(path) + "</p></body></html>");
                 return;
             }
+            // Serve the page only under the "/"-terminated URL. Without the slash the browser
+            // resolves the page's relative references one directory too high, so same-directory
+            // images, PDFs and sibling links all come back 404.
+            if (!path.endsWith("/")) {
+                HttpUtils.redirect(ex, HttpUtils.withTrailingSlash(ex.getRequestURI()));
+                return;
+            }
+            file = index;
         } else if (!Files.exists(file)) {
             respond(ex, 404, "text/html",
                 "<html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head><body><h1>404 Not Found</h1><p>" + HttpUtils.escapeHtml(path) + "</p></body></html>");
