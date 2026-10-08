@@ -2932,6 +2932,18 @@ public class PortalServer {
      * Extracts up to 20 related documents for the given portal-relative document path
      * (e.g. {@code /project/some/page.html}).  Used by both the JSON API and the HTML page.
      */
+    /**
+     * Resolves a served path against a project's output directory, or {@code null} when the result
+     * sits outside it. {@code Path.resolve} hands back an absolute argument untouched and keeps
+     * {@code ..} segments, so the leading slashes have to come off and the result has to be
+     * normalised before it can be compared with the directory it is supposed to be inside.
+     */
+    private static Path underStaticDir(Project proj, String servedPath) {
+        Path base = proj.staticDir();
+        Path file = base.resolve(servedPath.replaceFirst("^/+", "")).normalize();
+        return file.startsWith(base) ? file : null;
+    }
+
     private List<Map<String, String>> relatedDocsFor(String docPath) {
         if (docPath == null || docPath.isBlank()) return List.of();
 
@@ -2966,11 +2978,14 @@ public class PortalServer {
         // Fallback: read body text directly from static HTML file
         if (bodyText.isBlank()) {
             try {
-                Path htmlFile = proj.staticDir().resolve(pagePath.replaceFirst("^/", ""));
-                if (!Files.exists(htmlFile)) {
-                    htmlFile = proj.staticDir().resolve(altPath.replaceFirst("^/", "").replaceAll("/$", "/index.html"));
+                // pagePath is the caller's ?path= argument with the project name taken off, so it
+                // goes through the same check handleStatic applies: resolve, normalise, and refuse
+                // anything that landed outside the project's output directory.
+                Path htmlFile = underStaticDir(proj, pagePath);
+                if (htmlFile == null || !Files.exists(htmlFile)) {
+                    htmlFile = underStaticDir(proj, altPath.replaceAll("/$", "/index.html"));
                 }
-                if (Files.exists(htmlFile)) {
+                if (htmlFile != null && Files.exists(htmlFile)) {
                     String raw = Files.readString(htmlFile);
                     bodyText = raw.replaceAll("(?s)<script[^>]*>.*?</script>", " ")
                                   .replaceAll("(?s)<style[^>]*>.*?</style>", " ")
