@@ -22,6 +22,11 @@
             <groupId>com.scivicslab</groupId>
             <artifactId>html-saurus-lib</artifactId>
         </dependency>
+        <!-- The OCR and transcript clients speak to quarkus-gpu-broker; nothing else does -->
+        <dependency>
+            <groupId>com.scivicslab</groupId>
+            <artifactId>gpu-broker-client</artifactId>
+        </dependency>
         <!-- PDF text extraction, for the PDF import -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
