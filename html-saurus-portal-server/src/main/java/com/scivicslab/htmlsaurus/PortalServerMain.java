@@ -8,43 +8,37 @@ import java.util.List;
  * Entry point for portal mode: serve every Docusaurus project under one root, on the machine the
  * documents are written on.
  *
- * <p>Usage: {@code java -jar html-saurus-portal-server.jar <works-dir> [--port N] [--threads N]
- * [--no-diagrams]}
+ * <p>Usage: {@code java -jar html-saurus-portal-server.jar <works-dir> [--port N] [--threads N]}
  *
- * <p>This is the mode with the endpoints that reach into the machine: importing a PDF, reading
- * and writing the Markdown over MCP, rebuilding a project. None of that is reachable from the
- * public site, because none of it is in that jar.
+ * <p>This is the mode with the endpoints that reach into the machine: importing a PDF, reading and
+ * writing the Markdown over MCP, rebuilding a project. None of that is reachable from the published
+ * site, because none of it is in that jar.
  *
- * <p>There is no option that selects a mode. Which mode html-saurus runs in used to come from
- * {@code --production} / {@code --portal-mode} / {@code --serve} and the way they combined, and
- * one jar held the code for all of them. A mode is now a jar.
+ * <p>No option selects a mode. Which mode html-saurus ran in used to come from {@code --production}
+ * / {@code --portal-mode} / {@code --serve} and the way they combined. A mode is a jar now.
  */
 public final class PortalServerMain {
 
     private PortalServerMain() {}
 
     public static void main(String[] args) throws Exception {
-        Path worksDir = null;
-        int port = 8080;
-        // 0 = unspecified: SiteBuilder keeps its own default (4 -- see
-        // BuildParallelization_260822_oo01, deliberately not Runtime.availableProcessors() so a
-        // shared machine isn't saturated by default).
-        int threads = 0;
+        Options o = new Options("html-saurus-portal-server")
+                .value("--port")
+                // Page-conversion parallelism for every build this server runs: the ones at
+                // start-up, and the ones someone starts from the Projects tab. 0 keeps
+                // SiteBuilder's own default of 4 (BuildParallelization_260822_oo01).
+                .value("--threads")
+                .obsolete("--portal-mode", false, "running this jar is portal mode")
+                .obsolete("--serve", false, "this jar always serves")
+                .obsolete("--production", false, "the published site is html-saurus-production-server")
+                // Turning the figures off is a build-time choice, and the builds here are started
+                // by someone watching them, not by the command line that started the server.
+                .obsolete("--no-diagrams", false, "use html-saurus-build-only to build without figures")
+                .parse(args);
 
-        for (int i = 0; i < args.length; i++) {
-            if (args[i].equals("--port") && i + 1 < args.length) port = Integer.parseInt(args[++i]);
-            else if (args[i].equals("--threads") && i + 1 < args.length) threads = Integer.parseInt(args[++i]);
-            else if (args[i].equals("--no-diagrams")) BuildStages.skipDiagrams(true);
-            else if (!args[i].startsWith("--")) worksDir = Path.of(args[i]).toAbsolutePath();
-            // --portal-mode and --serve chose a mode when one jar held every mode. Running this
-            // jar is the mode now. They are accepted and ignored so a stored command line (the
-            // AI workspace tool entry passes both) keeps working.
-            else if (args[i].equals("--portal-mode") || args[i].equals("--serve")) { }
-            else if (args[i].startsWith("--")) {
-                System.err.println("Ignoring unknown option " + args[i]);
-            }
-        }
-        if (worksDir == null) worksDir = Path.of("").toAbsolutePath();
+        Path worksDir = o.path();
+        int port = o.number("--port", 8080);
+        int threads = o.number("--threads", 0);
 
         List<Path> projects = Projects.findProjects(worksDir);
         System.out.println("=== html-saurus portal ===");
