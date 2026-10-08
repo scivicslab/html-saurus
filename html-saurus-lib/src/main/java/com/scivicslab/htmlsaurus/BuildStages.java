@@ -80,6 +80,9 @@ public final class BuildStages {
             // Figures first: the .png a page embeds is regenerated from its .jsh when out of date,
             // so a document and its diagrams are never out of step (DiagramBuilder).
             if (!skipDiagrams) DiagramBuilder.rebuild(docsDir);
+            // The .md a page is built from is regenerated from its .lisp when out of date, for the
+            // same reason (RuleFileBuilder).
+            if (!skipDiagrams) RuleFileBuilder.rebuild(docsDir);
             Path projectDir = docsDir.getParent();
             String[] i18n = Projects.readI18nConfig(projectDir);
             String defaultLocale = i18n.length > 0 ? i18n[0] : null;
