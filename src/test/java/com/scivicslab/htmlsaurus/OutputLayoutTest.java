@@ -166,6 +166,34 @@ class OutputLayoutTest {
         assertFalse(Files.exists(post.resolve("unused.png")), "an image it never names is not copied");
     }
 
+    /**
+     * {@code dir/index.md} is the page of {@code dir}, as {@code dir/dir.md} is. Treating the file
+     * name as an ordinary segment put the page at {@code dir/index/index.html}, so the directory's
+     * own address answered 404 and only {@code dir/index/} worked.
+     */
+    @Test
+    void aDirectoryIndexIsThePageOfItsDirectory() throws IOException {
+        for (boolean production : new boolean[] {false, true}) {
+            Path proj = createProject();
+            Path dir = proj.resolve("docs/ai-tools/emacs-mcp-server");
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve("index.md"), "---\ntitle: Overview\n---\n\nContent.\n");
+            Files.writeString(dir.resolve("tutorial.md"), "---\ntitle: Tutorial\n---\n\nMore.\n");
+
+            build(proj, production);
+            Path out = proj.resolve("static-html/ai-tools");
+
+            assertTrue(Files.isRegularFile(out.resolve("emacs-mcp-server/index.html")),
+                    "production=" + production + ": the directory's own page");
+            assertFalse(Files.exists(out.resolve("emacs-mcp-server/index/index.html")),
+                    "production=" + production + ": no page one level deeper");
+            assertTrue(Files.isRegularFile(out.resolve("emacs-mcp-server/tutorial/index.html")),
+                    "production=" + production + ": a sibling page is unaffected");
+
+            deleteTree(proj);
+        }
+    }
+
     private void deleteTree(Path dir) throws IOException {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {

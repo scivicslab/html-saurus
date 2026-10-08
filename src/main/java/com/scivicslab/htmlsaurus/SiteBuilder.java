@@ -422,16 +422,9 @@ public class SiteBuilder {
 
         // Detect same-name pattern: dir/dir.md (Docusaurus convention).
         // Also used below to fix relative asset paths in dev mode.
-        // Covers both Pattern 1 (only .md, no subdirs) and Pattern 2 (same-name .md + subdirs).
-        // In both cases the URL is based on the parent directory path, not the file path.
-        boolean isSameName = false;
-        if (rel.getNameCount() >= 2) {
-            String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
-            String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
-            if (fileBase.equals(parentBase)) {
-                isSameName = true;
-            }
-        }
+        // Covers both Pattern 1 (only .md, no subdirs) and Pattern 2 (same-name .md + subdirs),
+        // and index.md. In each case the URL is the parent directory path, not the file path.
+        boolean isSameName = isDirectoryIndex(rel);
 
         String cleanBase = cleanBaseFor(rel, fmId);
         // The page is the index of its own directory, and the files beside its Markdown source are
@@ -514,13 +507,6 @@ public class SiteBuilder {
         String rawRelPath = rel.toString().replace('\\', '/');
 
         // prev/next: find this page's normal URL in pageOrder for navigation
-        // Detect same-name pattern (dir/dir.md) to match convertPage's URL collapsing.
-        boolean isSameName = false;
-        if (rel.getNameCount() >= 2) {
-            String fileBase = stripNumericPrefix(stripExtension(rel.getFileName().toString()));
-            String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
-            if (fileBase.equals(parentBase)) isSameName = true;
-        }
         String normalCleanBase = cleanBaseFor(rel, fm[2]);
         String normalPath = "/" + normalCleanBase + "/";
         String prevHref = null, prevLabel = null, nextHref = null, nextLabel = null;
@@ -635,10 +621,18 @@ public class SiteBuilder {
         return cleanBaseFor(rel, fmId) + "/";
     }
 
-    /** The {@code dir/dir.md} convention: the page is its own directory's index. */
-    static boolean isSameNamePattern(Path rel) {
+    /**
+     * Whether this Markdown file is the page of the directory holding it, rather than a page beside
+     * its siblings. Two spellings mean that: {@code dir/dir.md}, and Docusaurus's {@code dir/index.md}.
+     *
+     * <p>A file directly under {@code docs/} is excluded even when it is called {@code index.md}:
+     * the directory it would stand for is the site root, which the root page is written to.
+     */
+    static boolean isDirectoryIndex(Path rel) {
         if (rel.getNameCount() < 2) return false;
-        String fileBase = stripNumericPrefix(rel.getFileName().toString().replaceAll("\\.md$", ""));
+        String name = rel.getFileName().toString();
+        if (name.equals("index.md")) return true;
+        String fileBase = stripNumericPrefix(name.replaceAll("\\.md$", ""));
         String parentBase = stripNumericPrefix(rel.getName(rel.getNameCount() - 2).toString());
         return fileBase.equals(parentBase);
     }
@@ -657,7 +651,7 @@ public class SiteBuilder {
      * @return the page's directory path under {@code static-html/}
      */
     static String cleanBaseFor(Path rel, String fmId) {
-        boolean isSameName = isSameNamePattern(rel);
+        boolean isSameName = isDirectoryIndex(rel);
         String cleanId = fmId == null ? "" : stripNumericPrefix(fmId);
         String parentPath = rel.getParent() == null ? "" : rel.getParent().toString().replace('\\', '/');
         if (!cleanId.isEmpty()) {
