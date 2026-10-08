@@ -90,7 +90,7 @@ public class PortalServer {
     /** The PDF imports this process is running, and how far each has got
      *  ({@code WhereJobControlBelongs_260901_oo01}). Finished jobs stay readable for an hour so a
      *  browser that was away can still collect the outcome. */
-    private final com.scivicslab.jobregistry.JobRegistry importJobs =
+    private final com.scivicslab.jobregistry.JobRegistry batchJobs =
             new com.scivicslab.jobregistry.JobRegistry(searcherSystem, 60 * 60 * 1000L);
     /** Number of not-yet-completed OCR pages {@link GpuBrokerOcrClient} allows in flight per
      *  backend before {@code client.submit} blocks the calling {@code PdfImportJobActor}'s
@@ -224,7 +224,7 @@ public class PortalServer {
         };
         java.util.concurrent.Callable<Integer> reindexAllRunner = this::reindexAllCore;
         java.util.concurrent.Callable<int[]> scanWorksDirRunner = this::scanWorksDirCore;
-        // No BuildJob: an MCP caller waits for the answer, so there is nobody polling for progress.
+        // No job: an MCP caller waits for the answer, so there is nobody polling for progress.
         java.util.concurrent.Callable<Integer> updateAllProjectsRunner = () -> updateAllProjectsCore(null)[0];
         java.util.function.Function<String, List<String>> navbarLabelsResolver = name -> {
             Project proj = projectMap.get(name);
@@ -1229,43 +1229,6 @@ public class PortalServer {
     }
 
     /**
-     * One build the browser started and can ask about.
-     *
-     * <p>A build of a whole project takes as long as it takes — {@code all} rebuilds the HTML, the
-     * Lucene index and then every document's embedding, and the embedding step re-runs in full
-     * because the index it compares itself against was just rewritten. Answering the browser only
-     * when that finished meant the Rebuild button sat on "Building…" for minutes and, if anything
-     * between the two dropped the connection, never came back at all. The work is the same; what
-     * changes is that the request returns immediately and the button asks how it is going.</p>
-     */
-    private static final class BuildJob {
-        private final String project;
-        private final String stage;
-        private final long startedAt = System.currentTimeMillis();
-        private volatile String state = "running";     // running | done | error
-        private volatile String message = "";
-        private volatile long finishedAt;
-        /** Set when the run changed which projects the portal knows, so the page reloads its list. */
-        private volatile boolean listChanged;
-
-        BuildJob(String project, String stage) {
-            this.project = project;
-            this.stage = stage;
-        }
-
-        String json(String id) {
-            long ms = (finishedAt > 0 ? finishedAt : System.currentTimeMillis()) - startedAt;
-            return "{\"jobId\":" + HttpUtils.jsonStr(id) + ",\"state\":" + HttpUtils.jsonStr(state)
-                    + ",\"project\":" + HttpUtils.jsonStr(project) + ",\"stage\":" + HttpUtils.jsonStr(stage)
-                    + ",\"ms\":" + ms + ",\"message\":" + HttpUtils.jsonStr(message)
-                    + ",\"listChanged\":" + listChanged + "}";
-        }
-    }
-
-    /** Builds started through {@link #handleBuildAsync}, by job id. */
-    private final Map<String, BuildJob> buildJobs = new java.util.concurrent.ConcurrentHashMap<>();
-
-    /**
      * Handles {@code POST /api/build-async/<stage>/<project>}. Starts the build on its own thread
      * and answers at once with a job id to poll {@link #handleBuildStatus} with.
      */
@@ -1286,40 +1249,48 @@ public class PortalServer {
             respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
             return;
         }
-        String id = java.util.UUID.randomUUID().toString();
-        BuildJob job = new BuildJob(name, stage);
-        buildJobs.put(id, job);
-        System.out.println("Build stage '" + stage + "' started in background: " + name + " (job " + id + ")");
-        Thread worker = new Thread(() -> {
-            try {
-                runBuildStage(proj, stage);
-                job.message = "";
-                job.state = "done";
-            } catch (IllegalArgumentException e) {
-                job.message = "unknown stage: " + stage;
-                job.state = "error";
-            } catch (Exception e) {
-                System.err.println("Build stage '" + stage + "' error for " + name + ": " + e.getMessage());
-                job.message = String.valueOf(e.getMessage());
-                job.state = "error";
-            } finally {
-                job.finishedAt = System.currentTimeMillis();
-            }
-        }, "build-" + name + "-" + stage);
-        worker.setDaemon(true);
-        worker.start();
-        respond(ex, 202, "application/json", job.json(id));
+        System.out.println("Build stage '" + stage + "' started in background: " + name);
+        var job = batchJobs.submit("build", name, (com.scivicslab.jobregistry.Job<BuildOutcome> j) -> {
+            j.phase(stage);
+            j.result(BuildOutcome.NOTHING_YET);
+            runBuildStage(proj, stage);
+            j.result(new BuildOutcome("", false));
+        }, System.currentTimeMillis());
+        respond(ex, 202, "application/json", buildJobJson(job));
     }
 
     /** Handles {@code GET /api/build-status?jobId=...}. */
     private void handleBuildStatus(HttpExchange ex) throws IOException {
         String id = queryParam(ex, "jobId");
-        BuildJob job = id.isBlank() ? null : buildJobs.get(id);
+        com.scivicslab.jobregistry.Job<?> job = id.isBlank() ? null : batchJobs.get(id);
         if (job == null) {
             respond(ex, 404, "application/json", "{\"error\":\"no such build job\"}");
             return;
         }
-        respond(ex, 200, "application/json", job.json(id));
+        respond(ex, 200, "application/json", buildJobJson(job));
+    }
+
+    /**
+     * The shape the button that started a build polls for. Distinct from {@link #importJobJson},
+     * which the Batch Job list reads: that one speaks of pages and files, this one of the project
+     * and the stage, and both read the same job.
+     */
+    private String buildJobJson(com.scivicslab.jobregistry.Job<?> job) {
+        BuildOutcome r = job.result() instanceof BuildOutcome got ? got : BuildOutcome.NOTHING_YET;
+        String state = switch (job.state()) {
+            case RUNNING -> "running";
+            case DONE -> "done";
+            case ERROR -> "error";
+            case CANCELLED -> "stopped";
+        };
+        String message = job.state() == com.scivicslab.jobregistry.Job.State.ERROR
+                ? String.valueOf(job.error()) : r.message();
+        return "{\"jobId\":" + jsonStr(job.id()) + ",\"state\":" + jsonStr(state)
+                + ",\"project\":" + jsonStr(job.label())
+                + ",\"stage\":" + jsonStr(job.phase() == null ? "" : job.phase())
+                + ",\"ms\":" + (System.currentTimeMillis() - job.createdAtMs())
+                + ",\"message\":" + jsonStr(message)
+                + ",\"listChanged\":" + r.listChanged() + "}";
     }
 
     /**
@@ -1333,29 +1304,19 @@ public class PortalServer {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
-        String id = java.util.UUID.randomUUID().toString();
-        BuildJob job = new BuildJob(ALL_PROJECTS, "update-all-projects");
-        buildJobs.put(id, job);
-        System.out.println("Update all projects started in background (job " + id + ")");
-        Thread worker = new Thread(() -> {
-            try {
-                int[] result = updateAllProjectsCore(job);
-                int total = result[0], added = result[1], removed = result[2];
-                job.listChanged = added + removed > 0;
-                job.message = total + " project(s) updated"
-                        + (job.listChanged ? " (" + added + " added, " + removed + " removed)" : "");
-                job.state = "done";
-            } catch (Exception e) {
-                System.err.println("Update all projects error: " + e.getMessage());
-                job.message = String.valueOf(e.getMessage());
-                job.state = "error";
-            } finally {
-                job.finishedAt = System.currentTimeMillis();
-            }
-        }, "update-all-projects");
-        worker.setDaemon(true);
-        worker.start();
-        respond(ex, 202, "application/json", job.json(id));
+        System.out.println("Update all projects started in background");
+        var job = batchJobs.submit("update-all-projects", ALL_PROJECTS,
+                (com.scivicslab.jobregistry.Job<BuildOutcome> j) -> {
+            j.phase("starting");
+            j.result(BuildOutcome.NOTHING_YET);
+            int[] result = updateAllProjectsCore(j);
+            int total = result[0], added = result[1], removed = result[2];
+            boolean listChanged = added + removed > 0;
+            j.result(new BuildOutcome(total + " project(s) updated"
+                    + (listChanged ? " (" + added + " added, " + removed + " removed)" : ""),
+                    listChanged));
+        }, System.currentTimeMillis());
+        respond(ex, 202, "application/json", buildJobJson(job));
     }
 
     /** The {@code project} a whole-portal job reports itself under, where one name will not do. */
@@ -1382,13 +1343,13 @@ public class PortalServer {
      * <p>Shared by {@link #handleUpdateAllProjectsAsync} (REST) and the MCP
      * {@code update-all-projects} tool.</p>
      *
-     * @param job the job whose {@code message} carries progress to the browser, or {@code null}
-     *            to run without reporting progress
+     * @param job the job whose phase carries progress to the browser, or {@code null} to run
+     *            without reporting progress
      * @return {@code {projects updated, newly added, removed}} — the caller reports the last two so
      *         that a page showing the old list knows to redraw it
      * @throws Exception if the rescan or any build stage fails
      */
-    private int[] updateAllProjectsCore(BuildJob job) throws Exception {
+    private int[] updateAllProjectsCore(com.scivicslab.jobregistry.Job<?> job) throws Exception {
         System.out.println("Update all projects requested");
         reportProgress(job, "scanning " + worksDir);
         int[] scan = scanWorksDirCore();
@@ -1417,9 +1378,9 @@ public class PortalServer {
     }
 
     /** Records one step of a long job, on the job the browser polls and on the server console. */
-    private static void reportProgress(BuildJob job, String message) {
+    private static void reportProgress(com.scivicslab.jobregistry.Job<?> job, String message) {
         if (job != null) {
-            job.message = message;
+            job.phase(message);
         }
         System.out.println("  " + message);
     }
@@ -2167,6 +2128,12 @@ public class PortalServer {
             // A PDF import counts real pages; a video import is one step whose phase text is the
             // only honest progress there is, so the two are worded differently.
             function importJobLine(j) {
+              if (j.kind === 'build' || j.kind === 'update-all-projects') {
+                if (j.state === 'running') return (j.phase || 'working') + '...';
+                if (j.state === 'done') return j.message || 'Done.';
+                if (j.state === 'stopped') return 'Stopped.';
+                return 'Error: ' + (j.error || 'unknown');
+              }
               if (j.kind === 'video') {
                 if (j.state === 'running') return (j.phase || 'Working') + '...';
                 if (j.state === 'done') return 'Done: ' + (j.lastFile || 'transcript saved')
@@ -2204,20 +2171,25 @@ public class PortalServer {
                 const line = document.createElement('span');
                 line.className = 'import-job-line';
                 line.textContent = importJobLine(j);
-                const btn = document.createElement('button');
-                btn.className = 'btn';
-                btn.type = 'button';
-                btn.textContent = j.state === 'running' ? 'Stop' : 'Clear';
-                btn.addEventListener('click', function () {
-                  btn.disabled = true;
-                  const url = j.state === 'running' ? '/api/import/stop' : '/api/import/clear';
-                  fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
-                              body: JSON.stringify({jobId: j.jobId})})
-                    .then(refreshImportJobs).catch(refreshImportJobs);
-                });
+                const isBuild = j.kind === 'build' || j.kind === 'update-all-projects';
                 row.appendChild(name);
                 row.appendChild(line);
-                row.appendChild(btn);
+                // A running build is not offered a Stop button: it is one call into the builder,
+                // which never asks whether it should stop, so the button could only lie.
+                if (!(isBuild && j.state === 'running')) {
+                  const btn = document.createElement('button');
+                  btn.className = 'btn';
+                  btn.type = 'button';
+                  btn.textContent = j.state === 'running' ? 'Stop' : 'Clear';
+                  btn.addEventListener('click', function () {
+                    btn.disabled = true;
+                    const url = j.state === 'running' ? '/api/import/stop' : '/api/import/clear';
+                    fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({jobId: j.jobId})})
+                      .then(refreshImportJobs).catch(refreshImportJobs);
+                  });
+                  row.appendChild(btn);
+                }
                 box.appendChild(row);
               });
               // The count on the tab is what makes a background import visible from any tab.
@@ -3116,7 +3088,7 @@ public class PortalServer {
         PdfImportJob work = new PdfImportJob(pdfBytes, destDir, stem, ocr, pagesPerFile,
             totalPages, (title == null || title.isBlank()) ? stem : title,
             target.fileDisplayPrefix(), rebuildAfterImport(proj));
-        var job = importJobs.submit("pdf", srcPath.getFileName().toString(),
+        var job = batchJobs.submit("pdf", srcPath.getFileName().toString(),
             work::run, System.currentTimeMillis());
 
         respond(ex, 200, "application/json",
@@ -3134,7 +3106,7 @@ public class PortalServer {
             return;
         }
         String jobId = queryParam(ex, "jobId");
-        com.scivicslab.jobregistry.Job<?> job = importJobs.get(jobId);
+        com.scivicslab.jobregistry.Job<?> job = batchJobs.get(jobId);
         if (job == null) {
             respond(ex, 404, "application/json", "{\"error\":\"unknown or expired jobId\"}");
             return;
@@ -3155,7 +3127,7 @@ public class PortalServer {
         }
         StringBuilder sb = new StringBuilder("[");
         boolean first = true;
-        for (com.scivicslab.jobregistry.Job<?> job : importJobs.recent()) {
+        for (com.scivicslab.jobregistry.Job<?> job : batchJobs.recent()) {
             if (!first) sb.append(",");
             first = false;
             sb.append(importJobJson(job));
@@ -3176,7 +3148,7 @@ public class PortalServer {
         Map<String, Object> body = McpJsonParser.parseObject(
             new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         String jobId = body.get("jobId") instanceof String s ? s : null;
-        if (jobId == null || !importJobs.remove(jobId)) {
+        if (jobId == null || !batchJobs.remove(jobId)) {
             respond(ex, 409, "application/json", "{\"error\":\"still running, or no such job\"}");
             return;
         }
@@ -3203,6 +3175,7 @@ public class PortalServer {
             + ",\"currentPage\":" + job.done() + ",\"totalPages\":" + job.total()
             + ",\"lastFile\":" + jsonStr(r.lastFile()) + ",\"totalImages\":" + r.totalImages()
             + ",\"state\":" + jsonStr(state)
+            + ",\"message\":" + jsonStr(job.result() instanceof BuildOutcome b ? b.message() : "")
             + ",\"error\":" + (job.state() == com.scivicslab.jobregistry.Job.State.ERROR
                                  ? jsonStr(job.error()) : "null") + "}";
     }
@@ -3219,11 +3192,11 @@ public class PortalServer {
         Map<String, Object> body = McpJsonParser.parseObject(
             new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         String jobId = body.get("jobId") instanceof String s ? s : null;
-        if (jobId == null || importJobs.get(jobId) == null) {
+        if (jobId == null || batchJobs.get(jobId) == null) {
             respond(ex, 404, "application/json", "{\"error\":\"unknown or expired jobId\"}");
             return;
         }
-        importJobs.stop(jobId);
+        batchJobs.stop(jobId);
         respond(ex, 200, "application/json", "{\"status\":\"ok\"}");
     }
 
@@ -3410,7 +3383,7 @@ public class PortalServer {
         VideoImportJob work = new VideoImportJob(url.trim(), transcripts, target.destDir(),
             form.get("filename"), form.get("title"), target.fileDisplayPrefix(),
             rebuildAfterImport(target.project()));
-        var job = importJobs.submit("video", url.trim(), work::run, System.currentTimeMillis());
+        var job = batchJobs.submit("video", url.trim(), work::run, System.currentTimeMillis());
         respond(ex, 200, "application/json", "{\"jobId\":" + jsonStr(job.id()) + "}");
     }
 
