@@ -422,7 +422,7 @@ public class Main {
         Path baseIndexDir = projectDir.resolve("search-index");
 
         // Index default locale, with the blog posts that sit beside its docs
-        reindex(projectDir.resolve("docs"), baseIndexDir, defaultLocale, production,
+        reindex(projectDir.resolve("docs"), baseIndexDir, defaultLocale, defaultLocale, production,
                 projectDir.resolve("blog"));
 
         // Index alternate locales
@@ -431,7 +431,7 @@ public class Main {
             Path localeDocs = projectDir.resolve(
                 "i18n/" + locale + "/docusaurus-plugin-content-docs/current");
             if (hasMarkdownFiles(localeDocs)) {
-                reindex(localeDocs, baseIndexDir.resolve(locale), locale, production,
+                reindex(localeDocs, baseIndexDir.resolve(locale), locale, defaultLocale, production,
                         projectDir.resolve("i18n/" + locale + "/docusaurus-plugin-content-blog"));
             }
         }
@@ -465,9 +465,19 @@ public class Main {
      * @param blogDir the locale's blog directory, or {@code null} when the project has no blog
      */
     static void reindex(Path docsDir, Path indexDir, String locale, boolean production, Path blogDir) {
+        reindex(docsDir, indexDir, locale, "ja", production, blogDir);
+    }
+
+    /**
+     * Builds the index for one locale, told which locale the site writes at the root.
+     *
+     * @param defaultLocale the project's default locale, whose pages carry no locale segment
+     */
+    static void reindex(Path docsDir, Path indexDir, String locale, String defaultLocale,
+                        boolean production, Path blogDir) {
         try {
             Files.createDirectories(indexDir);
-            new SearchIndexer(docsDir, indexDir, locale, production, blogDir).index();
+            new SearchIndexer(docsDir, indexDir, locale, defaultLocale, production, blogDir).index();
             System.out.println("  index done : " + indexDir);
         } catch (IOException e) {
             System.err.println("Index failed: " + e.getMessage());

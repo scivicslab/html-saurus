@@ -40,6 +40,11 @@ public class SearchIndexer {
     private final boolean production;
     /** The blog posts' directory, indexed alongside the docs; null when the project has no blog. */
     private final Path blogDir;
+    /**
+     * The locale the site writes at the root. Pages of every other locale live under a directory
+     * named after it, so this is what decides whether an address carries a locale segment.
+     */
+    private final String defaultLocale;
 
     /**
      * Creates an indexer for the default (Japanese) locale in dev mode.
@@ -71,11 +76,28 @@ public class SearchIndexer {
      * @param blogDir directory holding the blog posts, or {@code null} when there is no blog
      */
     public SearchIndexer(Path docsDir, Path indexDir, String locale, boolean production, Path blogDir) {
+        this(docsDir, indexDir, locale, "ja", production, blogDir);
+    }
+
+    /**
+     * Creates an indexer that knows which locale the site writes at the root.
+     *
+     * @param defaultLocale the project's default locale; pages of this locale carry no locale
+     *                      segment in their address, pages of any other do
+     */
+    public SearchIndexer(Path docsDir, Path indexDir, String locale, String defaultLocale,
+                          boolean production, Path blogDir) {
         this.docsDir = docsDir;
         this.indexDir = indexDir;
         this.locale = locale;
+        this.defaultLocale = defaultLocale;
         this.production = production;
         this.blogDir = blogDir;
+    }
+
+    /** Whether this locale is the one written at the root, and so carries no locale segment. */
+    private boolean isDefaultLocale() {
+        return locale == null || locale.equals(defaultLocale);
     }
 
     /**
@@ -218,7 +240,7 @@ public class SearchIndexer {
         Path rel = docsDir.relativize(mdFile);
         String relStr = rel.toString().replace('\\', '/');
         // The same method the page writer uses, so a hit leads to the page that was written.
-        String localePrefix = (locale != null && !isJapanese()) ? locale + "/" : "";
+        String localePrefix = isDefaultLocale() ? "" : locale + "/";
         String href = "/" + localePrefix + SiteBuilder.cleanBaseFor(rel, docId) + "/";
 
         Document doc = new Document();
@@ -297,7 +319,7 @@ public class SearchIndexer {
         }
 
         String slug = BlogBuilder.blogSlug(mdFile, rawFm);
-        String localePrefix = (locale != null && !isJapanese()) ? locale + "/" : "";
+        String localePrefix = isDefaultLocale() ? "" : locale + "/";
         String href = "/" + localePrefix + "blog/" + slug + "/";
         String plainText = stripMarkdown(body);
 

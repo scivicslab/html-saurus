@@ -41,6 +41,35 @@ class SearchPathTest {
         }
     }
 
+    /**
+     * The default locale is written at the root, whatever it is. The indexer asked whether the
+     * locale was Japanese instead of whether it was the project's default, so every page of a
+     * project whose default is English was indexed under {@code /en/} while its pages sit at the
+     * root. Every hit in such a project led to a 404.
+     */
+    @Test
+    void theDefaultLocaleIsNotPrefixedEvenWhenItIsNotJapanese() throws IOException {
+        Path proj = createProject();
+        Files.writeString(proj.resolve("docusaurus.config.js"),
+                "module.exports = { i18n: { defaultLocale: 'en', locales: ['en'] } };");
+        Path dir = proj.resolve("docs/ai-tools");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("mcp-gateway.md"),
+                "---\ntitle: MCP Gateway\n---\n\nemacsclient bridge\n");
+
+        Main.build(proj.resolve("docs"), proj.resolve("static-html"), false);
+        Main.reindexAll(proj, false);
+
+        try (var d = new org.apache.lucene.store.NIOFSDirectory(proj.resolve("search-index"));
+             var reader = org.apache.lucene.index.DirectoryReader.open(d)) {
+            assertEquals(1, reader.maxDoc());
+            String path = reader.storedFields().document(0).get("path");
+            assertEquals("/ai-tools/mcp-gateway/", path, "the default locale is not prefixed");
+            assertTrue(Files.isRegularFile(proj.resolve("static-html" + path + "index.html")),
+                    path + " must lead to a page");
+        }
+    }
+
     @Test
     void theIndexedPathIsThePageThatWasWritten() throws IOException {
         for (boolean production : new boolean[] {false, true}) {
