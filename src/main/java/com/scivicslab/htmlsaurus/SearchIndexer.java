@@ -107,6 +107,37 @@ public class SearchIndexer {
      *
      * @throws IOException if file I/O or index writing fails
      */
+    /**
+     * Whether {@code indexDir} holds an index this build of Lucene can read, counting the
+     * per-locale indexes in its immediate subdirectories.
+     *
+     * <p>An index is derived data: the Markdown under {@code docs/} is the source, and the index
+     * is rebuilt from it whenever it is missing. "Present" is a poor stand-in for "usable",
+     * though. A Lucene major-version upgrade leaves every existing index unreadable — Lucene 10
+     * refuses a Lucene 9 index with {@code IndexFormatTooOldException} — and an interrupted write
+     * leaves a corrupt one. In both cases the directory is still there, so a presence check sees
+     * nothing wrong while every query throws. Callers that would rebuild a missing index should
+     * ask this instead, and rebuild on {@code false}.
+     */
+    static boolean isUsableIndex(Path indexDir) {
+        if (!Files.isDirectory(indexDir)) return false;
+        if (!opens(indexDir)) return false;
+        try (var entries = Files.list(indexDir)) {
+            return entries.filter(Files::isDirectory).allMatch(SearchIndexer::opens);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** Whether a Lucene reader can be opened on this one directory. */
+    private static boolean opens(Path dir) {
+        try (var d = new NIOFSDirectory(dir); var r = DirectoryReader.open(d)) {
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public void index() throws IOException {
         Analyzer baseAnalyzer = isJapanese() ? new JapaneseAnalyzer() : new StandardAnalyzer();
         Analyzer analyzer = new PerFieldAnalyzerWrapper(baseAnalyzer,

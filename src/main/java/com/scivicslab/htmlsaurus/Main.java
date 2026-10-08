@@ -230,7 +230,9 @@ public class Main {
             if (!Files.isDirectory(staticDir)) {
                 build(p.resolve("docs"), staticDir, production, threads);
             }
-            if (!Files.isDirectory(indexDir)) {
+            // Not "is it there" but "can this build read it": a Lucene major-version upgrade and
+            // an interrupted write both leave a directory that every query then throws on.
+            if (!SearchIndexer.isUsableIndex(indexDir)) {
                 reindexAll(p, production);
             }
         }

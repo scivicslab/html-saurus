@@ -12,7 +12,42 @@
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- One version for every Lucene artifact: mixing them throws at class-load time. -->
+        <lucene.version>10.5.2</lucene.version>
     </properties>
+
+    <!--
+      Transitive artifacts that arrive at a version with a published advisory. Each is pinned to
+      the release that fixes it; the comment names who drags it in, so the pin can be dropped once
+      that dependency ships the fixed version itself. Checked with
+      https://api.osv.dev/v1/querybatch over the resolved dependency list.
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <!-- via pojo-actor 4.2.0 — 2.20.0 carries 11 advisories (polymorphic-type-validator
+                 bypasses, eager DNS resolution, parser DoS). -->
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>2.22.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- via poi-ooxml -> commons-compress — uncontrolled recursion on long inputs. -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>3.21.0</version>
+            </dependency>
+            <!-- via poi-ooxml — MapMessage JSON serialization of non-finite floats. Stays on the
+                 2.x line; 3.0.0 is still beta. -->
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-api</artifactId>
+                <version>2.26.1</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
 
@@ -32,57 +67,57 @@
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-core</artifactId>
-            <version>9.11.0</version>
+            <version>${lucene.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-queryparser</artifactId>
-            <version>9.11.0</version>
+            <version>${lucene.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-analysis-kuromoji</artifactId>
-            <version>9.11.0</version>
+            <version>${lucene.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-queries</artifactId>
-            <version>9.11.0</version>
+            <version>${lucene.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-analysis-common</artifactId>
-            <version>9.11.0</version>
+            <version>${lucene.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-highlighter</artifactId>
-            <version>9.11.0</version>
+            <version>${lucene.version}</version>
         </dependency>
         <dependency>
             <groupId>org.commonmark</groupId>
             <artifactId>commonmark</artifactId>
-            <version>0.22.0</version>
+            <version>0.30.0</version>
         </dependency>
         <dependency>
             <groupId>org.commonmark</groupId>
             <artifactId>commonmark-ext-gfm-tables</artifactId>
-            <version>0.22.0</version>
+            <version>0.30.0</version>
         </dependency>
         <dependency>
             <groupId>org.commonmark</groupId>
             <artifactId>commonmark-ext-gfm-strikethrough</artifactId>
-            <version>0.22.0</version>
+            <version>0.30.0</version>
         </dependency>
         <dependency>
             <groupId>org.commonmark</groupId>
             <artifactId>commonmark-ext-heading-anchor</artifactId>
-            <version>0.22.0</version>
+            <version>0.30.0</version>
         </dependency>
         <dependency>
             <groupId>org.commonmark</groupId>
             <artifactId>commonmark-ext-autolink</artifactId>
-            <version>0.22.0</version>
+            <version>0.30.0</version>
         </dependency>
 
         <!-- POJO-actor: lightweight actor framework -->
@@ -103,21 +138,21 @@
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
-            <version>3.0.3</version>
+            <version>3.0.8</version>
         </dependency>
 
         <!-- Word (.docx) text and embedded-image extraction -->
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
-            <version>5.3.0</version>
+            <version>5.5.1</version>
         </dependency>
 
         <!-- HTML fetch and article-text extraction for the Web page import -->
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.18.3</version>
+            <version>1.23.2</version>
         </dependency>
 
         <!-- Test dependencies -->
