@@ -95,4 +95,67 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <!--
+              A native image, built with GraalVM's closed-world analysis. This is the mechanism
+              that removes unreachable code: the analysis found 9,682 types reachable out of
+              everything on the classpath.
+
+              Measured 2026-10-08, and it does not work yet. The image builds, and then dies on
+              its first query:
+
+                Cannot find implementing class for:
+                  org.apache.lucene.analysis.ja.tokenattributes.BaseFormAttribute
+                Caused by: ClassNotFoundException: ...BaseFormAttributeImpl
+
+              Lucene derives an attribute's implementation class name from the interface name and
+              loads it with Class.forName, and its codecs arrive through ServiceLoader; a
+              closed-world analysis sees neither. Making this work needs reachability metadata
+              for those classes, most practically produced by running the application under
+              -agentlib:native-image-agent and feeding the result back in. The same omission is
+              why the shade plugin's minimizeJar fails here, with the same exception.
+
+              Note also what it would and would not buy. The executable is 72.9 MB against the
+              13.9 MB jar, because it carries AOT machine code and the runtime instead of
+              bytecode. It is smaller only counted against the jar plus a JVM: the GraalVM
+              distribution the container unpacks is 716 MB.
+            -->
+            <id>native</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>1.1.14</version>
+                        <extensions>true</extensions>
+                        <executions>
+                            <execution>
+                                <id>build-native</id>
+                                <goals>
+                                    <goal>compile-no-fork</goal>
+                                </goals>
+                                <phase>package</phase>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <imageName>html-saurus-portal-server</imageName>
+                            <mainClass>com.scivicslab.htmlsaurus.PortalServerMain</mainClass>
+                            <buildArgs>
+                                <buildArg>--no-fallback</buildArg>
+                                <buildArg>-H:+ReportExceptionStackTraces</buildArg>
+                                <buildArg>--enable-url-protocols=http,https</buildArg>
+                                <buildArg>-H:IncludeResources=org/apache/lucene/.*|META-INF/services/.*|.*\.dict|.*\.fst|.*\.dat|com/scivicslab/htmlsaurus/.*\.css</buildArg>
+                                <!-- Defer Lucene classes that require runtime initialization -->
+                                <buildArg>--initialize-at-run-time=org.apache.lucene.internal.vectorization.PanamaVectorUtilSupport,org.apache.lucene.internal.vectorization.VectorizationProvider,org.apache.lucene.util.VectorUtil,org.apache.lucene.analysis.tokenattributes.PackedTokenAttributeImpl</buildArg>
+                                <!-- Allow NativeLibrary.findEntry0 to be reported at runtime (Lucene falls back to scalar) -->
+                                <buildArg>--report-unsupported-elements-at-runtime</buildArg>
+                            </buildArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
