@@ -80,8 +80,8 @@ class SearchIndexerTest {
 
             List<String> paths = readPaths(indexDir);
             assertEquals(1, paths.size());
-            assertEquals("/intro.html", paths.get(0),
-                    "Numeric prefix must be stripped; path must be /intro.html in dev mode");
+            assertEquals("/intro/", paths.get(0),
+                    "Numeric prefix must be stripped; path must be /intro/ in dev mode");
         }
 
         @Test
@@ -110,7 +110,7 @@ class SearchIndexerTest {
 
             List<String> paths = readPaths(indexDir);
             assertEquals(1, paths.size());
-            assertEquals("/page.html", paths.get(0));
+            assertEquals("/page/", paths.get(0));
         }
 
         @Test
@@ -145,7 +145,7 @@ class SearchIndexerTest {
 
             List<String> paths = readPaths(indexDir);
             assertEquals(1, paths.size());
-            assertEquals("/en/intro.html", paths.get(0),
+            assertEquals("/en/intro/", paths.get(0),
                     "English locale path must be prefixed with /en/");
         }
 
@@ -175,7 +175,7 @@ class SearchIndexerTest {
 
             List<String> paths = readPaths(indexDir);
             assertEquals(1, paths.size());
-            assertEquals("/intro.html", paths.get(0),
+            assertEquals("/intro/", paths.get(0),
                     "Japanese locale path must not have a locale prefix");
         }
 
