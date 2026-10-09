@@ -129,6 +129,22 @@ public class SearchIndexer {
         }
     }
 
+    /**
+     * Removes the index files directly in {@code dir} when this Lucene cannot open them.
+     *
+     * <p>{@code OpenMode.CREATE} does not make {@code IndexWriter} ignore what is already there:
+     * it reads the latest {@code segments_N} first, and an index written by an older Lucene (the
+     * {@code Lucene99} codec after the upgrade to Lucene 10) makes it throw before anything is
+     * written. The index is derived from the Markdown, so the unreadable files are deleted and
+     * the index is written anew. Subdirectories are per-locale indexes, rebuilt by their own call.
+     */
+    static void clearUnreadableIndex(Path dir) throws IOException {
+        if (!Files.isDirectory(dir) || opens(dir)) return;
+        try (var entries = Files.list(dir)) {
+            for (Path p : entries.filter(Files::isRegularFile).toList()) Files.delete(p);
+        }
+    }
+
     /** Whether a Lucene reader can be opened on this one directory. */
     private static boolean opens(Path dir) {
         try (var d = new NIOFSDirectory(dir); var r = DirectoryReader.open(d)) {
@@ -147,6 +163,7 @@ public class SearchIndexer {
                        "body_ng", shingleAnalyzer(baseAnalyzer)));
         var config = new IndexWriterConfig(analyzer);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
+        clearUnreadableIndex(indexDir);
 
         try (var dir = new NIOFSDirectory(indexDir);
              var writer = new IndexWriter(dir, config)) {

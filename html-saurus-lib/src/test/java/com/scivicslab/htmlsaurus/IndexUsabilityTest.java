@@ -86,6 +86,26 @@ class IndexUsabilityTest {
     }
 
     @Test
+    @DisplayName("Rebuilding over an index that Lucene 9 wrote yields a usable index")
+    void rebuildsOverAnIndexLucene9Wrote() throws Exception {
+        // A real index written by Lucene 9 (codec Lucene99), as every project's search-index/ was
+        // before the upgrade. Detecting it as unusable is not enough: the rebuild has to succeed,
+        // and IndexWriter in CREATE mode still reads the old segments file first.
+        Path dir = Files.createDirectories(tempDir.resolve("lucene9"));
+        Path fixture = Path.of(getClass().getResource("/lucene9-index").toURI());
+        try (var files = Files.list(fixture)) {
+            for (Path f : files.toList()) Files.copy(f, dir.resolve(f.getFileName()));
+        }
+        assertFalse(SearchIndexer.isUsableIndex(dir), "the fixture is unreadable by this Lucene");
+
+        Path docs = Files.createDirectories(tempDir.resolve("lucene9-docs"));
+        Files.writeString(docs.resolve("intro.md"),
+                "---\ntitle: Introduction\nid: intro\n---\n\n# Introduction\n\nHello world.\n");
+        BuildStages.reindex(docs, dir, "ja", true);
+        assertTrue(SearchIndexer.isUsableIndex(dir), "the rebuilt index can be opened");
+    }
+
+    @Test
     @DisplayName("A sound locale index leaves the project's index usable")
     void soundLocaleIndexStaysUsable() throws Exception {
         Path dir = buildIndex("ja-and-en");
