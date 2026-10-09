@@ -24,7 +24,9 @@ final class PdfPageSplitter {
     }
 
     /**
-     * Extracts page {@code pageIndex} (0-based) as a new single-page PDF.
+     * Extracts page {@code pageIndex} (0-based) as a new single-page PDF. The document information
+     * (Creator, Producer, ...) is carried over: Marker reads it to recognise a text layer written
+     * by an OCR program it does not trust, and OCRs such a page from its image instead.
      *
      * @param pdfBytes  the full document
      * @param pageIndex 0-based page index
@@ -35,6 +37,7 @@ final class PdfPageSplitter {
              PDDocument one = new PDDocument();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             one.importPage(src.getPage(pageIndex));
+            one.setDocumentInformation(src.getDocumentInformation());
             one.save(out);
             return out.toByteArray();
         }
