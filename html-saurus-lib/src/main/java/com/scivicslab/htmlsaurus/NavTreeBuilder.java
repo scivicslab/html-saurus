@@ -234,7 +234,8 @@ class NavTreeBuilder {
     private SiteNode buildTreeMerged(Path defaultDir, Path localeDir) throws IOException {
         List<Path> defaultEntries;
         try (var stream = Files.list(defaultDir)) {
-            defaultEntries = stream.sorted(Comparator.comparing(p -> sortKey(p.getFileName().toString()))).toList();
+            defaultEntries = stream.filter(p -> !isHidden(p))
+                .sorted(Comparator.comparing(p -> sortKey(p.getFileName().toString()))).toList();
         }
 
         String dirBase = SiteBuilder.stripNumericPrefix(defaultDir.getFileName().toString());
@@ -327,6 +328,16 @@ class NavTreeBuilder {
     }
 
     /**
+     * Whether a file or directory is hidden (its name starts with a dot) and so left out of the
+     * sidebar, e.g. {@code .gitkeep} or a tool's working directory such as {@code .rst-on-lisp}.
+     * Leaving it out also keeps a hidden directory from turning a one-page directory into a category.
+     */
+    static boolean isHidden(Path entry) {
+        Path name = entry.getFileName();
+        return name != null && name.toString().startsWith(".");
+    }
+
+    /**
      * Recursively builds the navigation tree from the docs directory structure.
      * Handles Docusaurus conventions: numeric prefixes for ordering, {@code _category_.json}
      * for category labels, and same-name Markdown files as category index pages.
@@ -338,7 +349,8 @@ class NavTreeBuilder {
     private SiteNode buildTree(Path dir) throws IOException {
         List<Path> entries;
         try (var stream = Files.list(dir)) {
-            entries = stream.sorted(Comparator.comparing(p -> sortKey(p.getFileName().toString()))).toList();
+            entries = stream.filter(p -> !isHidden(p))
+                .sorted(Comparator.comparing(p -> sortKey(p.getFileName().toString()))).toList();
         }
 
         String dirBase = SiteBuilder.stripNumericPrefix(dir.getFileName().toString());

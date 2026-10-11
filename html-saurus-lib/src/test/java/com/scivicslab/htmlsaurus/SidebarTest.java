@@ -254,4 +254,33 @@ class SidebarTest {
                     "Pattern 2: deep path section/guide/guide/index.html must not exist");
         }
     }
+
+    // ---- Hidden entries ----------------------------------------------------
+
+    @Nested
+    @DisplayName("Hidden files and directories (name starts with a dot) are not in the sidebar")
+    class HiddenEntries {
+
+        @Test
+        @DisplayName("a hidden directory beside dir/dir.md neither shows nor makes it a category")
+        void hiddenDirectoryIsLeftOut() throws IOException {
+            Path proj = createProject("proj");
+            Path docsDir = proj.resolve("docs");
+            writeDoc(docsDir, "010_section/020_page/020_page.md", "Page");
+            writeDoc(docsDir, "010_section/020_page/.tool-work/notes/notes.md", "Hidden Notes");
+            writeDoc(docsDir, "010_section/.drafts.md", "Hidden Draft");
+            Files.writeString(docsDir.resolve("010_section/.gitkeep"), "");
+
+            BuildStages.build(docsDir, proj.resolve("static-html"), false);
+
+            String start = readHtml(proj.resolve("static-html"), "index.html");
+            assertTrue(start.contains("url=section/page/"), "the site starts at the first visible page: " + start);
+            String html = readHtml(proj.resolve("static-html"), "section/page/index.html");
+            assertFalse(html.contains("Hidden Notes"), "a .md under a hidden directory must not be in the sidebar");
+            assertFalse(html.contains("Hidden Draft"), "a hidden .md must not be in the sidebar");
+            assertFalse(html.contains(".tool-work") || html.contains("tool-work"), "a hidden directory must not be a category");
+            assertFalse(html.contains(".gitkeep"), "a hidden file must not be in the sidebar");
+            assertTrue(html.contains(">Page</a>"), "dir/dir.md stays a leaf link when its only other entry is hidden");
+        }
+    }
 }
