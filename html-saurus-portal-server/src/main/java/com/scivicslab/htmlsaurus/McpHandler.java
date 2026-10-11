@@ -465,6 +465,7 @@ class McpHandler {
 
         try (Stream<Path> walk = Files.walk(target)) {
             walk.filter(p -> p.toString().endsWith(".md"))
+                .filter(p -> !HiddenPaths.isHiddenUnder(docsDir, p))
                 .sorted()
                 .forEach(p -> {
                     Path rel = docsDir.relativize(p);

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -281,6 +282,35 @@ class SidebarTest {
             assertFalse(html.contains(".tool-work") || html.contains("tool-work"), "a hidden directory must not be a category");
             assertFalse(html.contains(".gitkeep"), "a hidden file must not be in the sidebar");
             assertTrue(html.contains(">Page</a>"), "dir/dir.md stays a leaf link when its only other entry is hidden");
+        }
+
+        @Test
+        @DisplayName("a hidden .md gets no page and no search-index entry")
+        void hiddenMarkdownGetsNoPageAndNoIndexEntry() throws IOException {
+            Path proj = createProject("proj");
+            Path docsDir = proj.resolve("docs");
+            writeDoc(docsDir, "010_section/020_page/020_page.md", "Page");
+            writeDoc(docsDir, "010_section/020_page/.tool-work/notes/notes.md", "Hidden Notes");
+            writeDoc(docsDir, "010_section/.drafts.md", "Hidden Draft");
+
+            Path out = proj.resolve("static-html");
+            BuildStages.build(docsDir, out, false);
+            try (var files = Files.walk(out)) {
+                List<String> leaked = files.filter(Files::isRegularFile).filter(p -> {
+                    try { return Files.readString(p).contains("Hidden"); } catch (IOException e) { return false; }
+                }).map(p -> out.relativize(p).toString()).toList();
+                assertEquals(List.of(), leaked, "no output file may come from a hidden .md");
+            }
+
+            Path indexDir = tempDir.resolve("index");
+            new SearchIndexer(docsDir, indexDir, "ja", false).index();
+            try (var dir = new org.apache.lucene.store.NIOFSDirectory(indexDir);
+                 var reader = org.apache.lucene.index.DirectoryReader.open(dir)) {
+                List<String> paths = new java.util.ArrayList<>();
+                var stored = reader.storedFields();
+                for (int i = 0; i < reader.maxDoc(); i++) paths.add(stored.document(i).get("path"));
+                assertEquals(1, paths.size(), "only the visible page is indexed: " + paths);
+            }
         }
     }
 }

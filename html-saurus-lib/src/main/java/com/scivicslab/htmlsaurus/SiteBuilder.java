@@ -248,6 +248,7 @@ public class SiteBuilder {
         Files.walkFileTree(docsDir, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (HiddenPaths.isHidden(file)) return FileVisitResult.CONTINUE;   // no page, no copy
                 Path rel = docsDir.relativize(file);
                 if (file.toString().endsWith(".md")) {
                     mdFiles.add(new Path[]{file, rel});
@@ -261,6 +262,7 @@ public class SiteBuilder {
 
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                if (!dir.equals(docsDir) && HiddenPaths.isHidden(dir)) return FileVisitResult.SKIP_SUBTREE;
                 Files.createDirectories(outDir.resolve(cleanRelPath(docsDir.relativize(dir).toString().replace('\\', '/'))));
                 return FileVisitResult.CONTINUE;
             }

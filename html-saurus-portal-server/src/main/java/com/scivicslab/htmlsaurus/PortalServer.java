@@ -288,7 +288,9 @@ public class PortalServer {
             if (!Files.isDirectory(projectDocsDir)) continue;
             List<Path> mdFiles;
             try (var walk = Files.walk(projectDocsDir)) {
-                mdFiles = walk.filter(f -> f.toString().endsWith(".md")).collect(Collectors.toList());
+                mdFiles = walk.filter(f -> f.toString().endsWith(".md"))
+                    .filter(f -> !HiddenPaths.isHiddenUnder(projectDocsDir, f))
+                    .collect(Collectors.toList());
             } catch (IOException e) {
                 System.err.println("prerequisite-of index: could not walk " + projectDocsDir
                     + ": " + e.getMessage());
@@ -935,13 +937,16 @@ public class PortalServer {
             // nested layout), never descending into a sibling grouping subdirectory.
             List<Path> mds = new ArrayList<>();
             List<Path> children;
-            try (var st = Files.list(groupDir)) { children = st.sorted().collect(Collectors.toList()); }
+            try (var st = Files.list(groupDir)) {
+                children = st.filter(e -> !HiddenPaths.isHidden(e)).sorted().collect(Collectors.toList());
+            }
             for (Path e : children) {
                 if (Files.isRegularFile(e) && e.getFileName().toString().endsWith(".md")) {
                     mds.add(e);
                 } else if (nested && Files.isDirectory(e)) {
                     try (var sub = Files.list(e)) {
                         sub.filter(Files::isRegularFile)
+                           .filter(f -> !HiddenPaths.isHidden(f))
                            .filter(f -> f.getFileName().toString().endsWith(".md"))
                            .sorted().forEach(mds::add);
                     }

@@ -82,6 +82,7 @@ final class ReferenceLabels {
         if (!Files.isDirectory(docs)) return;
         try (Stream<Path> files = Files.walk(docs)) {
             files.filter(p -> p.getFileName().toString().endsWith(".md"))
+                 .filter(p -> !HiddenPaths.isHiddenUnder(docs, p))
                  .filter(p -> {
                      String s = p.toString();
                      return !s.contains("/static-html/") && !s.contains("/build/")

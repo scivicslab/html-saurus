@@ -170,8 +170,14 @@ public class SearchIndexer {
 
             Files.walkFileTree(docsDir, new SimpleFileVisitor<>() {
                 @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    return !dir.equals(docsDir) && HiddenPaths.isHidden(dir)
+                            ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                }
+
+                @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                    if (file.toString().endsWith(".md")) {
+                    if (file.toString().endsWith(".md") && !HiddenPaths.isHidden(file)) {
                         indexFile(writer, file);
                     }
                     return FileVisitResult.CONTINUE;
@@ -181,8 +187,14 @@ public class SearchIndexer {
             if (blogDir != null && Files.isDirectory(blogDir)) {
                 Files.walkFileTree(blogDir, new SimpleFileVisitor<>() {
                     @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                        return !dir.equals(blogDir) && HiddenPaths.isHidden(dir)
+                                ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                        if (file.toString().endsWith(".md")) {
+                        if (file.toString().endsWith(".md") && !HiddenPaths.isHidden(file)) {
                             indexBlogPost(writer, file);
                         }
                         return FileVisitResult.CONTINUE;

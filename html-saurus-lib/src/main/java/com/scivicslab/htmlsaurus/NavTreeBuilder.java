@@ -328,13 +328,11 @@ class NavTreeBuilder {
     }
 
     /**
-     * Whether a file or directory is hidden (its name starts with a dot) and so left out of the
-     * sidebar, e.g. {@code .gitkeep} or a tool's working directory such as {@code .rst-on-lisp}.
-     * Leaving it out also keeps a hidden directory from turning a one-page directory into a category.
+     * Hidden entries ({@link HiddenPaths}) are left out of the sidebar. Leaving them out before the
+     * page/category decision also keeps a hidden directory from turning a one-page directory into a category.
      */
-    static boolean isHidden(Path entry) {
-        Path name = entry.getFileName();
-        return name != null && name.toString().startsWith(".");
+    private static boolean isHidden(Path entry) {
+        return HiddenPaths.isHidden(entry);
     }
 
     /**
