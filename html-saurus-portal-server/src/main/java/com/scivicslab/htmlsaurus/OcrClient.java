@@ -12,7 +12,8 @@ import java.util.Map;
  * {@code OcrClient}):
  * <ul>
  *   <li>{@link YomiTokuOcrClient} — Japanese documents, correct column order on multi-column
- *       layouts, runs locally/on a GPU host with no math support, no image extraction</li>
+ *       layouts, runs locally/on a GPU host with no math support; extracts the figures its
+ *       layout analyzer finds</li>
  *   <li>{@link MarkerOcrClient} — math-heavy/LaTeX-preserving, GPU-hosted; on two-column
  *       Japanese/English books it merges the columns into one line, so prefer YomiToku for those;
  *       extracts embedded figures</li>

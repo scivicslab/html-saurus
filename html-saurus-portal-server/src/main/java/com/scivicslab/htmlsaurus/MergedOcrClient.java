@@ -42,8 +42,9 @@ import com.scivicslab.gpubroker.client.GpuBrokerClient;
  * this client works identically through {@code quarkus-gpu-broker} — the broker's fixed
  * per-queue request paths are exactly the ones used here.</p>
  *
- * <p>Tables are out of scope (unverified on table pages), and no images are returned — same as
- * the plain YomiToku backend today. See the design document for both decisions.</p>
+ * <p>Tables are out of scope (unverified on table pages). Figures are YomiToku's: its response
+ * lists each cropped figure as a {@code figure} block carrying {@code ![](figure_N.jpg)} at the
+ * figure's place in reading order, and the image bytes in {@code images}.</p>
  */
 class MergedOcrClient implements OcrClient {
 
@@ -136,9 +137,11 @@ class MergedOcrClient implements OcrClient {
 
     @Override
     public Result ocrPage(byte[] onePagePdfBytes) throws IOException, InterruptedException {
-        YomiTokuBlocks yomi = parseYomiTokuBlocks(yomiTokuCall.call(onePagePdfBytes));
+        String yomiBody = yomiTokuCall.call(onePagePdfBytes);
+        YomiTokuBlocks yomi = parseYomiTokuBlocks(yomiBody);
         List<MarkerBlock> mathBlocks = parseMarkerMathBlocks(markerCall.call(onePagePdfBytes));
-        return new Result(merge(yomi, mathBlocks), Map.of());
+        return new Result(merge(yomi, mathBlocks),
+                MarkerOcrClient.parseImages(McpJsonParser.parseObject(yomiBody)));
     }
 
     /**

@@ -15,7 +15,8 @@ import java.util.logging.Logger;
 
 /**
  * OCR client for YomiToku — correct on Japanese text and multi-column layouts (reads column by
- * column), no math support. Same server/contract as W206's other YomiToku deployment (see
+ * column), no math support; the figures its layout analyzer finds come back as cropped images.
+ * Same server/contract as W206's other YomiToku deployment (see
  * {@code EmbeddingClient}'s W206 GPU host convention): {@code POST {baseUrl}/ocr}, multipart
  * fields {@code file} (single-page PDF bytes) + {@code page} (always {@code "0"}, since the
  * caller already extracted one page).
@@ -80,10 +81,12 @@ class YomiTokuOcrClient implements OcrClient {
     }
 
     /** Parses a YomiToku response body, shared with {@link GpuBrokerOcrClient} (whose job result
-     *  carries the same body YomiToku itself returned). YomiToku has no images field — it is a
-     *  plain-text OCR engine. */
+     *  carries the same body YomiToku itself returned). The figures {@code /ocr/markdown} cropped
+     *  out of the page arrive in {@code images}, the same {@code {filename: base64}} shape Marker
+     *  returns, and the Markdown refers to each one as {@code ![](figure_N.jpg)}. */
     static Result parseResult(String responseBody) {
-        return new Result(parseParagraphs(responseBody), Map.of());
+        return new Result(parseParagraphs(responseBody),
+                MarkerOcrClient.parseImages(McpJsonParser.parseObject(responseBody)));
     }
 
     /**

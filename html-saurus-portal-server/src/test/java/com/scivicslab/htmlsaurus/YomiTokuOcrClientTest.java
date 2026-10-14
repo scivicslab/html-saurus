@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,9 +52,19 @@ class YomiTokuOcrClientTest {
     }
 
     @Test
-    void parseResult_hasNoImages() {
+    void parseResult_withoutImagesField_hasNoImages() {
         OcrClient.Result result = YomiTokuOcrClient.parseResult("{\"paragraphs\":[\"Text.\"]}");
         assertEquals(List.of("Text."), result.paragraphs());
         assertTrue(result.images().isEmpty());
+    }
+
+    @Test
+    void parseResult_decodesTheCroppedFigures() {
+        // "UE5H" is base64 for the bytes "PNG"; the Markdown names the figure where it sits.
+        String body = "{\"markdown\":\"Before.\\n\\n![](figure_0.png)\\n\\nAfter.\","
+                + "\"images\":{\"figure_0.png\":\"UE5H\"}}";
+        OcrClient.Result result = YomiTokuOcrClient.parseResult(body);
+        assertEquals(List.of("Before.", "![](figure_0.png)", "After."), result.paragraphs());
+        assertArrayEquals("PNG".getBytes(), result.images().get("figure_0.png"));
     }
 }
