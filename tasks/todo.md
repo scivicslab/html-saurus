@@ -1,3 +1,18 @@
+# 翻訳モデルを AI workspace の Settings から取る（2026-10-17）
+
+## Plan
+- [x] `TranslationClient`: 翻訳のたびに `AI_WORKSPACE_URL/api/settings/translation-model` を引く（短い間だけ保持して段落ごとの HTTP を避ける）
+- [x] 引けない・空のときは環境変数 `TRANSLATION_MODEL`、なければ既定値
+- [x] テスト: 応答の解釈、引けないときの退避（`com.sun.net.httpserver` で受ける）
+- [x] `rm -rf target && mvn install`
+
+## Review
+- モデルは「AI workspace の Settings → `TRANSLATION_MODEL` → 既定値」の順。AI workspace が無い・答えない・空のときは次へ退避し、翻訳は止まらない。
+- 5 秒だけ保持する（1 ページの数十段落ごとに HTTP を打たないため）。Settings で変えてから最長 5 秒で効く。
+- 単体テスト154件通過（受け側は `com.sun.net.httpserver`）。commit・push・稼働中インスタンスの入れ替えは未実施。
+
+---
+
 # 左ペインに `Update All Projects` ボタンを1つ置き、全体更新をそこへ集約する
 
 ヘッダ右端にある全プロジェクト対象の操作ボタン2つを画面から取り除き、works ディレクトリの
