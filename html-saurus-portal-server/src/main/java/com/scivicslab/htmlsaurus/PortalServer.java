@@ -491,6 +491,13 @@ public class PortalServer {
             return;
         }
 
+        // Import tab: start one PDF OCR import job per PDF directly inside a directory. Form
+        // fields: path (directory), project, destPath, backend, pagesPerFile.
+        if (path.equals("/api/import/pdf/bulk")) {
+            handleImportPdfBulk(ex);
+            return;
+        }
+
         // Import tab: start a video transcript import as a background job.
         // Form fields: url, project, destPath, title (optional), filename (optional).
         if (path.equals("/api/import/video/start")) {
@@ -1723,6 +1730,7 @@ public class PortalServer {
                 <span class="field-label">Import type</span>
                 <select id="import-type">
                   <option value="pdf">PDF</option>
+                  <option value="pdf-bulk">PDF (bulk directory)</option>
                   <option value="word">Word</option>
                   <option value="web">Web page</option>
                   <option value="video">Video</option>
@@ -1764,6 +1772,41 @@ public class PortalServer {
                   </div>
                   <div class="btn-row">
                     <button class="btn" type="button" id="import-pdf-start">OCR &amp; save</button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="import-panel" id="import-panel-pdf-bulk" hidden>
+                <p class="hint">Give the path of a directory on this server. Every PDF directly inside it
+                  (subdirectories are not entered) is OCR'd like a single PDF import, one job per file, and
+                  written as Markdown under the chosen project's docs/. Each file's title is its filename.</p>
+                <div class="card">
+                  <div class="field">
+                    <span class="field-label">Project</span>
+                    <select id="import-pdf-bulk-project"></select>
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Destination path (under docs/)</span>
+                    <input type="text" id="import-pdf-bulk-dest" autocomplete="off" placeholder="papers/my-books">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">OCR engine</span>
+                    <select id="import-pdf-bulk-backend">
+                      <option value="yomitoku">YomiToku (Japanese, multi-column)</option>
+                      <option value="marker">Marker (math/LaTeX, GPU)</option>
+                      <option value="yomitoku-marker">YomiToku + Marker (Japanese with math)</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Pages per file</span>
+                    <input type="number" id="import-pdf-bulk-pages-per-file" value="10" min="1">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">PDF directory path</span>
+                    <input type="text" id="import-pdf-bulk-path" autocomplete="off" placeholder="/home/devteam/works/pdfs">
+                  </div>
+                  <div class="btn-row">
+                    <button class="btn" type="button" id="import-pdf-bulk-start">OCR &amp; save all</button>
                   </div>
                 </div>
               </section>
@@ -1944,7 +1987,7 @@ public class PortalServer {
                     status.textContent = action + ' done (' + j.ms + 'ms)';
                     status.style.color = 'var(--accent-green)';
                   } else {
-                    status.textContent = 'Error: ' + (j.error || 'unknown');
+                    status.textContent = 'Error: ' + (j.error || j.message || 'unknown');
                     status.style.color = '#e06060';
                   }
                 }
@@ -2026,7 +2069,7 @@ public class PortalServer {
             // is called from the type-picker block above this point, and a var would still be
             // undefined there.
             function importProjectSelectIds() {
-              return ['import-pdf-project', 'import-word-project',
+              return ['import-pdf-project', 'import-pdf-bulk-project', 'import-word-project',
                 'import-web-project', 'import-video-project'];
             }
             function populateImportProjects() {
@@ -2062,6 +2105,8 @@ public class PortalServer {
             (function () {
               var fieldIds = ['import-pdf-dest', 'import-pdf-title', 'import-pdf-backend',
                 'import-pdf-pages-per-file', 'import-pdf-path',
+                'import-pdf-bulk-dest', 'import-pdf-bulk-backend',
+                'import-pdf-bulk-pages-per-file', 'import-pdf-bulk-path',
                 'import-word-dest', 'import-word-title', 'import-word-path',
                 'import-web-dest', 'import-web-title', 'import-web-filename', 'import-web-url',
                 'import-video-dest', 'import-video-title', 'import-video-filename', 'import-video-url'];
@@ -2111,6 +2156,29 @@ public class PortalServer {
                 progress.textContent = 'Started ' + startJson.totalPages + ' page(s). It is listed under Batch Job; queue another whenever you like.';
                 const pathField = document.getElementById('import-pdf-path');
                 if (pathField) pathField.value = '';
+                refreshImportJobs();
+              } catch (e) {
+                progress.textContent = 'Error: ' + e.message;
+              }
+            }
+            async function startPdfBulkImport() {
+              const progress = document.getElementById('import-progress');
+              const path = importField('import-pdf-bulk-path');
+              if (!path) { progress.textContent = 'Give a PDF directory path first.'; return; }
+              const body = new URLSearchParams();
+              body.set('path', path);
+              body.set('project', importField('import-pdf-bulk-project'));
+              body.set('destPath', importField('import-pdf-bulk-dest'));
+              body.set('backend', importField('import-pdf-bulk-backend'));
+              body.set('pagesPerFile', importField('import-pdf-bulk-pages-per-file'));
+              progress.textContent = 'Starting...';
+              try {
+                const r = await fetch('/api/import/pdf/bulk', {
+                  method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
+                const j = await r.json();
+                if (!r.ok) { progress.textContent = 'Error: ' + (j.error || 'unknown'); return; }
+                progress.textContent = 'Started ' + j.started + ' PDF(s). They are listed under Batch Job.'
+                  + (j.skipped.length > 0 ? ' Skipped: ' + j.skipped.join(', ') : '');
                 refreshImportJobs();
               } catch (e) {
                 progress.textContent = 'Error: ' + e.message;
@@ -2288,6 +2356,8 @@ public class PortalServer {
             (function () {
               var pdfBtn = document.getElementById('import-pdf-start');
               if (pdfBtn) pdfBtn.addEventListener('click', startPdfImport);
+              var pdfBulkBtn = document.getElementById('import-pdf-bulk-start');
+              if (pdfBulkBtn) pdfBulkBtn.addEventListener('click', startPdfBulkImport);
               var wordBtn = document.getElementById('import-word-start');
               if (wordBtn) wordBtn.addEventListener('click', startWordImport);
               var webBtn = document.getElementById('import-web-start');
@@ -3087,8 +3157,6 @@ public class PortalServer {
         if (target == null) {
             return;
         }
-        Project proj = target.project();
-        Path destDir = target.destDir();
         int pagesPerFile;
         try {
             pagesPerFile = Integer.parseInt(form.get("pagesPerFile"));
@@ -3097,24 +3165,109 @@ public class PortalServer {
         }
         if (pagesPerFile < 1) pagesPerFile = 10;
 
-        byte[] pdfBytes = Files.readAllBytes(srcPath);
         int totalPages;
+        String jobId;
         try {
-            totalPages = PdfPageSplitter.pageCount(pdfBytes);
+            var started = submitPdfImport(srcPath, ocr, target, pagesPerFile, form.get("title"));
+            jobId = started.getKey();
+            totalPages = started.getValue();
         } catch (Exception e) {
             respond(ex, 400, "application/json", "{\"error\":\"could not read PDF\"}");
             return;
         }
-        String stem = PageRenderer.stripExtension(srcPath.getFileName().toString());
-        String title = form.get("title");
-        PdfImportJob work = new PdfImportJob(pdfBytes, destDir, stem, ocr, pagesPerFile,
-            totalPages, (title == null || title.isBlank()) ? stem : title,
-            target.fileDisplayPrefix(), rebuildAfterImport(proj));
-        var job = batchJobs.submit("pdf", srcPath.getFileName().toString(),
-            work::run, System.currentTimeMillis());
 
         respond(ex, 200, "application/json",
-            "{\"jobId\":" + jsonStr(job.id()) + ",\"totalPages\":" + totalPages + "}");
+            "{\"jobId\":" + jsonStr(jobId) + ",\"totalPages\":" + totalPages + "}");
+    }
+
+    /**
+     * Registers one PDF import job and starts it.
+     *
+     * @param title the document title, or {@code null}/blank for the filename without extension
+     * @return the new job's id and the PDF's page count
+     * @throws Exception if the file cannot be read as a PDF; nothing has been submitted then
+     */
+    private Map.Entry<String, Integer> submitPdfImport(Path srcPath, OcrClient ocr, ImportTarget target,
+                                                       int pagesPerFile, String title) throws Exception {
+        byte[] pdfBytes = Files.readAllBytes(srcPath);
+        int totalPages = PdfPageSplitter.pageCount(pdfBytes);
+        String stem = PageRenderer.stripExtension(srcPath.getFileName().toString());
+        PdfImportJob work = new PdfImportJob(pdfBytes, target.destDir(), stem, ocr, pagesPerFile,
+            totalPages, (title == null || title.isBlank()) ? stem : title,
+            target.fileDisplayPrefix(), rebuildAfterImport(target.project()));
+        var job = batchJobs.submit("pdf", srcPath.getFileName().toString(),
+            work::run, System.currentTimeMillis());
+        return Map.entry(job.id(), totalPages);
+    }
+
+    /**
+     * Handles {@code POST /api/import/pdf/bulk}. Form fields as {@link #handleImportPdfStart}, except
+     * {@code path} names a directory and there is no {@code title}. Starts one PDF import job for each
+     * {@code .pdf} file directly inside it (not recursive), in filename order, each submitted
+     * exactly as {@link #handleImportPdfStart} would. A file that cannot be read as a PDF is
+     * skipped and named in the reply. Returns {@code {started, skipped:[filename...]}}.
+     */
+    private void handleImportPdfBulk(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, String> form = parseFormBody(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String dirStr = form.get("path");
+        if (dirStr == null || dirStr.isBlank()) {
+            respond(ex, 400, "application/json", "{\"error\":\"missing path\"}");
+            return;
+        }
+        Path dir = Path.of(dirStr).normalize();
+        if (!Files.isDirectory(dir)) {
+            respond(ex, 404, "application/json", "{\"error\":\"directory not found: " + dirStr.replace("\"", "'") + "\"}");
+            return;
+        }
+        OcrClient ocr = ocrClients.get(form.get("backend"));
+        if (ocr == null) {
+            respond(ex, 400, "application/json", "{\"error\":\"unknown backend\"}");
+            return;
+        }
+        ImportTarget target = resolveImportTarget(ex, form);
+        if (target == null) {
+            return;
+        }
+        int pagesPerFile;
+        try {
+            pagesPerFile = Integer.parseInt(form.get("pagesPerFile"));
+        } catch (NumberFormatException e) {
+            pagesPerFile = 10;
+        }
+        if (pagesPerFile < 1) pagesPerFile = 10;
+
+        List<Path> pdfs;
+        try (var entries = Files.list(dir)) {
+            pdfs = entries
+                .filter(f -> Files.isRegularFile(f) && f.getFileName().toString().toLowerCase().endsWith(".pdf"))
+                .sorted()
+                .toList();
+        }
+        if (pdfs.isEmpty()) {
+            respond(ex, 400, "application/json", "{\"error\":\"no PDF files in the directory\"}");
+            return;
+        }
+        // Each PDF is submitted exactly as a single PDF import would be.
+        int started = 0;
+        List<String> skipped = new ArrayList<>();
+        for (Path pdf : pdfs) {
+            try {
+                submitPdfImport(pdf, ocr, target, pagesPerFile, null);
+                started++;
+            } catch (Exception e) {
+                skipped.add(pdf.getFileName().toString());
+            }
+        }
+        StringBuilder json = new StringBuilder("{\"started\":").append(started).append(",\"skipped\":[");
+        for (int i = 0; i < skipped.size(); i++) {
+            if (i > 0) json.append(',');
+            json.append(jsonStr(skipped.get(i)));
+        }
+        respond(ex, 200, "application/json", json.append("]}").toString());
     }
 
     /**
