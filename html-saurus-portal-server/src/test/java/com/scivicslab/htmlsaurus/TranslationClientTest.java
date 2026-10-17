@@ -104,4 +104,12 @@ class TranslationClientTest {
         server.start();
         return server;
     }
+
+    @Test
+    void queueNameFor_followsTheBrokersNaming() {
+        assertEquals("chat-google-gemma-4-26B-A4B-it", TranslationClient.queueNameFor("google/gemma-4-26B-A4B-it"));
+        assertEquals("chat-GLM-5.3-Flash-EXL3", TranslationClient.queueNameFor("GLM-5.3-Flash-EXL3"));
+        assertEquals("chat-qwen3.8-flash-next-iq3_xxs-radeon",
+            TranslationClient.queueNameFor("qwen3.8-flash-next-iq3_xxs-radeon"));
+    }
 }

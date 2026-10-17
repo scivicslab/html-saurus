@@ -1,3 +1,29 @@
+# ページ翻訳を Batch Job にして、GPU broker のジョブ待ち行列に流す（2026-10-18）
+
+## 方針（ユーザー決定）
+- 翻訳は Import と同じ流れにする: broker の `POST /jobs/{キュー}` に `FOREGROUND` で投入し、`GpuBrokerClient` の流量制御に任せる。
+- ブラウザは全ブロックの文面を 1 回で渡し、サーバが 1 つの Batch Job（kind `translate`）として走らせる。
+- 訳はキャッシュに入る。ブラウザは進み具合を問い合わせ、訳せたブロックから差し込む。
+
+## Plan
+- [x] `TranslationClient.translateViaBroker`: キュー名は `chat-` + モデル名（`/` は `-`）。`FOREGROUND`、待ちにタイムアウトを付けない
+- [x] `PageTranslationJob`: キャッシュ済みは飛ばす・同文は 1 回だけ投入・失敗は数えて続行・停止で打ち切る
+- [x] `POST /api/translate-page`（ジョブ開始）と `POST /api/translate-lookup`（キャッシュから引く）
+- [x] `GPU_BROKER_URL` が無いときは直接呼び出しを 1 件ずつ（起動時の判断。実行時の切り替えはしない）
+- [x] `PageScripts`: 1 回で渡し、進み具合を問い合わせ、訳せた順に差し込む。失敗は「翻訳失敗」と表示。Hide で停止
+- [x] Batch Job タブに `translate` の行（`n / 全体`）
+- [x] テスト: ジョブ（偽の翻訳器）、キュー名、ブラウザ（ヘッドレス）で 1 ページ通し
+- [x] `rm -rf target && mvn install`（lib → portal-server の順）
+
+## Review
+- ページ翻訳は Batch Job（kind `translate`）になった。ブラウザは全ブロックを 1 回で渡し、`/api/import/status` と `/api/translate-lookup` を 1.5 秒ごとに引いて、訳せたブロックから差し込む。ジョブの状態を先に読み、終わっていたら残りを「翻訳失敗」と表示する。
+- キュー名は `chat-` + モデル名（`/` は `-`）。待ちにタイムアウトは付けず、投入は `GpuBrokerClient` の流量制御（キューごとに 10 件）で進む。`FOREGROUND`。
+- 本物のページ（CISSP Chap01 p001-010、58 ブロック）で確認: 開始 → 進み具合 → 完了。ブラウザを閉じてもジョブは 58 / 58 まで進み、もう一度押すと全部キャッシュから 1.7 秒で出る。失敗 0。
+- 確認時のモデルは Settings の `qwen3.8-flash-next-iq3_xxs-radeon`（処理枠 1）で、58 ブロックに約 5 分。落ちずに順に進んだ。gemma（32 枠）なら速い。
+- 単体テスト: lib 168 件、portal-server 161 件（ジョブ 6 件、キュー名 1 件を追加）。commit・push・稼働中インスタンスの入れ替えは未実施。
+
+---
+
 # 単純な箇条書きは 1 ブロックとして翻訳する（2026-10-17）
 
 ## Plan

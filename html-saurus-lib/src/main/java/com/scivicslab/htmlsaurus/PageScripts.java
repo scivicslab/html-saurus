@@ -323,10 +323,25 @@ class PageScripts {
               var defaultLabel = btn.innerHTML;
               var shownLabel = '&#x1F310; Hide translation';
               var translated = false;
+              // Counts runs: Hide, or a newer run, makes an older run's polling stop at its next step.
+              var runId = 0;
+              var runningJobId = null;
+              function postJson(url, obj) {
+                return fetch(url, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+                  body: JSON.stringify(obj)
+                }).then(function(r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); });
+              }
+              function stopJob(jobId) {
+                postJson('/api/import/stop', { jobId: jobId }).catch(function() {});
+              }
+              // The page is translated as one Batch Job on the server, which queues the blocks on the
+              // GPU broker; this side only hands the blocks over and shows what has come back.
               function runTranslation() {
                 var main = document.querySelector('main');
                 if (!main) return;
-                var blocks = [];
+                var items = [];
                 main.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, tr, ul, ol').forEach(function(el) {
                   if (el.dataset.translated) return;
                   // A list is a block only when it is simple; the items inside a simple list are
@@ -337,32 +352,68 @@ class PageScripts {
                     if (list && isSimpleList(list) && main.contains(list)) return;
                   }
                   el.dataset.translated = '1';
-                  blocks.push(el);
+                  var text = (isSimpleList(el) ? simpleListText(el) : ownText(el)).trim();
+                  if (!text) return;
+                  items.push({ el: el, text: text, lang: isJapaneseText(text) ? 'English' : 'Japanese', done: false });
                 });
                 translated = true;
-                if (!blocks.length) { btn.innerHTML = shownLabel; return; }
-                btn.disabled = true;
+                if (!items.length) { btn.innerHTML = shownLabel; return; }
+                var myRun = ++runId;
                 btn.innerHTML = '&#x1F310; Translating\\u2026';
-                var pending = blocks.length;
-                function oneDone() {
-                  pending--;
-                  if (pending <= 0) { btn.innerHTML = shownLabel; btn.disabled = false; }
+                function payload(list) {
+                  return list.map(function(it) { return { text: it.text, lang: it.lang }; });
                 }
-                blocks.forEach(function(el) {
-                  var text = (isSimpleList(el) ? simpleListText(el) : ownText(el)).trim();
-                  if (!text) { oneDone(); return; }
-                  var lang = isJapaneseText(text) ? 'English' : 'Japanese';
-                  fetch('/api/translate?lang=' + encodeURIComponent(lang), {
-                    method: 'POST',
-                    headers: {'Content-Type': 'text/plain; charset=UTF-8'},
-                    body: text
-                  }).then(function(r) { return r.ok ? r.json() : null; })
-                    .then(function(d) { if (d && d.translation) insertTranslation(el, d.translation); })
-                    .catch(function() {})
-                    .finally(oneDone);
-                });
+                function finish(failedCount) {
+                  runningJobId = null;
+                  btn.innerHTML = shownLabel + (failedCount ? ' (' + failedCount + ' failed)' : '');
+                }
+                function failRemaining() {
+                  var failed = items.filter(function(it) { return !it.done; });
+                  failed.forEach(function(it) { it.done = true; insertTranslation(it.el, '(translation failed)'); });
+                  finish(failed.length);
+                }
+                function poll(jobId) {
+                  function tick() {
+                    if (myRun !== runId) return;
+                    var open = items.filter(function(it) { return !it.done; });
+                    // The job's state is read before the cache is, so a job seen finished has all its
+                    // results in the lookup that follows.
+                    fetch('/api/import/status?jobId=' + encodeURIComponent(jobId))
+                      .then(function(r) { return r.ok ? r.json() : null; })
+                      .catch(function() { return { state: 'running' }; })
+                      .then(function(job) {
+                        return postJson('/api/translate-lookup', { blocks: payload(open) }).then(function(found) {
+                          return { job: job, found: found.translations };
+                        });
+                      })
+                      .then(function(res) {
+                        if (myRun !== runId) return;
+                        open.forEach(function(it, i) {
+                          if (res.found[i]) { it.done = true; insertTranslation(it.el, res.found[i]); }
+                        });
+                        var remaining = items.filter(function(it) { return !it.done; }).length;
+                        var ended = !res.job || res.job.state !== 'running';
+                        if (remaining === 0) { finish(0); return; }
+                        if (ended) { failRemaining(); return; }
+                        btn.innerHTML = '&#x1F310; Translating ' + (items.length - remaining)
+                          + ' / ' + items.length + '\\u2026';
+                        setTimeout(tick, 1500);
+                      })
+                      .catch(function() { if (myRun === runId) setTimeout(tick, 3000); });
+                  }
+                  tick();
+                }
+                postJson('/api/translate-page', { label: document.title, blocks: payload(items) })
+                  .then(function(start) {
+                    if (myRun !== runId) { stopJob(start.jobId); return; }
+                    runningJobId = start.jobId;
+                    poll(start.jobId);
+                  })
+                  .catch(function() { if (myRun === runId) failRemaining(); });
               }
               function clearTranslation() {
+                runId++;
+                if (runningJobId) { stopJob(runningJobId); runningJobId = null; }
                 document.querySelectorAll('main tr.translation-row').forEach(function(tr) { tr.remove(); });
                 document.querySelectorAll('main details.inline-translation').forEach(function(d) { d.remove(); });
                 document.querySelectorAll('main [data-translated]').forEach(function(el) { delete el.dataset.translated; });

@@ -1,5 +1,11 @@
 package com.scivicslab.htmlsaurus;
 
+import com.scivicslab.gpubroker.client.GpuBrokerClient;
+import com.scivicslab.gpubroker.client.GpuBrokerClientException;
+import com.scivicslab.gpubroker.client.JobResult;
+import com.scivicslab.gpubroker.client.Priority;
+
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -7,6 +13,8 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -176,6 +184,46 @@ public class TranslationClient {
     static String parseModel(String responseBody) {
         Object model = McpJsonParser.parseObject(responseBody).get("model");
         return model == null ? null : model.toString();
+    }
+
+    /** The name quarkus-gpu-broker lists a chat model's queue under: {@code chat-} and the model
+     *  id with {@code /} written as {@code -}, e.g. {@code chat-google-gemma-4-26B-A4B-it}. */
+    static String queueNameFor(String model) {
+        return "chat-" + model.replace('/', '-');
+    }
+
+    /**
+     * Submits one block to quarkus-gpu-broker's job queue for the current model, at
+     * {@code FOREGROUND} priority because a person is waiting on the page. {@code broker} holds
+     * this call while the queue already has its limit of jobs outstanding, so a caller that submits
+     * a page's blocks one after another is paced by the queue rather than flooding it, and the
+     * time a job waits in the queue is not a failure: nothing here times out.
+     *
+     * @return the translation once the job is done; completes exceptionally if the broker rejects
+     *         the job, the job fails, or the answer has no content
+     */
+    CompletableFuture<String> translateViaBroker(GpuBrokerClient broker, String text, String targetLang) {
+        CompletableFuture<String> out = new CompletableFuture<>();
+        String model = currentModel();
+        byte[] body = buildRequestJson(text, targetLang, model).getBytes(StandardCharsets.UTF_8);
+        try {
+            broker.submit(queueNameFor(model), body, "application/json", Priority.FOREGROUND, result -> {
+                if (result.status() != JobResult.Status.DONE) {
+                    out.completeExceptionally(new IOException(
+                            "translation failed via gpu-broker: " + result.error()));
+                    return;
+                }
+                String content = parseContent(new String(result.body(), StandardCharsets.UTF_8));
+                if (content == null) {
+                    out.completeExceptionally(new IOException("translation answer has no content"));
+                } else {
+                    out.complete(content);
+                }
+            });
+        } catch (GpuBrokerClientException e) {
+            out.completeExceptionally(e);
+        }
+        return out;
     }
 
     /** Whether {@link #translate} should skip attempting a connection at time {@code nowMs}. */

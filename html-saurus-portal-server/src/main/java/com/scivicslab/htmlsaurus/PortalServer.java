@@ -477,6 +477,17 @@ public class PortalServer {
             return;
         }
 
+        // Page translation: start one Batch Job for all the blocks of a page, then look the
+        // finished ones up in the cache as they appear. Body: {"label":"...","blocks":[{"text","lang"}...]}.
+        if (path.equals("/api/translate-page")) {
+            handleTranslatePage(ex);
+            return;
+        }
+        if (path.equals("/api/translate-lookup")) {
+            handleTranslateLookup(ex);
+            return;
+        }
+
         // On-demand paragraph translation API: POST /api/translate?lang=...
         if (path.equals("/api/translate")) {
             handleTranslate(ex);
@@ -2193,6 +2204,13 @@ public class PortalServer {
                 if (j.state === 'stopped') return 'Stopped.';
                 return 'Error: ' + (j.error || 'unknown');
               }
+              if (j.kind === 'translate') {
+                if (j.state === 'running') return 'Translating: ' + j.currentPage + ' / ' + j.totalPages + '...';
+                if (j.state === 'done') return 'Done: ' + j.totalPages + ' block(s)' + (j.phase ? ' - ' + j.phase : '') + '.';
+                if (j.state === 'stopped') return 'Stopped at ' + j.currentPage + ' / ' + j.totalPages
+                  + '. Translated blocks are kept.';
+                return 'Error: ' + (j.error || 'unknown');
+              }
               if (j.kind === 'video') {
                 if (j.state === 'running') return (j.phase || 'Working') + '...';
                 if (j.state === 'done') return 'Done: ' + (j.lastFile || 'transcript saved')
@@ -3094,6 +3112,100 @@ public class PortalServer {
             translationCache.put(key, result);
         }
         return result;
+    }
+
+    /** The most blocks one page translation may carry, and the longest one block may be. */
+    private static final int MAX_PAGE_BLOCKS = 3000;
+    private static final int MAX_BLOCK_CHARS = 20_000;
+
+    /**
+     * How the page's blocks are translated: through quarkus-gpu-broker's job queue when
+     * {@code GPU_BROKER_URL} is set, otherwise one at a time against the translation server. Decided
+     * here, once, never switched while running (the rule {@link GpuBrokerOcrClient} follows too).
+     */
+    private PageTranslationJob.BlockTranslator blockTranslator() {
+        if (GPU_BROKER != null) {
+            return (text, lang) -> translate.translateViaBroker(GPU_BROKER, text, lang);
+        }
+        return (text, lang) -> {
+            String result = translate.translate(text, lang);
+            return result == null
+                ? java.util.concurrent.CompletableFuture.<String>failedFuture(new IOException("translation failed"))
+                : java.util.concurrent.CompletableFuture.completedFuture(result);
+        };
+    }
+
+    /** Reads {@code {"blocks":[{"text":"...","lang":"..."}]}}, or {@code null} after answering 400. */
+    private List<PageTranslationJob.Block> readBlocks(HttpExchange ex, Map<String, Object> body) throws IOException {
+        if (!(body.get("blocks") instanceof List<?> raw) || raw.isEmpty() || raw.size() > MAX_PAGE_BLOCKS) {
+            respond(ex, 400, "application/json", "{\"error\":\"blocks must hold 1 to " + MAX_PAGE_BLOCKS + " entries\"}");
+            return null;
+        }
+        List<PageTranslationJob.Block> blocks = new ArrayList<>(raw.size());
+        for (Object o : raw) {
+            if (!(o instanceof Map<?, ?> m) || !(m.get("text") instanceof String text)
+                    || !(m.get("lang") instanceof String lang)) {
+                respond(ex, 400, "application/json", "{\"error\":\"each block needs text and lang\"}");
+                return null;
+            }
+            // Stripped the way /api/translate strips, so one text is one cache entry on both routes.
+            String stripped = text.strip();
+            if (stripped.isEmpty() || stripped.length() > MAX_BLOCK_CHARS || lang.isBlank()) {
+                respond(ex, 400, "application/json", "{\"error\":\"a block is empty or too long\"}");
+                return null;
+            }
+            blocks.add(new PageTranslationJob.Block(stripped, lang));
+        }
+        return blocks;
+    }
+
+    /**
+     * Handles {@code POST /api/translate-page}. Starts one Batch Job (kind {@code translate}) that
+     * translates every block and fills {@link #translationCache}, and answers {@code {jobId, total}}
+     * at once. The browser follows the job through {@link #handleImportStatus} and reads what is
+     * finished through {@link #handleTranslateLookup}.
+     */
+    private void handleTranslatePage(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, Object> body = McpJsonParser.parseObject(
+            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        List<PageTranslationJob.Block> blocks = readBlocks(ex, body);
+        if (blocks == null) {
+            return;
+        }
+        String label = body.get("label") instanceof String l && !l.isBlank() ? l : "page";
+        PageTranslationJob work = new PageTranslationJob(blocks, translationCache, blockTranslator());
+        var job = batchJobs.submit("translate", label, work::run, System.currentTimeMillis());
+        respond(ex, 200, "application/json",
+            "{\"jobId\":" + jsonStr(job.id()) + ",\"total\":" + blocks.size() + "}");
+    }
+
+    /**
+     * Handles {@code POST /api/translate-lookup}. Answers {@code {"translations":[...]}}: for each
+     * block in the request, its cached translation, or {@code null} when it has none yet.
+     */
+    private void handleTranslateLookup(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, Object> body = McpJsonParser.parseObject(
+            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        List<PageTranslationJob.Block> blocks = readBlocks(ex, body);
+        if (blocks == null) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder("{\"translations\":[");
+        for (int i = 0; i < blocks.size(); i++) {
+            if (i > 0) sb.append(',');
+            PageTranslationJob.Block b = blocks.get(i);
+            String cached = translationCache.get(TranslationCache.key(b.text(), b.lang()));
+            sb.append(cached == null ? "null" : jsonStr(cached));
+        }
+        respond(ex, 200, "application/json; charset=UTF-8", sb.append("]}").toString());
     }
 
     /**
