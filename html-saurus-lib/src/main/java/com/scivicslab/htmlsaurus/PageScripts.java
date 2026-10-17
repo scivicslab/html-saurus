@@ -215,7 +215,8 @@ class PageScripts {
                 });
               }
             })();
-            // On-demand translation: paragraphs, headings, list items, and table rows
+            // On-demand translation: paragraphs, headings, list items, and table rows. A list with no
+            // nested list is translated as one block, not item by item.
             (function() {
               var btn = document.getElementById('translate-btn');
               if (!btn) return;
@@ -248,7 +249,22 @@ class PageScripts {
                 }
                 return el.textContent;
               }
-              function makeAccordion(translation) {
+              // A list none of whose items holds another list. Its items are short parts of one
+              // thing, so the whole list is translated in one call and gets one accordion.
+              function isSimpleList(el) {
+                return (el.tagName === 'UL' || el.tagName === 'OL') && !el.querySelector('ul, ol');
+              }
+              // One line per item, numbered for <ol> and dashed for <ul>, so the translation comes
+              // back in the same line structure.
+              function simpleListText(list) {
+                var n = 0;
+                return Array.prototype.map.call(list.children, function(item) {
+                  var line = item.textContent.replace(/\\s+/g, ' ').trim();
+                  n++;
+                  return line ? ((list.tagName === 'OL' ? n + '. ' : '- ') + line) : '';
+                }).filter(Boolean).join('\\n');
+              }
+              function makeAccordion(translation, keepLines) {
                 var details = document.createElement('details');
                 details.className = 'inline-translation';
                 var summary = document.createElement('summary');
@@ -274,11 +290,12 @@ class PageScripts {
                 details.appendChild(summary);
                 var body = document.createElement('div');
                 body.textContent = translation;
+                if (keepLines) body.style.whiteSpace = 'pre-line';
                 details.appendChild(body);
                 return details;
               }
               function insertTranslation(el, translation) {
-                var details = makeAccordion(translation);
+                var details = makeAccordion(translation, isSimpleList(el));
                 if (el.tagName === 'LI') {
                   // Insert before any nested <ul>/<ol> so the translation stays next to this
                   // item's own text instead of trailing the whole nested sub-list.
@@ -310,8 +327,15 @@ class PageScripts {
                 var main = document.querySelector('main');
                 if (!main) return;
                 var blocks = [];
-                main.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, tr').forEach(function(el) {
+                main.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, tr, ul, ol').forEach(function(el) {
                   if (el.dataset.translated) return;
+                  // A list is a block only when it is simple; the items inside a simple list are
+                  // part of that block, so they are not blocks of their own.
+                  if ((el.tagName === 'UL' || el.tagName === 'OL') && !isSimpleList(el)) return;
+                  if (el.tagName !== 'UL' && el.tagName !== 'OL') {
+                    var list = el.closest('ul, ol');
+                    if (list && isSimpleList(list) && main.contains(list)) return;
+                  }
                   el.dataset.translated = '1';
                   blocks.push(el);
                 });
@@ -325,7 +349,7 @@ class PageScripts {
                   if (pending <= 0) { btn.innerHTML = shownLabel; btn.disabled = false; }
                 }
                 blocks.forEach(function(el) {
-                  var text = ownText(el).trim();
+                  var text = (isSimpleList(el) ? simpleListText(el) : ownText(el)).trim();
                   if (!text) { oneDone(); return; }
                   var lang = isJapaneseText(text) ? 'English' : 'Japanese';
                   fetch('/api/translate?lang=' + encodeURIComponent(lang), {
