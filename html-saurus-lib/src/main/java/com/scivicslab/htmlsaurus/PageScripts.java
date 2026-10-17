@@ -215,8 +215,8 @@ class PageScripts {
                 });
               }
             })();
-            // On-demand translation: paragraphs, headings, list items, and table rows. A list with no
-            // nested list is translated as one block, not item by item.
+            // On-demand translation: paragraphs, headings, list items, and table rows. A whole list
+            // is translated as one block, not item by item.
             (function() {
               var btn = document.getElementById('translate-btn');
               if (!btn) return;
@@ -249,20 +249,44 @@ class PageScripts {
                 }
                 return el.textContent;
               }
-              // A list none of whose items holds another list. Its items are short parts of one
-              // thing, so the whole list is translated in one call and gets one accordion.
-              function isSimpleList(el) {
-                return (el.tagName === 'UL' || el.tagName === 'OL') && !el.querySelector('ul, ol');
-              }
-              // One line per item, numbered for <ol> and dashed for <ul>, so the translation comes
-              // back in the same line structure.
-              function simpleListText(list) {
+              // A whole list is translated as one block: its items are parts of one thing, and the
+              // sub-items under an item only make sense next to it. Only the outermost list is a
+              // block; a list too long to send in one request is split item by item instead.
+              var LIST_BLOCK_MAX_CHARS = 6000;
+              // One line per item, indented two spaces per level, numbered for <ol> and dashed for
+              // <ul>, so the translation comes back in the same line structure.
+              function listText(list, indent) {
+                var lines = [];
                 var n = 0;
-                return Array.prototype.map.call(list.children, function(item) {
-                  var line = item.textContent.replace(/\\s+/g, ' ').trim();
+                Array.prototype.forEach.call(list.children, function(item) {
+                  if (item.tagName !== 'LI') return;
                   n++;
-                  return line ? ((list.tagName === 'OL' ? n + '. ' : '- ') + line) : '';
-                }).filter(Boolean).join('\\n');
+                  var own = '';
+                  var nested = [];
+                  item.childNodes.forEach(function(c) {
+                    if (c.nodeType === 1 && (c.tagName === 'UL' || c.tagName === 'OL')) nested.push(c);
+                    else own += c.textContent;
+                  });
+                  own = own.replace(/\\s+/g, ' ').trim();
+                  if (own) lines.push(indent + (list.tagName === 'OL' ? n + '. ' : '- ') + own);
+                  nested.forEach(function(sub) {
+                    var t = listText(sub, indent + '  ');
+                    if (t) lines.push(t);
+                  });
+                });
+                return lines.join('\\n');
+              }
+              function isListBlock(el) {
+                if (el.tagName !== 'UL' && el.tagName !== 'OL') return false;
+                if (el.parentElement && el.parentElement.closest('li')) return false;
+                return listText(el, '').length <= LIST_BLOCK_MAX_CHARS;
+              }
+              // Whether el sits inside a list that is translated as one block.
+              function inListBlock(el, main) {
+                for (var a = el.parentElement; a && a !== main; a = a.parentElement) {
+                  if (isListBlock(a)) return true;
+                }
+                return false;
               }
               function makeAccordion(translation, keepLines) {
                 var details = document.createElement('details');
@@ -290,12 +314,12 @@ class PageScripts {
                 details.appendChild(summary);
                 var body = document.createElement('div');
                 body.textContent = translation;
-                if (keepLines) body.style.whiteSpace = 'pre-line';
+                if (keepLines) body.style.whiteSpace = 'pre-wrap';
                 details.appendChild(body);
                 return details;
               }
               function insertTranslation(el, translation) {
-                var details = makeAccordion(translation, isSimpleList(el));
+                var details = makeAccordion(translation, isListBlock(el));
                 if (el.tagName === 'LI') {
                   // Insert before any nested <ul>/<ol> so the translation stays next to this
                   // item's own text instead of trailing the whole nested sub-list.
@@ -344,15 +368,13 @@ class PageScripts {
                 var items = [];
                 main.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, tr, ul, ol').forEach(function(el) {
                   if (el.dataset.translated) return;
-                  // A list is a block only when it is simple; the items inside a simple list are
-                  // part of that block, so they are not blocks of their own.
-                  if ((el.tagName === 'UL' || el.tagName === 'OL') && !isSimpleList(el)) return;
-                  if (el.tagName !== 'UL' && el.tagName !== 'OL') {
-                    var list = el.closest('ul, ol');
-                    if (list && isSimpleList(list) && main.contains(list)) return;
-                  }
+                  // A list is a block as a whole; what is inside it is part of that block, so it is
+                  // not a block of its own. A list that is not a block (nested in an item, or too
+                  // long) is skipped here and its items are blocks instead.
+                  if ((el.tagName === 'UL' || el.tagName === 'OL') && !isListBlock(el)) return;
+                  if (el.tagName !== 'UL' && el.tagName !== 'OL' && inListBlock(el, main)) return;
                   el.dataset.translated = '1';
-                  var text = (isSimpleList(el) ? simpleListText(el) : ownText(el)).trim();
+                  var text = (isListBlock(el) ? listText(el, '') : ownText(el)).trim();
                   if (!text) return;
                   items.push({ el: el, text: text, lang: isJapaneseText(text) ? 'English' : 'Japanese', done: false });
                 });

@@ -50,7 +50,8 @@ public class TranslationClient {
 
     private static final String SYSTEM_PROMPT_TEMPLATE =
             "You are a translation engine. Translate the user's text into %s. "
-          + "Output only the translation, with no explanation, quotes, or preamble.";
+          + "Output only the translation, with no explanation, quotes, or preamble. "
+          + "Keep the line breaks, the indentation, and the leading \"- \" or numbering of every line.";
 
     private final String baseUrl;
     /** The model used when AI workspace names none: {@code TRANSLATION_MODEL}, else the default. */
