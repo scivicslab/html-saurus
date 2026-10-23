@@ -51,6 +51,16 @@ final class ReferenceLabels {
         this.labels = labels;
     }
 
+    /** Whether no document id was found anywhere, so that no reference can be judged unplaced. */
+    boolean isEmpty() {
+        return labels.isEmpty();
+    }
+
+    /** Whether some document in the doc repositories declares this id. */
+    boolean knows(String id) {
+        return labels.containsKey(id);
+    }
+
     /**
      * Reads the frontmatter id of every document in the doc repositories beside {@code projectRoot}.
      *

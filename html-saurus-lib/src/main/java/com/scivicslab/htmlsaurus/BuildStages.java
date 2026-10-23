@@ -114,9 +114,44 @@ public final class BuildStages {
                 localeBuilder.build();
                 System.out.println("  build done : " + localeDocs);
             }
+            reportBrokenLinks(outDir, projectDir, 20);
         } catch (IOException e) {
             System.err.println("Build failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Prints the same-site references in a built site that resolve to nothing, and returns how many
+     * there are. The build only warns: a site that already carries broken links must still build,
+     * and {@code links --strict} is what turns the count into a failing exit status.
+     *
+     * @param outDir      the directory the build wrote
+     * @param projectRoot the repository being built, which locates the {@code doc_*} repositories
+     *                    that the document ids are checked against
+     * @param limit       how many findings to print; {@code <= 0} prints all of them
+     * @return the number of broken references found, or {@code -1} when the site could not be read
+     */
+    public static int reportBrokenLinks(Path outDir, Path projectRoot, int limit) {
+        List<LinkChecker.Finding> findings;
+        try {
+            findings = LinkChecker.checkInternal(outDir, projectRoot);
+        } catch (IOException e) {
+            System.err.println("Link check failed: " + e.getMessage());
+            return -1;
+        }
+        if (findings.isEmpty()) {
+            System.out.println("  links ok   : " + outDir);
+            return 0;
+        }
+        System.err.println("WARNING: " + findings.size() + " broken internal link(s) in " + outDir);
+        int shown = limit > 0 ? Math.min(limit, findings.size()) : findings.size();
+        for (LinkChecker.Finding f : findings.subList(0, shown)) {
+            System.err.println("  " + f.kind() + "  " + f.page() + "  ->  " + f.href());
+        }
+        if (shown < findings.size()) {
+            System.err.println("  ... " + (findings.size() - shown) + " more; run the links command to list all.");
+        }
+        return findings.size();
     }
 
     /**

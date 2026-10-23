@@ -56,6 +56,14 @@ public final class BuildOnlyMain {
                 server named by EMBEDDING_SERVER_URL. Keyed off search-index/, so run index
                 first when it is stale. Reports and returns when that server is unreachable.
                 """);
+        stageCommand("links", """
+                Reports the same-site links in the built pages under static-html/ that resolve to
+                nothing, or only in a different letter case. Reads the output of html and makes no
+                request. Run html first when the pages are stale.
+
+                For example:
+                $ java -jar html-saurus-build-only.jar links -d ~/works/nigsc_homepage2 --strict
+                """);
         stageCommand("all", """
                 Runs html, then index, then embedding, in that order.
 
@@ -64,7 +72,7 @@ public final class BuildOnlyMain {
                 """);
     }
 
-    /** The four commands differ only in which stages they run; the options are the same. */
+    /** The five commands differ only in which stages they run; the options are the same. */
     private void stageCommand(String name, String description) {
         Options opts = new Options();
 
@@ -109,6 +117,15 @@ public final class BuildOnlyMain {
                 .required(false)
                 .build());
 
+        if (name.equals("links")) {
+            opts.addOption(Option.builder()
+                    .longOpt("strict")
+                    .hasArg(false)
+                    .desc("Exit with status 1 when any broken link is found (default: report only).")
+                    .required(false)
+                    .build());
+        }
+
         cmds.addCommand(name, opts, description, (CommandLine cl) -> {
             if (cl.hasOption("no-diagrams")) BuildStages.skipDiagrams(true);
             Path dir = Path.of(cl.getOptionValue("dir")).toAbsolutePath();
@@ -134,6 +151,16 @@ public final class BuildOnlyMain {
             System.out.println("  projects : " + projects.size());
             System.out.println("  stage    : " + name);
             System.out.println("=========================");
+
+            if (name.equals("links")) {
+                int broken = 0;
+                for (Path p : projects) {
+                    int n = BuildStages.reportBrokenLinks(p.resolve("static-html"), p, 0);
+                    if (n > 0) broken += n;
+                }
+                if (broken > 0 && cl.hasOption("strict")) System.exit(1);
+                return;
+            }
 
             boolean all = name.equals("all");
             if (all || name.equals("html")) {

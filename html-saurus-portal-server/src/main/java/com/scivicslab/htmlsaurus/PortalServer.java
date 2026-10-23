@@ -456,6 +456,12 @@ public class PortalServer {
         // Related documents API (JSON): GET /api/related?path=... (development mode only)
         if (path.equals("/api/related")) {
             handleRelated(ex);
+        // Broken same-site links of one project's built pages (JSON): GET /api/link-check?project=...
+        if (path.equals("/api/link-check")) {
+            handleLinkCheck(ex);
+            return;
+        }
+
             return;
         }
 
@@ -1293,6 +1299,29 @@ public class PortalServer {
     /**
      * The shape the button that started a build polls for. Distinct from {@link #importJobJson},
      * which the Batch Job list reads: that one speaks of pages and files, this one of the project
+    /**
+     * Handles {@code GET /api/link-check?project=<name>}: the same-site references in that project's
+     * built pages that resolve to nothing, as {@code {"project","count","findings":[{"page","href","kind"}]}}.
+     */
+    private void handleLinkCheck(HttpExchange ex) throws IOException {
+        Project p = projectMap.get(queryParam(ex, "project"));
+        if (p == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"no such project\"}");
+            return;
+        }
+        List<LinkChecker.Finding> findings = LinkChecker.checkInternal(p.staticDir(), p.projectDir());
+        StringBuilder sb = new StringBuilder("{\"project\":").append(jsonStr(p.name()))
+                .append(",\"count\":").append(findings.size()).append(",\"findings\":[");
+        for (int i = 0; i < findings.size(); i++) {
+            LinkChecker.Finding f = findings.get(i);
+            if (i > 0) sb.append(',');
+            sb.append("{\"page\":").append(jsonStr(f.page()))
+              .append(",\"href\":").append(jsonStr(f.href()))
+              .append(",\"kind\":").append(jsonStr(f.kind().name())).append('}');
+        }
+        respond(ex, 200, "application/json", sb.append("]}").toString());
+    }
+
      * and the stage, and both read the same job.
      */
     private String buildJobJson(com.scivicslab.jobregistry.Job<?> job) {
