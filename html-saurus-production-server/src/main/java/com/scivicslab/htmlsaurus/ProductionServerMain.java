@@ -75,6 +75,8 @@ public final class ProductionServerMain {
                 .required(false)
                 .build());
 
+        LinkPolicy.addOptions(opts);
+
         String description = """
                 Builds the project and serves it, for readers on the internet.
 
@@ -104,7 +106,19 @@ public final class ProductionServerMain {
             System.out.println("  port    : " + port);
             System.out.println("=====================================");
 
-            BuildStages.build(docsDir, outDir, true, threads);
+            try {
+                BuildStages.linkPolicy(LinkPolicy.from(cl));
+            } catch (IllegalArgumentException e) {
+                System.err.println(e.getMessage());
+                System.exit(1);
+                return;
+            }
+            if (!BuildStages.build(docsDir, outDir, true, threads)) {
+                // With --strict-links this stops a deployment before it replaces the running pods.
+                System.err.println("Not serving: the build failed.");
+                System.exit(1);
+                return;
+            }
             BuildStages.reindexAll(projectDir, true);
             try {
                 new SearchServer(outDir, indexDir, port).start();

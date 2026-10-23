@@ -100,6 +100,7 @@ public final class LinkChecker {
      */
     public static List<Finding> checkInternal(Path siteDir, Path projectRoot) throws IOException {
         ReferenceLabels refs = projectRoot == null ? null : ReferenceLabels.forProject(projectRoot);
+        String ownHost = projectRoot == null ? null : ExternalLinks.ownHostOf(projectRoot);
         Set<String> files = new HashSet<>();
         try (Stream<Path> walk = Files.walk(siteDir)) {
             walk.filter(Files::isRegularFile)
@@ -137,7 +138,7 @@ public final class LinkChecker {
                     if (!attr.group(1).equalsIgnoreCase(wanted)) continue;
                     String raw = unescape(attr.group(2) != null ? attr.group(2) : attr.group(3));
                     if (raw.isBlank() || !seen.add(raw)) continue;
-                    Kind kind = judge(raw, pageUrl, pageFile, siteDir, files, byLowerCase, anchors);
+                    Kind kind = judge(raw, ownHost, pageUrl, pageFile, siteDir, files, byLowerCase, anchors);
                     if (kind != null) findings.add(new Finding(pageUrl, raw, kind));
                 }
             }
@@ -151,10 +152,20 @@ public final class LinkChecker {
     }
 
     /** Returns why the reference is broken, or {@code null} when it resolves. */
-    private static Kind judge(String raw, String pageUrl, String pageFile, Path siteDir,
+    private static Kind judge(String raw, String ownHost, String pageUrl, String pageFile, Path siteDir,
                               Set<String> files, Map<String, String> byLowerCase,
                               Map<String, Set<String>> anchors) {
         String ref = raw.strip();
+        // An address written out in full that names this very site is an internal link, and is
+        // looked up in the built pages: what the live site answers is the last build's content.
+        if (ownHost != null) {
+            Matcher own = Pattern.compile("^https?://" + Pattern.quote(ownHost) + "(?::\\d+)?(?=[/?#]|$)",
+                    Pattern.CASE_INSENSITIVE).matcher(ref);
+            if (own.find()) {
+                ref = ref.substring(own.end());
+                if (ref.isEmpty() || ref.startsWith("?")) ref = "/" + ref;
+            }
+        }
         if (ref.startsWith("//") || SCHEME.matcher(ref).find()) return null;
 
         String fragment = null;
@@ -241,7 +252,7 @@ public final class LinkChecker {
     }
 
     /** Decodes the character references an HTML attribute value can carry. */
-    private static String unescape(String s) {
+    static String unescape(String s) {
         if (s.indexOf('&') < 0) return s;
         Matcher m = ENTITY.matcher(s);
         StringBuilder out = new StringBuilder();

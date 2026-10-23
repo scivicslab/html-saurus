@@ -185,8 +185,13 @@ class ConfigReader {
             Path cfg = projectRoot.resolve(name);
             if (!Files.exists(cfg)) continue;
             try {
-                String content = Files.readString(cfg);
-                var m = java.util.regex.Pattern.compile("url:\\s*['\"]([^'\"]+)['\"]").matcher(content);
+                // Lines commented out with // are skipped: a config often keeps the addresses of
+                // earlier test servers there, above the real one.
+                StringBuilder live = new StringBuilder();
+                for (String line : Files.readString(cfg).split("\n")) {
+                    if (!line.stripLeading().startsWith("//")) live.append(line).append('\n');
+                }
+                var m = java.util.regex.Pattern.compile("url:\\s*['\"]([^'\"]+)['\"]").matcher(live);
                 if (m.find()) return m.group(1).replaceAll("/+$", "");
             } catch (IOException ignored) {}
         }

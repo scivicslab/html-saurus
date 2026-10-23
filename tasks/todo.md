@@ -305,3 +305,28 @@ MCP ツール `update-all-projects` は同じ core を `BuildJob` 無しで呼�
 - 手順 4: 全 `doc_*` の既存出力を実測したところ、別プロジェクトを指す絶対リンクの誤検出は 0 件。
 - 実測（読み取りのみ・20 リポジトリ）: `MISSING` 6410、`UNTRANSLATED` 6247、`MISSING_FRAGMENT` 117、`UNKNOWN_DOC_ID` 13。
 - 手順 3（外部リンク）と手順 5（違反一覧の引き渡し）が残り。
+
+### 経過（リンク切れ時の3つの動き）
+
+- ユーザー指定: リンク切れがあったら「ビルドしない」「ログに警告」「無視」の3種類。オプションは2つ。
+- 実装: 既定は警告（`WARN`）。`--strict-links` で失敗（`FAIL`: 全件を表示し、終了コード 1、あとの段階は走らない）。`--ignore-links` で検査しない（`IGNORE`）。両方指定は拒否。`LinkPolicy` に3つの動きとオプション定義をまとめ、`build-only` の `html`・`all` と `production-server` の `serve` が使う。
+- `BuildStages.build` は成否を `boolean` で返す。`serve` は失敗なら起動せず終了する（配備のとき、動いている Pod を置き換える前に止まる）。
+- 検証: `LinkPolicyTest` 8件を追加。lib 193・production-server 18・portal-server 187・build-only 4、すべて GREEN。実コマンドで、既定は警告＋終了コード 0、`--strict-links` は終了コード 1 で索引を作らない、`--ignore-links` は何も言わない、両方指定は拒否、を確認した。
+- ポータル（画面からのビルド）への適用は未着手。
+
+### 経過（文書IDの検査・別プログラム）
+
+- ユーザー指定: 本文に書かれた文書IDに該当する文書が無いものを警告する、別の仕組み。起動中のポータルに問い合わせて答えが返るかで判定する。
+- ポータルの `GET /api/resolve?id=` が、あれば 200、無ければ 404 を返す（`localhost:28001` で実測）。
+- 実装: `build-only` の `doc-ids` コマンド（`-d`、`-a`、`--portal`、`--strict`）。ビルドの段階ではなく独立したコマンドにした（ビルドがポータルの稼働に依存しないように）。`DocIdScanner`（ID の抽出。front matter と fenced code block は読まない）、`DocIdChecker`（読む・集計する）、`PortalResolver`（問い合わせる。接続できないのは「無い」ではなく失敗として扱い、終了コード 2）。
+- 検証: 新規 15件（`DocIdScannerTest` 8、`DocIdCheckerTest` 7）。lib 208・build-only 4、GREEN。実ポータルで全 27 プロジェクトを実行し、1417 個の ID のうち 85 個が文書に対応しなかった。4 個はディスクで宣言の有無を直接確かめ、実在しないことを確認した。
+- 既知の限界: 例として書かれた ID（`NoSuchDocument_000000_oo01` など）も報告される。ポータルが索引を更新する前の新しい ID も報告される。
+
+### 経過（外部リンクの検査・別プログラム／自サイトの完全な URL）
+
+- ユーザー指定: 外部リンクの検査は時間がかかるので別プログラムにする。並列は POJO-actor を一貫して使う。
+- 実装: `build-only` の `external-links` コマンド（`-d`、`-a`、`--interval`（既定 3 秒）、`--strict`）。ホストごとに 1 つのアクター `HostWorker`（FIFO で 1 度に 1 リクエスト、リクエスト開始の間隔を空ける）、ホスト同士は並列。`LinkProbe` が HEAD→GET、リダイレクトを 1 段ずつ追う（301・308 は `MOVED`、404・410 は `GONE`、他は `UNSURE`）。素の POJO を先に書き、アクター化は `ExternalLinkChecker` だけ。
+- 実測（`nigsc_homepage2`、458 件の外部アドレス・142 ホスト）: 2 分 14 秒。27 gone、73 moved、51 unsure、307 ok。
+- 発見: 自サイトの完全な URL（`https://sc.ddbj.nig.ac.jp/...`）は内部リンクなのに、検査から漏れていた。`LinkChecker` が `url:` で名指しされた自サイトの URL を内部リンクとして扱うようにし、`external-links` からは外した。
+- 修正: `ConfigReader.readSiteUrl` が `//url: 'http://localhost'` のような行頭コメントを先に拾っていた。コメント行を読み飛ばすようにした。
+- 検証: lib 229・portal-server 187・production-server 18・build-only 4、すべて GREEN。

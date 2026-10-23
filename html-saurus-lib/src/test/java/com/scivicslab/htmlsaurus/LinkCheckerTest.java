@@ -189,4 +189,38 @@ class LinkCheckerTest {
         assertEquals("../only-default/", f.get(0).href());
         assertEquals(LinkChecker.Kind.MISSING, f.get(1).kind());
     }
+
+    /** A project whose config names the site's own address. */
+    private Path projectWithSiteUrl(String url) throws IOException {
+        Path repo = works.resolve("proj_site");
+        Files.createDirectories(repo.resolve("docs"));
+        Files.writeString(repo.resolve("docusaurus.config.js"), "module.exports = { url: '" + url + "' };");
+        return repo;
+    }
+
+    @Test
+    void anAddressWrittenOutInFullThatNamesThisSiteIsLookedUpInTheBuiltPages() throws IOException {
+        Path repo = projectWithSiteUrl("https://site.example");
+        page("guides/hardware", "x");
+        page("a", "<a href=\"https://site.example/guides/hardware/\">ok</a>"
+                + "<a href=\"http://SITE.example/guides/hardware\">ok too</a>"
+                + "<a href=\"https://site.example/guides/hardware2025/\">gone</a>"
+                + "<a href=\"https://site.example/guides/Hardware/\">case</a>"
+                + "<a href=\"https://site.example\">top</a>"
+                + "<a href=\"https://other.example/guides/hardware2025/\">elsewhere</a>");
+        page("", "home");
+        List<LinkChecker.Finding> f = LinkChecker.checkInternal(site, repo);
+        assertEquals(2, f.size(), f.toString());
+        assertEquals("https://site.example/guides/hardware2025/", f.get(0).href());
+        assertEquals(LinkChecker.Kind.MISSING, f.get(0).kind());
+        assertEquals(LinkChecker.Kind.CASE_MISMATCH, f.get(1).kind());
+    }
+
+    @Test
+    void aSiteWhoseConfigNamesNoAddressTreatsFullAddressesAsExternal() throws IOException {
+        Path repo = works.resolve("proj_nosite");
+        Files.createDirectories(repo.resolve("docs"));
+        page("a", "<a href=\"https://site.example/nowhere/\">x</a>");
+        assertEquals(List.of(), LinkChecker.checkInternal(site, repo));
+    }
 }

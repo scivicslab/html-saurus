@@ -30,6 +30,14 @@ public final class BuildStages {
         skipDiagrams = skip;
     }
 
+    /** Set by {@code --strict-links} and {@code --ignore-links}; see {@link LinkPolicy}. */
+    private static LinkPolicy linkPolicy = LinkPolicy.WARN;
+
+    /** Chooses what the HTML stage does about broken same-site links in the pages it wrote. */
+    public static void linkPolicy(LinkPolicy policy) {
+        linkPolicy = policy;
+    }
+
     /** Number of semantic neighbours kept per document. */
     public static final int SEMANTIC_TOP_K = 20;
 
@@ -62,8 +70,8 @@ public final class BuildStages {
     }
 
     /** Builds with {@link SiteBuilder}'s own default page-conversion parallelism. */
-    public static void build(Path docsDir, Path outDir, boolean production) {
-        build(docsDir, outDir, production, 0);
+    public static boolean build(Path docsDir, Path outDir, boolean production) {
+        return build(docsDir, outDir, production, 0);
     }
 
     /**
@@ -74,8 +82,10 @@ public final class BuildStages {
      * @param production whether to build in production mode
      * @param threads    page-conversion parallelism (see {@link SiteBuilder#threads}); {@code <= 0}
      *                   keeps {@link SiteBuilder}'s own default
+     * @return {@code false} when the build failed: the pages could not be written, or the
+     *         link policy is {@link LinkPolicy#FAIL} and a page holds a broken link
      */
-    public static void build(Path docsDir, Path outDir, boolean production, int threads) {
+    public static boolean build(Path docsDir, Path outDir, boolean production, int threads) {
         try {
             // Figures first: the .png a page embeds is regenerated from its .jsh when out of date,
             // so a document and its diagrams are never out of step (DiagramBuilder).
@@ -114,9 +124,18 @@ public final class BuildStages {
                 localeBuilder.build();
                 System.out.println("  build done : " + localeDocs);
             }
-            reportBrokenLinks(outDir, projectDir, 20);
+            if (linkPolicy == LinkPolicy.IGNORE) return true;
+            boolean strict = linkPolicy == LinkPolicy.FAIL;
+            int broken = reportBrokenLinks(outDir, projectDir, strict ? 0 : 20);
+            if (strict && broken != 0) {
+                System.err.println("Build failed: " + (broken < 0 ? "the link check could not run"
+                        : broken + " broken internal link(s), and --" + LinkPolicy.FAIL_OPTION + " is set"));
+                return false;
+            }
+            return true;
         } catch (IOException e) {
             System.err.println("Build failed: " + e.getMessage());
+            return false;
         }
     }
 
