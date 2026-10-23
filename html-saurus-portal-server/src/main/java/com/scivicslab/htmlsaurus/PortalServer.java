@@ -453,15 +453,15 @@ public class PortalServer {
             return;
         }
 
-        // Related documents API (JSON): GET /api/related?path=... (development mode only)
-        if (path.equals("/api/related")) {
-            handleRelated(ex);
         // Broken same-site links of one project's built pages (JSON): GET /api/link-check?project=...
         if (path.equals("/api/link-check")) {
             handleLinkCheck(ex);
             return;
         }
 
+        // Related documents API (JSON): GET /api/related?path=... (development mode only)
+        if (path.equals("/api/related")) {
+            handleRelated(ex);
             return;
         }
 
@@ -1297,9 +1297,6 @@ public class PortalServer {
     }
 
     /**
-     * The shape the button that started a build polls for. Distinct from {@link #importJobJson},
-     * which the Batch Job list reads: that one speaks of pages and files, this one of the project
-    /**
      * Handles {@code GET /api/link-check?project=<name>}: the same-site references in that project's
      * built pages that resolve to nothing, as {@code {"project","count","findings":[{"page","href","kind"}]}}.
      */
@@ -1322,6 +1319,9 @@ public class PortalServer {
         respond(ex, 200, "application/json", sb.append("]}").toString());
     }
 
+    /**
+     * The shape the button that started a build polls for. Distinct from {@link #importJobJson},
+     * which the Batch Job list reads: that one speaks of pages and files, this one of the project
      * and the stage, and both read the same job.
      */
     private String buildJobJson(com.scivicslab.jobregistry.Job<?> job) {
