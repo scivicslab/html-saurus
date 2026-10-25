@@ -330,3 +330,52 @@ MCP ツール `update-all-projects` は同じ core を `BuildJob` 無しで呼�
 - 発見: 自サイトの完全な URL（`https://sc.ddbj.nig.ac.jp/...`）は内部リンクなのに、検査から漏れていた。`LinkChecker` が `url:` で名指しされた自サイトの URL を内部リンクとして扱うようにし、`external-links` からは外した。
 - 修正: `ConfigReader.readSiteUrl` が `//url: 'http://localhost'` のような行頭コメントを先に拾っていた。コメント行を読み飛ばすようにした。
 - 検証: lib 229・portal-server 187・production-server 18・build-only 4、すべて GREEN。
+
+## PDF import: split into chapter subdirectories (local LLM decides the boundaries)
+
+Goal: an option on the Import tab (PDF panel) that stores the imported book as `Chap01`, `Chap02`, ...
+(two digits), with the chapter boundaries decided by the local LLM. Reference layouts:
+`doc_Base011/docs/Books-Infra/MasteringK8s4thEd`, `.../LinuxKernelNetworking`,
+`Books-Programming/CoreJava14th_Vol1` (front matter keeps its original name, appendices are `Appendix_A`...,
+page numbers restart at `p001` inside each chapter).
+
+Facts found (PortalServer.java / PdfImportJob.java / TranslationClient.java):
+- `PdfImportJob` already keeps every page's Markdown in `pageMarkdown[]` and writes a batch every `pagesPerFile` pages.
+- `TranslationClient` is the precedent for calling the local LLM (GPU broker `/v1/chat/completions`,
+  model from AI workspace settings, else `TRANSLATION_MODEL`, else the default).
+- No code creates `ChapNN` today; the import form is `#tab-import` (PortalServer.java ~1783-1820),
+  posted by `startPdfImport()` to `/api/import/pdf/start`.
+
+Plan:
+- [x] 1. UI: checkbox `#import-pdf-chapters` in the PDF panel; send `splitChapters`; keep it in `localStorage`.
+- [x] 2. `handleImportPdfStart` / `submitPdfImport`: pass `splitChapters` to `PdfImportJob`.
+- [x] 3. `PdfImportJob`: when the option is on, OCR all pages first and defer the batch writing.
+- [x] 4. New `ChapterBoundaryClient`: send "page number: first ~200 characters / headings" tables (windows of
+        about 100 pages) to the local LLM and parse a JSON list `[{kind: front|chapter|appendix|back, title, startPage}]`.
+- [x] 5. Code-side validation (start pages ascending, inside the page range, first chapter exists);
+        on failure fall back to the current flat layout and put the reason in the job result.
+- [x] 6. Writer: front matter in a directory with the book's own name, `Chap%02d`, `Appendix_<letter>`;
+        batches inside a chapter are `<chapter title>_pNNN-MMM` with the page number restarting at 1.
+- [x] 7. Progress stages shown in the Batch Job tab: OCR n/N, judging chapters, writing.
+- [x] 8. Unit tests (no external service): JSON parsing, validation, directory naming, batch layout.
+        E2E: add a scenario to `ImportTabE2E`.
+- [x] 9. Build (`rm -rf target && mvn install`), run the portal, import a small PDF with the option, look at the result.
+
+Out of scope for now: resuming a stopped import. (The bulk PDF panel was added afterwards, see the review.)
+
+Review (chapter split):
+- New: `ChapterSplitter` (pure: digest, answer parsing, validation, layout), `ChapterBoundaryClient` (asks the model
+  100 pages at a time, retries an unreadable answer once). Changed: `PdfImportJob` (optional planner; OCR first, write
+  by chapter, flat layout as the fallback), `TranslationClient.chat`, the PDF panel and `/api/import/pdf/start`
+  (`splitChapters`).
+- Tests: `ChapterSplitterTest` (12), `ChapterImportTest` (8, includes the job writing real files against stubs),
+  `ImportTabE2E` T-5 and T-6 (checkbox default, persistence, request body). Full `mvn install`: lib 231, build-only 4,
+  production-server 18, portal-server 207, all green.
+- Checked by hand on a throwaway portal (port 8601, text-layer backend, the real model through the GPU broker): a 9-page
+  LaTeX book became `book/`, `Chap01`-`Chap03`, `Appendix_A`, with page numbers restarting at p001 in each.
+- Not done: an import that is stopped cannot resume; front/back matter the model names is written
+  under its own title (index and acknowledgments are kept, not dropped).
+- Bulk PDF panel (added afterwards): the same checkbox (`#import-pdf-bulk-chapters`, sent as `splitChapters`). Each PDF is a
+  book of its own, so with the option on it is written under `<destPath>/<PDF name>/` (`ChapterSplitter.bookDirectoryName`);
+  otherwise every book's `Chap01` would land in the same directory. Checked by hand with two PDFs on a throwaway portal
+  (`Book One/Chap01..03`, `Book Two/Chap01..02`), and by `ImportTabE2E` T-7. Full `mvn install`: portal-server 208 tests, green.

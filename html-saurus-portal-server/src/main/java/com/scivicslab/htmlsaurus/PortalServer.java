@@ -1807,6 +1807,12 @@ public class PortalServer {
                     <input type="number" id="import-pdf-pages-per-file" value="10" min="1">
                   </div>
                   <div class="field">
+                    <span class="field-label">Chapters</span>
+                    <label><input type="checkbox" id="import-pdf-chapters">
+                      Split into chapters (the local LLM judges where each chapter starts; files go under
+                      Chap01, Chap02, ...)</label>
+                  </div>
+                  <div class="field">
                     <span class="field-label">PDF file path</span>
                     <input type="text" id="import-pdf-path" autocomplete="off" placeholder="/home/devteam/works/document.pdf">
                   </div>
@@ -1840,6 +1846,12 @@ public class PortalServer {
                   <div class="field">
                     <span class="field-label">Pages per file</span>
                     <input type="number" id="import-pdf-bulk-pages-per-file" value="10" min="1">
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Chapters</span>
+                    <label><input type="checkbox" id="import-pdf-bulk-chapters">
+                      Split every PDF into chapters (the local LLM judges where each chapter starts; each
+                      PDF gets a directory of its own holding Chap01, Chap02, ...)</label>
                   </div>
                   <div class="field">
                     <span class="field-label">PDF directory path</span>
@@ -2158,6 +2170,15 @@ public class PortalServer {
                 el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input',
                   function() { importFormFieldStore({id: id, value: el.value}); });
               });
+              // The chapter checkboxes are saved by their checked state, not by a value.
+              ['import-pdf-chapters', 'import-pdf-bulk-chapters'].forEach(function(id) {
+                var box = document.getElementById(id);
+                if (!box) return;
+                if (saved[id] !== undefined) box.checked = saved[id] === true;
+                box.addEventListener('change', function() {
+                  importFormFieldStore({id: id, value: box.checked});
+                });
+              });
               // The project dropdowns save the same way, but restoring them happens inside
               // populateImportProjects() once their <option>s exist.
               importProjectSelectIds().forEach(function(id) {
@@ -2179,6 +2200,8 @@ public class PortalServer {
               body.set('destPath', importField('import-pdf-dest'));
               body.set('backend', importField('import-pdf-backend'));
               body.set('pagesPerFile', importField('import-pdf-pages-per-file'));
+              const chaptersBox = document.getElementById('import-pdf-chapters');
+              if (chaptersBox && chaptersBox.checked) body.set('splitChapters', 'true');
               const title = importField('import-pdf-title');
               if (title) body.set('title', title);
               progress.textContent = 'Starting...';
@@ -2211,6 +2234,8 @@ public class PortalServer {
               body.set('destPath', importField('import-pdf-bulk-dest'));
               body.set('backend', importField('import-pdf-bulk-backend'));
               body.set('pagesPerFile', importField('import-pdf-bulk-pages-per-file'));
+              const bulkChaptersBox = document.getElementById('import-pdf-bulk-chapters');
+              if (bulkChaptersBox && bulkChaptersBox.checked) body.set('splitChapters', 'true');
               progress.textContent = 'Starting...';
               try {
                 const r = await fetch('/api/import/pdf/bulk', {
@@ -3309,7 +3334,8 @@ public class PortalServer {
         int totalPages;
         String jobId;
         try {
-            var started = submitPdfImport(srcPath, ocr, target, pagesPerFile, form.get("title"));
+            boolean splitChapters = "true".equals(form.get("splitChapters"));
+            var started = submitPdfImport(srcPath, ocr, target, pagesPerFile, form.get("title"), splitChapters);
             jobId = started.getKey();
             totalPages = started.getValue();
         } catch (Exception e) {
@@ -3325,17 +3351,21 @@ public class PortalServer {
      * Registers one PDF import job and starts it.
      *
      * @param title the document title, or {@code null}/blank for the filename without extension
+     * @param splitChapters whether the local LLM judges the chapter boundaries and the files are
+     *                      written under {@code Chap01}, {@code Chap02}, ... (see {@link PdfImportJob})
      * @return the new job's id and the PDF's page count
      * @throws Exception if the file cannot be read as a PDF; nothing has been submitted then
      */
     private Map.Entry<String, Integer> submitPdfImport(Path srcPath, OcrClient ocr, ImportTarget target,
-                                                       int pagesPerFile, String title) throws Exception {
+                                                       int pagesPerFile, String title,
+                                                       boolean splitChapters) throws Exception {
         byte[] pdfBytes = Files.readAllBytes(srcPath);
         int totalPages = PdfPageSplitter.pageCount(pdfBytes);
         String stem = PageRenderer.stripExtension(srcPath.getFileName().toString());
         PdfImportJob work = new PdfImportJob(pdfBytes, target.destDir(), stem, ocr, pagesPerFile,
             totalPages, (title == null || title.isBlank()) ? stem : title,
-            target.fileDisplayPrefix(), rebuildAfterImport(target.project()));
+            target.fileDisplayPrefix(), rebuildAfterImport(target.project()),
+            splitChapters ? new ChapterBoundaryClient(translate) : null);
         var job = batchJobs.submit("pdf", srcPath.getFileName().toString(),
             work::run, System.currentTimeMillis());
         return Map.entry(job.id(), totalPages);
@@ -3347,6 +3377,11 @@ public class PortalServer {
      * {@code .pdf} file directly inside it (not recursive), in filename order, each submitted
      * exactly as {@link #handleImportPdfStart} would. A file that cannot be read as a PDF is
      * skipped and named in the reply. Returns {@code {started, skipped:[filename...]}}.
+     *
+     * <p>With {@code splitChapters=true} each PDF is split into chapters as in
+     * {@link #handleImportPdfStart}, and is written under a directory named after the PDF (see
+     * {@link ChapterSplitter#bookDirectoryName}) so that one book's {@code Chap01} cannot overwrite
+     * another's.</p>
      */
     private void handleImportPdfBulk(HttpExchange ex) throws IOException {
         if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -3392,12 +3427,21 @@ public class PortalServer {
             respond(ex, 400, "application/json", "{\"error\":\"no PDF files in the directory\"}");
             return;
         }
-        // Each PDF is submitted exactly as a single PDF import would be.
+        // Each PDF is submitted exactly as a single PDF import would be. With the chapter split
+        // each one is a book of its own, so it gets a directory of its own: otherwise every book's
+        // Chap01, Chap02 ... would land in the same place.
+        boolean splitChapters = "true".equals(form.get("splitChapters"));
         int started = 0;
         List<String> skipped = new ArrayList<>();
         for (Path pdf : pdfs) {
             try {
-                submitPdfImport(pdf, ocr, target, pagesPerFile, null);
+                ImportTarget bookTarget = target;
+                if (splitChapters) {
+                    String book = ChapterSplitter.bookDirectoryName(pdf.getFileName().toString());
+                    bookTarget = new ImportTarget(target.project(), target.destDir().resolve(book),
+                            target.fileDisplayPrefix() + "/" + book);
+                }
+                submitPdfImport(pdf, ocr, bookTarget, pagesPerFile, null, splitChapters);
                 started++;
             } catch (Exception e) {
                 skipped.add(pdf.getFileName().toString());

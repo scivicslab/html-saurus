@@ -236,14 +236,48 @@ public class TranslationClient {
         downUntilMs.set(System.currentTimeMillis() + DOWN_BACKOFF_MS);
     }
 
+    /**
+     * One chat-completions call with the current model, for work that is not translation (the
+     * chapter boundaries of an imported book, see {@link ChapterBoundaryClient}). Unlike
+     * {@link #translate} it neither backs off after a failure nor swallows one: the caller
+     * decides what a failed call means.
+     *
+     * @param timeoutSeconds how long to wait for the whole answer
+     * @return the model's answer text
+     * @throws IOException if the server cannot be reached, answers with a status other than 200,
+     *                     or answers without content
+     */
+    String chat(String system, String user, int timeoutSeconds) throws IOException, InterruptedException {
+        String body = chatRequestJson(system, user, currentModel(), 0.0);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/v1/chat/completions"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .timeout(Duration.ofSeconds(timeoutSeconds))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            throw new IOException("generation server " + baseUrl + " answered status " + response.statusCode());
+        }
+        String content = parseContent(response.body());
+        if (content == null) {
+            throw new IOException("generation server " + baseUrl + " answered without content");
+        }
+        return content;
+    }
+
     /** Builds the OpenAI-style chat-completions request body for a translation call. */
     private static String buildRequestJson(String text, String targetLang, String model) {
-        String system = SYSTEM_PROMPT_TEMPLATE.formatted(targetLang);
+        return chatRequestJson(SYSTEM_PROMPT_TEMPLATE.formatted(targetLang), text, model, 0.2);
+    }
+
+    /** Builds the OpenAI-style chat-completions request body for one system and one user message. */
+    private static String chatRequestJson(String system, String user, String model, double temperature) {
         return "{\"model\":" + HttpUtils.jsonStr(model) + ","
-             + "\"temperature\":0.2,"
+             + "\"temperature\":" + temperature + ","
              + "\"messages\":["
              + "{\"role\":\"system\",\"content\":" + HttpUtils.jsonStr(system) + "},"
-             + "{\"role\":\"user\",\"content\":" + HttpUtils.jsonStr(text) + "}"
+             + "{\"role\":\"user\",\"content\":" + HttpUtils.jsonStr(user) + "}"
              + "]}";
     }
 

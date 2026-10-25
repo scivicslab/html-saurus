@@ -39,11 +39,19 @@ public class ImportTabE2E {
     public static void main(String[] args) throws Exception {
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
-            runSubTabSwitching(browser);
-            runWordImport(browser);
-            runWebImport(browser);
-            runPdfImportWithImage(browser);
-            runReloadDoesNotLoseState(browser);
+            if (args.length > 0 && args[0].equals("chapters")) {
+                // Only the chapter option: needs no OCR server and no model server.
+                runChapterOption(browser);
+                runBulkChapterOption(browser);
+            } else {
+                runSubTabSwitching(browser);
+                runWordImport(browser);
+                runWebImport(browser);
+                runPdfImportWithImage(browser);
+                runReloadDoesNotLoseState(browser);
+                runChapterOption(browser);
+                runBulkChapterOption(browser);
+            }
         }
         System.out.printf("%nResults: %d passed, %d failed%n", passed, failed);
         if (failed > 0) System.exit(1);
@@ -331,6 +339,102 @@ public class ImportTabE2E {
             } catch (Exception e) {
                 throw new AssertionError("setup/build failed: " + e.getMessage(), e);
             }
+        });
+    }
+
+    /**
+     * The PDF panel's "Split into chapters" checkbox: off by default, remembered across a reload
+     * like the other fields, and sent to the server (as {@code splitChapters=true}) only when
+     * checked. The start request is answered by the test itself, so no OCR or model server is
+     * needed.
+     */
+    private static void runChapterOption(Browser browser) {
+        withPage("T-5: the chapter checkbox is off by default and survives a page reload", browser, page -> {
+            page.navigate(BASE_URL + "/");
+            page.waitForLoadState();
+            page.click("#tab-btn-import");
+            check(!page.isChecked("#import-pdf-chapters"), "the chapter checkbox must be off by default");
+            page.check("#import-pdf-chapters");
+            page.reload();
+            page.waitForLoadState();
+            page.click("#tab-btn-import");
+            check(page.isChecked("#import-pdf-chapters"), "the chapter checkbox must stay checked after a reload");
+            page.uncheck("#import-pdf-chapters");
+            page.reload();
+            page.waitForLoadState();
+            page.click("#tab-btn-import");
+            check(!page.isChecked("#import-pdf-chapters"), "unchecking must be remembered too");
+        });
+
+        withPage("T-6: the start request carries splitChapters only when the checkbox is checked", browser, page -> {
+            java.util.List<String> bodies = new java.util.concurrent.CopyOnWriteArrayList<>();
+            page.route("**/api/import/pdf/start", route -> {
+                bodies.add(route.request().postData());
+                route.fulfill(new Route.FulfillOptions().setStatus(200).setContentType("application/json")
+                        .setBody("{\"jobId\":\"fake\",\"totalPages\":1}"));
+            });
+            page.navigate(BASE_URL + "/");
+            page.waitForLoadState();
+            page.click("#tab-btn-import");
+            page.fill("#import-pdf-path", "/tmp/not-read-because-the-request-is-answered-by-the-test.pdf");
+            page.uncheck("#import-pdf-chapters");
+            page.click("#import-pdf-start");
+            for (int i = 0; i < 40 && bodies.size() < 1; i++) page.waitForTimeout(100);
+            check(bodies.size() == 1, "one start request expected, got " + bodies.size());
+            check(!bodies.get(0).contains("splitChapters"),
+                    "an unchecked box must not send splitChapters, got: " + bodies.get(0));
+
+            // The page empties the path field after a successful start; give it again.
+            page.fill("#import-pdf-path", "/tmp/not-read-because-the-request-is-answered-by-the-test.pdf");
+            page.check("#import-pdf-chapters");
+            page.click("#import-pdf-start");
+            for (int i = 0; i < 40 && bodies.size() < 2; i++) page.waitForTimeout(100);
+            check(bodies.size() == 2, "a second start request expected, got " + bodies.size());
+            check(bodies.get(1).contains("splitChapters=true"),
+                    "a checked box must send splitChapters=true, got: " + bodies.get(1));
+        });
+    }
+
+    /**
+     * The same checkbox on the bulk panel ({@code #import-pdf-bulk-chapters}): off by default,
+     * remembered across a reload, and sent as {@code splitChapters=true} to the bulk endpoint only
+     * when checked.
+     */
+    private static void runBulkChapterOption(Browser browser) {
+        withPage("T-7: the bulk panel's chapter checkbox is off by default, survives a reload, and is sent when checked", browser, page -> {
+            java.util.List<String> bodies = new java.util.concurrent.CopyOnWriteArrayList<>();
+            page.route("**/api/import/pdf/bulk", route -> {
+                bodies.add(route.request().postData());
+                route.fulfill(new Route.FulfillOptions().setStatus(200).setContentType("application/json")
+                        .setBody("{\"started\":1,\"skipped\":[]}"));
+            });
+            page.navigate(BASE_URL + "/");
+            page.waitForLoadState();
+            page.click("#tab-btn-import");
+            page.selectOption("#import-type", "pdf-bulk");
+            check(!page.isChecked("#import-pdf-bulk-chapters"), "the bulk chapter checkbox must be off by default");
+            check(!page.isChecked("#import-pdf-chapters"), "the single-PDF checkbox is a separate one and must still be off");
+            page.check("#import-pdf-bulk-chapters");
+            page.reload();
+            page.waitForLoadState();
+            page.click("#tab-btn-import");
+            page.selectOption("#import-type", "pdf-bulk");
+            check(page.isChecked("#import-pdf-bulk-chapters"), "the bulk chapter checkbox must stay checked after a reload");
+            check(!page.isChecked("#import-pdf-chapters"), "checking the bulk box must not check the single-PDF one");
+
+            page.fill("#import-pdf-bulk-path", "/tmp/not-read-because-the-request-is-answered-by-the-test");
+            page.click("#import-pdf-bulk-start");
+            for (int i = 0; i < 40 && bodies.size() < 1; i++) page.waitForTimeout(100);
+            check(bodies.size() == 1, "one bulk request expected, got " + bodies.size());
+            check(bodies.get(0).contains("splitChapters=true"),
+                    "a checked box must send splitChapters=true, got: " + bodies.get(0));
+
+            page.uncheck("#import-pdf-bulk-chapters");
+            page.click("#import-pdf-bulk-start");
+            for (int i = 0; i < 40 && bodies.size() < 2; i++) page.waitForTimeout(100);
+            check(bodies.size() == 2, "a second bulk request expected, got " + bodies.size());
+            check(!bodies.get(1).contains("splitChapters"),
+                    "an unchecked box must not send splitChapters, got: " + bodies.get(1));
         });
     }
 
