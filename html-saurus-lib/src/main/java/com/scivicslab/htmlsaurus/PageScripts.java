@@ -6,11 +6,16 @@ class PageScripts {
     private PageScripts() {}
 
     static String render() {
+        return render(BasePath.current());
+    }
+
+    /** The script block for a server reached below {@code base}: the calls it makes to the server are written through it. */
+    static String render(BasePath base) {
         return """
             <script src="https://cdn.jsdelivr.net/npm/mermaid@11.13.0/dist/mermaid.min.js"
               integrity="sha384-tI0sDqjGJcqrQ8e/XKiQGS+ee11v5knTNWx2goxMBxe4DO9U0uKlfxJtYB9ILZ4j"
               crossorigin="anonymous"></script>
-            <script>mermaid.initialize({startOnLoad: true});</script>
+            <script>var BASE = 'YADOC_BASE_PATH'; mermaid.initialize({startOnLoad: true});</script>
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
               integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg"
               crossorigin="anonymous"></script>
@@ -110,7 +115,7 @@ class PageScripts {
                 // on 'Building...' for all of it -- and for good, whenever anything in between
                 // dropped the connection.
                 function poll(jobId) {
-                  fetch('/api/build-status?jobId=' + encodeURIComponent(jobId))
+                  fetch(BASE + '/api/build-status?jobId=' + encodeURIComponent(jobId))
                     .then(function(r) { return r.json(); })
                     .then(function(j) {
                       if (j.state === 'running') {
@@ -132,7 +137,7 @@ class PageScripts {
                   var sel = document.getElementById('rebuild-stage');
                   var stage = sel ? sel.value : 'html';
                   btn.disabled = true; btn.textContent = 'Building\\u2026';
-                  fetch('/api/build-async/' + stage + '/' + encodeURIComponent('YADOC_BUILD_SITE'), {method: 'POST'})
+                  fetch(BASE + '/api/build-async/' + stage + '/' + encodeURIComponent('YADOC_BUILD_SITE'), {method: 'POST'})
                     .then(function(r) { return r.json(); })
                     .then(function(j) {
                       if (!j.jobId) { btn.textContent = '\\u2717 Error'; btn.disabled = false; return; }
@@ -155,7 +160,7 @@ class PageScripts {
                     } else {
                       data.forEach(function(item) {
                         var a = document.createElement('a');
-                        a.className = 'sr-item'; a.href = item.path;
+                        a.className = 'sr-item'; a.href = BASE + item.path;
                         a.innerHTML = '<div class="sr-title">' + esc(item.title) + '</div>' +
                                       '<div class="sr-breadcrumb">' + esc(breadcrumb(item.pagePath || item.path)) + '</div>' +
                                       '<div class="sr-summary">' + hl(item.summary) + '</div>';
@@ -211,7 +216,7 @@ class PageScripts {
                   if (choice === 'copy-id') { navigator.clipboard.writeText(sel.dataset.docId).then(flashSelect); return; }
                   var src = sel.dataset.path;
                   if (!src) return;
-                  window.open('/api/source?path=' + encodeURIComponent(src) + '&format=' + choice, '_blank');
+                  window.open(BASE + '/api/source?path=' + encodeURIComponent(src) + '&format=' + choice, '_blank');
                 });
               }
             })();
@@ -358,7 +363,7 @@ class PageScripts {
                 }).then(function(r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); });
               }
               function stopJob(jobId) {
-                postJson('/api/import/stop', { jobId: jobId }).catch(function() {});
+                postJson(BASE + '/api/import/stop', { jobId: jobId }).catch(function() {});
               }
               // The page is translated as one Batch Job on the server, which queues the blocks on the
               // GPU broker; this side only hands the blocks over and shows what has come back.
@@ -400,11 +405,11 @@ class PageScripts {
                     var open = items.filter(function(it) { return !it.done; });
                     // The job's state is read before the cache is, so a job seen finished has all its
                     // results in the lookup that follows.
-                    fetch('/api/import/status?jobId=' + encodeURIComponent(jobId))
+                    fetch(BASE + '/api/import/status?jobId=' + encodeURIComponent(jobId))
                       .then(function(r) { return r.ok ? r.json() : null; })
                       .catch(function() { return { state: 'running' }; })
                       .then(function(job) {
-                        return postJson('/api/translate-lookup', { blocks: payload(open) }).then(function(found) {
+                        return postJson(BASE + '/api/translate-lookup', { blocks: payload(open) }).then(function(found) {
                           return { job: job, found: found.translations };
                         });
                       })
@@ -425,7 +430,7 @@ class PageScripts {
                   }
                   tick();
                 }
-                postJson('/api/translate-page', { label: document.title, blocks: payload(items) })
+                postJson(BASE + '/api/translate-page', { label: document.title, blocks: payload(items) })
                   .then(function(start) {
                     if (myRun !== runId) { stopJob(start.jobId); return; }
                     runningJobId = start.jobId;
@@ -541,6 +546,6 @@ class PageScripts {
               });
             })();
             </script>
-            """;
+            """.replace("YADOC_BASE_PATH", base.prefix());
     }
 }

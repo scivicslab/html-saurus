@@ -105,6 +105,9 @@ public class PortalServer {
      *  backend is called at its own fixed node instead. */
     private static final GpuBrokerClient GPU_BROKER = buildGpuBroker();
 
+    /** Where the browser reaches this server; every URL written into a page or a redirect goes through it. */
+    private final BasePath base;
+
     private static GpuBrokerClient buildGpuBroker() {
         String brokerUrl = System.getenv("GPU_BROKER_URL");
         return brokerUrl == null || brokerUrl.isBlank() ? null
@@ -149,6 +152,16 @@ public class PortalServer {
      */
     public PortalServer(Path worksDir, List<Path> projectDirs, int port,
                         SemanticIndex semanticIndex, int threads) {
+        this(worksDir, projectDirs, port, semanticIndex, threads, BasePath.current());
+    }
+
+    /**
+     * As above, for a server that a proxy publishes below {@code base} (see {@link BasePath}): every URL the
+     * pages and redirects of this server write is prefixed with it. {@link BasePath#none()} serves at the host root.
+     */
+    public PortalServer(Path worksDir, List<Path> projectDirs, int port,
+                        SemanticIndex semanticIndex, int threads, BasePath base) {
+        this.base = base;
         this.worksDir = worksDir;
         this.port = port;
         this.threads = threads;
@@ -642,7 +655,7 @@ public class PortalServer {
 
         // Redirect /<project> → /<project>/
         if (slash < 0) {
-            ex.getResponseHeaders().set("Location", "/" + projectName + "/");
+            ex.getResponseHeaders().set("Location", base.url("/" + projectName + "/"));
             ex.sendResponseHeaders(302, -1);
             return;
         }
@@ -1733,7 +1746,7 @@ public class PortalServer {
             List<String> labels = readNavbarLabels(p.projectDir());
             String[] i18n = Projects.readI18nConfig(p.projectDir());
             sb.append("    <div class=\"project-row\">\n");
-            sb.append("      <div class=\"project-name\"><a class=\"project-link\" href=\"/").append(escHtml(p.name())).append("/\">").append(escHtml(p.name())).append("</a></div>\n");
+            sb.append("      <div class=\"project-name\"><a class=\"project-link\" href=\"").append(escHtml(base.url("/" + p.name() + "/"))).append("\">").append(escHtml(p.name())).append("</a></div>\n");
             sb.append("      <div class=\"project-labels\" id=\"labels-").append(escHtml(p.name())).append("\">\n");
             for (String label : labels) {
                 sb.append("        <span class=\"project-label\">").append(escHtml(label)).append("</span>\n");
@@ -1959,6 +1972,7 @@ public class PortalServer {
               </div>
             """);
 
+        sb.append("<script>var BASE = " + jsonStr(base.prefix()) + ";</script>\n");
         sb.append("</aside>\n");
         sb.append("<div id=\"pane-splitter\" title=\"Drag to resize\"></div>\n");
         sb.append("<div class=\"doc-pane\">\n");
@@ -1988,7 +2002,7 @@ public class PortalServer {
             // Re-read docusaurus.config.ts live and re-render one project row's navbar labels in place.
             // Returns the number of labels rendered, or -1 when the server reports an error.
             async function renderLabels(name) {
-              const r = await fetch('/api/navbar-labels/' + encodeURIComponent(name));
+              const r = await fetch(BASE + '/api/navbar-labels/' + encodeURIComponent(name));
               const j = await r.json();
               if (j.status !== 'ok') return -1;
               const box = document.getElementById('labels-' + name);
@@ -2022,14 +2036,14 @@ public class PortalServer {
                 } else {
                   // Started, then polled: a whole-project build takes minutes, and waiting for the
                   // response held this button on '...' for all of it.
-                  const started = await fetch('/api/build-async/' + action + '/' + encodeURIComponent(name),
+                  const started = await fetch(BASE + '/api/build-async/' + action + '/' + encodeURIComponent(name),
                                               {method: 'POST'});
                   const s0 = await started.json();
                   let j = s0;
                   while (j.state === 'running') {
                     status.textContent = action + ' ' + Math.round(j.ms / 1000) + 's...';
                     await new Promise(res => setTimeout(res, 1500));
-                    const r2 = await fetch('/api/build-status?jobId=' + encodeURIComponent(s0.jobId));
+                    const r2 = await fetch(BASE + '/api/build-status?jobId=' + encodeURIComponent(s0.jobId));
                     j = await r2.json();
                   }
                   if (j.state === 'done') {
@@ -2071,7 +2085,7 @@ public class PortalServer {
                 loadInFrame('/search-semantic?q=' + encodeURIComponent(text));
               } else {
                 const form = document.createElement('form');
-                form.method = 'POST'; form.action = '/find-related'; form.target = 'doc-frame';
+                form.method = 'POST'; form.action = BASE + '/find-related'; form.target = 'doc-frame';
                 form.style.display = 'none';
                 const tInput = document.createElement('input');
                 tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
@@ -2209,7 +2223,7 @@ public class PortalServer {
                 // The Start button is deliberately left enabled: one import runs on an actor of its
                 // own, so several can run at once and the point of starting one is to walk away and
                 // start the next.
-                const startResp = await fetch('/api/import/pdf/start', {
+                const startResp = await fetch(BASE + '/api/import/pdf/start', {
                   method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
                 const startJson = await startResp.json();
                 if (!startResp.ok) {
@@ -2238,7 +2252,7 @@ public class PortalServer {
               if (bulkChaptersBox && bulkChaptersBox.checked) body.set('splitChapters', 'true');
               progress.textContent = 'Starting...';
               try {
-                const r = await fetch('/api/import/pdf/bulk', {
+                const r = await fetch(BASE + '/api/import/pdf/bulk', {
                   method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
                 const j = await r.json();
                 if (!r.ok) { progress.textContent = 'Error: ' + (j.error || 'unknown'); return; }
@@ -2314,7 +2328,7 @@ public class PortalServer {
                   btn.textContent = j.state === 'running' ? 'Stop' : 'Clear';
                   btn.addEventListener('click', function () {
                     btn.disabled = true;
-                    const url = j.state === 'running' ? '/api/import/stop' : '/api/import/clear';
+                    const url = BASE + (j.state === 'running' ? '/api/import/stop' : '/api/import/clear');
                     fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
                                 body: JSON.stringify({jobId: j.jobId})})
                       .then(refreshImportJobs).catch(refreshImportJobs);
@@ -2335,7 +2349,7 @@ public class PortalServer {
             async function refreshImportJobs() {
               let jobs;
               try {
-                const r = await fetch('/api/import/jobs');
+                const r = await fetch(BASE + '/api/import/jobs');
                 jobs = await r.json();
               } catch (e) {
                 return;   // the portal may be restarting; the next tick tries again
@@ -2359,7 +2373,7 @@ public class PortalServer {
               btn.disabled = true;
               progress.textContent = 'Converting...';
               try {
-                const r = await fetch('/api/import/word', {
+                const r = await fetch(BASE + '/api/import/word', {
                   method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
                 const j = await r.json();
                 progress.textContent = r.ok
@@ -2386,7 +2400,7 @@ public class PortalServer {
               btn.disabled = true;
               progress.textContent = 'Fetching...';
               try {
-                const r = await fetch('/api/import/web', {
+                const r = await fetch(BASE + '/api/import/web', {
                   method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
                 const j = await r.json();
                 progress.textContent = r.ok
@@ -2413,7 +2427,7 @@ public class PortalServer {
               try {
                 // Like the PDF import, the Start button stays enabled: the job is the server's, so
                 // queueing another does not wait for this one.
-                const r = await fetch('/api/import/video/start', {
+                const r = await fetch(BASE + '/api/import/video/start', {
                   method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body});
                 const j = await r.json();
                 if (!r.ok) { progress.textContent = 'Error: ' + (j.error || 'unknown'); return; }
@@ -2451,13 +2465,13 @@ public class PortalServer {
                 // Started, then polled: a rescan followed by HTML, index and embedding over every
                 // project runs for tens of minutes, which no held request survives. The job says
                 // which project and which stage it is on.
-                const started = await fetch('/api/update-all-projects-async', {method: 'POST'});
+                const started = await fetch(BASE + '/api/update-all-projects-async', {method: 'POST'});
                 const s0 = await started.json();
                 let j = s0;
                 while (j.state === 'running') {
                   status.textContent = (j.message || 'starting') + ' ' + Math.round(j.ms / 1000) + 's...';
                   await new Promise(res => setTimeout(res, 1500));
-                  const r2 = await fetch('/api/build-status?jobId=' + encodeURIComponent(s0.jobId));
+                  const r2 = await fetch(BASE + '/api/build-status?jobId=' + encodeURIComponent(s0.jobId));
                   j = await r2.json();
                 }
                 if (j.state === 'done') {
@@ -2506,11 +2520,13 @@ public class PortalServer {
               // The right-pane state lives in the URL hash (e.g. #/doc_x/010/page.html), so a hard
               // reload restores the exact page - including pages reached by navigating INSIDE the
               // iframe (mirrored by the load handler below). Bookmarking and back/forward also work.
+              // The state kept here (hash, recent list) holds paths below the base path, so it means the same under any prefix.
+              function unbase(p) { return BASE && p.indexOf(BASE + '/') === 0 ? p.slice(BASE.length) : p; }
               function frameLoc() {
                 try {
                   var w = frame.contentWindow;
                   if (!w || w.location.protocol.indexOf('http') !== 0) return null;
-                  return w.location.pathname + w.location.search;
+                  return unbase(w.location.pathname) + w.location.search;
                 } catch (e) { return null; }
               }
               function showInFrame(url) {
@@ -2519,7 +2535,7 @@ public class PortalServer {
                 if (!url) { frame.setAttribute('src', 'about:blank'); return; }
                 // Only (re)load when the iframe is not already on this URL, so mirroring in-iframe
                 // navigation into the hash never triggers a reload loop.
-                if (frameLoc() !== url) frame.setAttribute('src', url);
+                if (frameLoc() !== url) frame.setAttribute('src', BASE + url);
               }
               function applyHash() {
                 showInFrame(location.hash ? location.hash.slice(1) : '');
@@ -2596,7 +2612,7 @@ public class PortalServer {
                   if (e.defaultPrevented || e.button !== 0 ||
                       e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                   e.preventDefault();
-                  loadInFrame(a.getAttribute('href'));
+                  loadInFrame(unbase(a.getAttribute('href')));
                 });
               }
               // Recently-viewed dropdown in the header.
@@ -2616,7 +2632,7 @@ public class PortalServer {
                   }
                   list.forEach(function(it) {
                     var a = document.createElement('a');
-                    a.href = it.url;
+                    a.href = BASE + it.url;
                     // Prefix the entry with its Docusaurus project name (first URL path
                     // segment, e.g. "doc_SCIVICS002"): "<project> : <title>". Derived from the
                     // URL at render time so pre-existing entries without a stored project work too.
@@ -2721,10 +2737,10 @@ public class PortalServer {
             </head>
             <body>
             <header>
-              <a class="home" href="/" target="_top">Documentation Portal</a>
+              <a class="home" href="YADOC_BASE_PATH/" target="_top">Documentation Portal</a>
             </header>
             <main>
-            """.formatted(escHtml(q)));
+            """.formatted(escHtml(q)).replace("YADOC_BASE_PATH", base.prefix()));
         sb.append(RelatedDocsView.searchWidgetBlock(q, "fulltext", true));
 
         if (q.isBlank()) {
@@ -2739,7 +2755,7 @@ public class PortalServer {
                 sb.append("<p class=\"no-results\">No results found.</p>\n");
             } else {
                 for (var hit : hits) {
-                    String href = "/" + hit.get("project") + hit.get("pagePath");
+                    String href = base.url("/" + hit.get("project") + hit.get("pagePath"));
                     sb.append("<a class=\"result\" href=\"").append(escHtml(href)).append("\">\n");
                     sb.append("  <div class=\"result-project\">").append(escHtml(hit.get("project"))).append("</div>\n");
                     sb.append("  <div class=\"result-title\">").append(escHtml(hit.get("title"))).append("</div>\n");
@@ -2753,21 +2769,21 @@ public class PortalServer {
                     String qEnc = java.net.URLEncoder.encode(q, java.nio.charset.StandardCharsets.UTF_8);
                     String langParam = "&lang=" + java.net.URLEncoder.encode(finalLang, java.nio.charset.StandardCharsets.UTF_8);
                     if (page > 1)
-                        sb.append("<a href=\"/search?q=").append(qEnc).append(langParam).append("&page=").append(page - 1).append("\">&laquo; Prev</a> ");
+                        sb.append("<a href=\"").append(base.url("/search")).append("?q=").append(qEnc).append(langParam).append("&page=").append(page - 1).append("\">&laquo; Prev</a> ");
                     for (int p = 1; p <= totalPages; p++) {
                         if (p == page)
                             sb.append("<span class=\"pager-cur\">").append(p).append("</span> ");
                         else
-                            sb.append("<a href=\"/search?q=").append(qEnc).append(langParam).append("&page=").append(p).append("\">").append(p).append("</a> ");
+                            sb.append("<a href=\"").append(base.url("/search")).append("?q=").append(qEnc).append(langParam).append("&page=").append(p).append("\">").append(p).append("</a> ");
                     }
                     if (page < totalPages)
-                        sb.append("<a href=\"/search?q=").append(qEnc).append("&page=").append(page + 1).append("\">Next &raquo;</a>");
+                        sb.append("<a href=\"").append(base.url("/search")).append("?q=").append(qEnc).append("&page=").append(page + 1).append("\">Next &raquo;</a>");
                     sb.append("</div>\n");
                 }
             }
         }
         sb.append("</main>\n");
-        sb.append(RelatedDocsView.searchWidgetScript());
+        sb.append(RelatedDocsView.searchWidgetScript(base));
         sb.append("</body>\n</html>\n");
         respond(ex, 200, "text/html; charset=UTF-8", HttpUtils.injectResponsive(sb.toString()));
     }
@@ -3022,7 +3038,7 @@ public class PortalServer {
     /** GET /search-semantic?q=... — semantic search results page (with a query box). */
     private void handleSearchSemanticPage(HttpExchange ex) throws IOException {
         String q = queryParam(ex, "q");
-        respond(ex, 200, "text/html; charset=UTF-8", RelatedDocsView.searchResultsPage(q, semanticSearch(q), true));
+        respond(ex, 200, "text/html; charset=UTF-8", RelatedDocsView.searchResultsPage(base, q, semanticSearch(q), true));
     }
 
     /** Embeds the query and ranks all documents by cosine; empty if no index/query or the embed server is down. */
@@ -3041,14 +3057,14 @@ public class PortalServer {
     private void handleRelatedPage(HttpExchange ex) throws IOException {
         String docPath = queryParam(ex, "path");
         respond(ex, 200, "text/html; charset=UTF-8",
-                RelatedDocsView.pageHtml("Related", docPath, relatedDocsFor(docPath)));
+                RelatedDocsView.pageHtml(base, "Related", docPath, relatedDocsFor(docPath)));
     }
 
     /** GET /related-semantic?path=... — renders an HTML page with the embedding-based related docs. */
     private void handleRelatedSemanticPage(HttpExchange ex) throws IOException {
         String docPath = queryParam(ex, "path");
         respond(ex, 200, "text/html; charset=UTF-8",
-                RelatedDocsView.pageHtml("Related (semantic)", docPath,
+                RelatedDocsView.pageHtml(base, "Related (semantic)", docPath,
                         semanticRelated.getOrDefault(docPath, List.of())));
     }
 
@@ -3810,10 +3826,10 @@ public class PortalServer {
             </head>
             <body>
             <header>
-              <a class="home" href="/">Documentation Portal</a>
+              <a class="home" href="YADOC_BASE_PATH/">Documentation Portal</a>
             </header>
             <main>
-            """);
+            """.replace("YADOC_BASE_PATH", base.prefix()));
         sb.append(RelatedDocsView.searchWidgetBlock(text, "tfidf", true));
 
         sb.append("<div class=\"query-box\"><div class=\"query-label\">Query text:</div>")
@@ -3832,7 +3848,7 @@ public class PortalServer {
                     int sl = href.indexOf('/', 1);
                     displayProject = sl > 0 ? href.substring(1, sl) : href.substring(1);
                 }
-                sb.append("<a class=\"result\" href=\"").append(escHtml(href != null ? href : "#")).append("\">\n");
+                sb.append("<a class=\"result\" href=\"").append(escHtml(href != null ? base.url(href) : "#")).append("\">\n");
                 sb.append("  <div class=\"result-project\">").append(escHtml(displayProject)).append("</div>\n");
                 sb.append("  <div class=\"result-title\">").append(escHtml(hit.get("title") != null ? hit.get("title") : "")).append("</div>\n");
                 sb.append("  <div class=\"result-breadcrumb\">").append(escHtml(pathToBreadcrumb(href))).append("</div>\n");
@@ -3842,7 +3858,7 @@ public class PortalServer {
         }
 
         sb.append("</main>\n");
-        sb.append(RelatedDocsView.searchWidgetScript());
+        sb.append(RelatedDocsView.searchWidgetScript(base));
         sb.append("</body>\n</html>\n");
         respond(ex, 200, "text/html; charset=UTF-8", HttpUtils.injectResponsive(sb.toString()));
     }
@@ -4065,7 +4081,7 @@ public class PortalServer {
             <script>
             (function(){
               var path = %s;
-              fetch('/api/related?path=' + encodeURIComponent(path))
+              fetch(YADOC_BASE_PATH_JS + '/api/related?path=' + encodeURIComponent(path))
                 .then(function(r){return r.json();})
                 .then(function(docs){
                   var box = document.getElementById('related-docs');
@@ -4074,7 +4090,7 @@ public class PortalServer {
                   docs.slice(0, 10).forEach(function(d){
                     var li = document.createElement('li');
                     var a = document.createElement('a');
-                    a.href = d.path;
+                    a.href = YADOC_BASE_PATH_JS + d.path;
                     a.textContent = d.title || d.path;
                     a.title = d.summary || '';
                     li.appendChild(a);
@@ -4083,7 +4099,7 @@ public class PortalServer {
                   var footer = document.createElement('div');
                   footer.style.cssText = 'margin-top:.6rem;font-size:.8rem;';
                   var seeAll = document.createElement('a');
-                  seeAll.href = '/related?path=' + encodeURIComponent(path);
+                  seeAll.href = YADOC_BASE_PATH_JS + '/related?path=' + encodeURIComponent(path);
                   seeAll.textContent = 'See all ' + docs.length + ' related documents →';
                   seeAll.style.cssText = 'color:#1a4fa0;text-decoration:none;';
                   footer.appendChild(seeAll);
@@ -4092,11 +4108,11 @@ public class PortalServer {
                 });
             })();
             </script>
-            """.formatted(jsonStr(docPath));
+            """.formatted(jsonStr(docPath)).replace("YADOC_BASE_PATH_JS", jsonStr(base.prefix()));
 
         // Second, independent widget: embedding-based (semantic) related documents,
         // shared with single-project mode (SearchServer) via RelatedDocsView.
-        String semScript = RelatedDocsView.semanticWidget(docPath);
+        String semScript = RelatedDocsView.semanticWidget(base, docPath);
         return RelatedDocsView.injectBeforeBodyEnd(html, script + semScript);
     }
 

@@ -65,15 +65,15 @@ final class RelatedDocsView {
     }
 
     /** Renders the standalone related-documents HTML page (used by {@code /related} and {@code /related-semantic}). */
-    static String pageHtml(String heading, String docPath, List<Map<String, String>> hits) {
+    static String pageHtml(BasePath base, String heading, String docPath, List<Map<String, String>> hits) {
         var sb = new StringBuilder();
-        sb.append(pageOpen(heading + ": " + (docPath == null ? "" : docPath)));
+        sb.append(pageOpen(base, heading + ": " + (docPath == null ? "" : docPath)));
         if (docPath != null && !docPath.isBlank()) {
             sb.append("<p class=\"source-link\">Related documents for: <a href=\"")
-              .append(HttpUtils.escapeHtml(docPath)).append("\">")
+              .append(HttpUtils.escapeHtml(docPath.startsWith("/") ? base.url(docPath) : docPath)).append("\">")
               .append(HttpUtils.escapeHtml(docPath)).append("</a></p>\n");
         }
-        appendResults(sb, hits, "related document");
+        appendResults(sb, base, hits, "related document");
         sb.append("</main>\n</body>\n</html>\n");
         return sb.toString();
     }
@@ -86,14 +86,14 @@ final class RelatedDocsView {
      *                      registers {@code /find-related}); {@link SearchServer} (single-project
      *                      mode) does not, so it passes {@code false} to omit that radio
      */
-    static String searchResultsPage(String query, List<Map<String, String>> hits, boolean supportsTfidf) {
+    static String searchResultsPage(BasePath base, String query, List<Map<String, String>> hits, boolean supportsTfidf) {
         var sb = new StringBuilder();
-        sb.append(pageOpen("Semantic search"));
+        sb.append(pageOpen(base, "Semantic search"));
         sb.append(searchWidgetBlock(query, "embedding", supportsTfidf));
         if (query != null && !query.isBlank()) {
-            appendResults(sb, hits, "result");
+            appendResults(sb, base, hits, "result");
         }
-        sb.append(searchWidgetScript());
+        sb.append(searchWidgetScript(base));
         sb.append("</main>\n</body>\n</html>\n");
         return sb.toString();
     }
@@ -171,9 +171,10 @@ final class RelatedDocsView {
      *   embedding -&gt; GET  /search-semantic?q=      (vector similarity)
      * </pre>
      */
-    static String searchWidgetScript() {
+    static String searchWidgetScript(BasePath base) {
         return """
             <script>
+            var BASE = 'YADOC_BASE_PATH';
             function doSearch() {
               const status = document.getElementById('search-status');
               const text = document.getElementById('search-input').value.trim();
@@ -183,10 +184,10 @@ final class RelatedDocsView {
               // Navigate the current frame in place. On the portal this frame is the right-pane
               // iframe, so results stay in the same tab; in single-project mode it replaces the page.
               if (type === 'embedding') {
-                window.location.assign('/search-semantic?q=' + encodeURIComponent(text));
+                window.location.assign(BASE + '/search-semantic?q=' + encodeURIComponent(text));
               } else if (type === 'tfidf') {
                 const form = document.createElement('form');
-                form.method = 'POST'; form.action = '/find-related';
+                form.method = 'POST'; form.action = BASE + '/find-related';
                 form.style.display = 'none';
                 const tInput = document.createElement('input');
                 tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
@@ -197,7 +198,7 @@ final class RelatedDocsView {
               } else {
                 const langEl = document.querySelector('input[name="lang"]:checked');
                 const lang = langEl ? langEl.value : 'ja';
-                window.location.assign('/search?q=' + encodeURIComponent(text) + '&lang=' + encodeURIComponent(lang));
+                window.location.assign(BASE + '/search?q=' + encodeURIComponent(text) + '&lang=' + encodeURIComponent(lang));
               }
               if (status) { status.textContent = 'Loading results...'; status.style.color = '#2e8555'; }
             }
@@ -208,11 +209,11 @@ final class RelatedDocsView {
               if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); doSearch(); }
             });
             </script>
-            """;
+            """.replace("YADOC_BASE_PATH", base.prefix());
     }
 
     /** Returns the page chrome (doctype, head, CSS, header, open main) with the given title. */
-    private static String pageOpen(String title) {
+    private static String pageOpen(BasePath base, String title) {
         return HttpUtils.injectResponsive("""
             <!DOCTYPE html>
             <html lang="ja">
@@ -249,14 +250,14 @@ final class RelatedDocsView {
             </head>
             <body>
             <header>
-              <a class="home" href="/" target="_top">Documentation Portal</a>
+              <a class="home" href="YADOC_BASE_PATH/" target="_top">Documentation Portal</a>
             </header>
             <main>
-            """.formatted(HttpUtils.escapeHtml(title)));
+            """.formatted(HttpUtils.escapeHtml(title)).replace("YADOC_BASE_PATH", base.prefix()));
     }
 
     /** Appends the result-count line and the result cards (or a no-results message). */
-    private static void appendResults(StringBuilder sb, List<Map<String, String>> hits, String noun) {
+    private static void appendResults(StringBuilder sb, BasePath base, List<Map<String, String>> hits, String noun) {
         sb.append("<p class=\"result-count\"><strong>").append(hits.size())
           .append("</strong> ").append(noun).append("(s) found</p>\n");
         if (hits.isEmpty()) {
@@ -270,7 +271,7 @@ final class RelatedDocsView {
                 int sl = href.indexOf('/', 1);
                 displayProject = sl > 0 ? href.substring(1, sl) : href.substring(1);
             }
-            sb.append("<a class=\"result\" href=\"").append(HttpUtils.escapeHtml(href != null ? href : "#")).append("\">\n");
+            sb.append("<a class=\"result\" href=\"").append(HttpUtils.escapeHtml(href != null ? base.url(href) : "#")).append("\">\n");
             sb.append("  <div class=\"result-project\">").append(HttpUtils.escapeHtml(displayProject)).append("</div>\n");
             sb.append("  <div class=\"result-title\">").append(HttpUtils.escapeHtml(hit.get("title") != null ? hit.get("title") : "")).append("</div>\n");
             sb.append("  <div class=\"result-breadcrumb\">").append(HttpUtils.escapeHtml(breadcrumb(href))).append("</div>\n");
@@ -287,7 +288,7 @@ final class RelatedDocsView {
      * @param docPath the served path of the current page (the lookup key)
      * @return an HTML fragment to insert before {@code </body>}
      */
-    static String semanticWidget(String docPath) {
+    static String semanticWidget(BasePath base, String docPath) {
         return """
             <style>
             #related-docs-sem{display:none;margin:1rem auto 2rem;max-width:860px;
@@ -314,7 +315,7 @@ final class RelatedDocsView {
             <script>
             (function(){
               var path = %s;
-              fetch('/api/related-semantic?path=' + encodeURIComponent(path))
+              fetch(YADOC_BASE_PATH_JS + '/api/related-semantic?path=' + encodeURIComponent(path))
                 .then(function(r){return r.json();})
                 .then(function(docs){
                   var box = document.getElementById('related-docs-sem');
@@ -323,7 +324,7 @@ final class RelatedDocsView {
                   docs.slice(0, 10).forEach(function(d){
                     var li = document.createElement('li');
                     var a = document.createElement('a');
-                    a.href = d.path;
+                    a.href = YADOC_BASE_PATH_JS + d.path;
                     a.textContent = d.title || d.path;
                     a.title = d.summary || '';
                     li.appendChild(a);
@@ -332,7 +333,7 @@ final class RelatedDocsView {
                   var footer = document.createElement('div');
                   footer.style.cssText = 'margin-top:.6rem;font-size:.8rem;';
                   var seeAll = document.createElement('a');
-                  seeAll.href = '/related-semantic?path=' + encodeURIComponent(path);
+                  seeAll.href = YADOC_BASE_PATH_JS + '/related-semantic?path=' + encodeURIComponent(path);
                   seeAll.textContent = 'See all ' + docs.length + ' semantically related documents →';
                   seeAll.style.cssText = 'color:#1d6b43;text-decoration:none;';
                   footer.appendChild(seeAll);
@@ -341,7 +342,8 @@ final class RelatedDocsView {
                 });
             })();
             </script>
-            """.formatted(HttpUtils.jsonStr(docPath));
+            """.formatted(HttpUtils.jsonStr(docPath))
+            .replace("YADOC_BASE_PATH_JS", HttpUtils.jsonStr(base.prefix()));
     }
 
     /** Inserts a widget fragment just before {@code </body>} (or appends if absent). */
