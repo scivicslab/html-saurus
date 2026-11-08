@@ -108,6 +108,9 @@ public class PortalServer {
     /** Where the browser reaches this server; every URL written into a page or a redirect goes through it. */
     private final BasePath base;
 
+    /** The file whose text is shown at the top of the portal page, or null. */
+    private final Path noticeFile;
+
     private static GpuBrokerClient buildGpuBroker() {
         String brokerUrl = System.getenv("GPU_BROKER_URL");
         return brokerUrl == null || brokerUrl.isBlank() ? null
@@ -155,13 +158,22 @@ public class PortalServer {
         this(worksDir, projectDirs, port, semanticIndex, threads, BasePath.current());
     }
 
+    public PortalServer(Path worksDir, List<Path> projectDirs, int port,
+                        SemanticIndex semanticIndex, int threads, BasePath base) {
+        this(worksDir, projectDirs, port, semanticIndex, threads, base, PortalNotice.fromEnvironment());
+    }
+
     /**
      * As above, for a server that a proxy publishes below {@code base} (see {@link BasePath}): every URL the
      * pages and redirects of this server write is prefixed with it. {@link BasePath#none()} serves at the host root.
      */
+    /**
+     * As above, with the file that holds the notice shown at the top of the portal page (see {@link PortalNotice}); null for none.
+     */
     public PortalServer(Path worksDir, List<Path> projectDirs, int port,
-                        SemanticIndex semanticIndex, int threads, BasePath base) {
+                        SemanticIndex semanticIndex, int threads, BasePath base, Path noticeFile) {
         this.base = base;
+        this.noticeFile = noticeFile;
         this.worksDir = worksDir;
         this.port = port;
         this.threads = threads;
@@ -1560,6 +1572,11 @@ public class PortalServer {
                 h2 { font-size: 0.8rem; color: var(--text-secondary); font-weight: 600;
                      text-transform: uppercase; letter-spacing: 0.06em;
                      margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; }
+                .portal-notice { background: var(--bg-secondary); border: 1px solid var(--border-color);
+                                 border-left: 4px solid #d9822b; border-radius: 6px; padding: 0.6rem 0.9rem;
+                                 margin-bottom: 1rem; font-size: 0.85rem; line-height: 1.5; }
+                .portal-notice p { margin: 0.25rem 0; }
+                .portal-notice code { font-family: monospace; }
                 .project-list { background: var(--bg-secondary); border: 1px solid var(--border-color);
                                 border-radius: 8px; overflow: hidden; }
                 .project-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
@@ -1706,6 +1723,7 @@ public class PortalServer {
             <div class="portal-body">
             <aside id="portal-sidebar">
             """);
+        sb.append(PortalNotice.html(noticeFile));
 
             sb.append("""
               <div class="tab-bar" role="tablist">
