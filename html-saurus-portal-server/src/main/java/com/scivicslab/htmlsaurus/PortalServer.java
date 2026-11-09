@@ -108,6 +108,9 @@ public class PortalServer {
     /** Where the browser reaches this server; every URL written into a page or a redirect goes through it. */
     private final BasePath base;
 
+    /** Whether the {@code /mcp} endpoint exists. */
+    private final boolean mcpEnabled;
+
     /** The file whose text is shown at the top of the portal page, or null. */
     private final Path noticeFile;
 
@@ -172,6 +175,17 @@ public class PortalServer {
      */
     public PortalServer(Path worksDir, List<Path> projectDirs, int port,
                         SemanticIndex semanticIndex, int threads, BasePath base, Path noticeFile) {
+        this(worksDir, projectDirs, port, semanticIndex, threads, base, noticeFile, true);
+    }
+
+    /**
+     * As above. With {@code mcp} false there is no {@code /mcp} endpoint at all: the handler is not built and every request
+     * for the path is answered 404. The endpoint reads and writes files and rebuilds projects without a credential, which a
+     * deployment that gives the portal to other people (k8s-pups) does not want to offer; the rest of the portal is unchanged.
+     */
+    public PortalServer(Path worksDir, List<Path> projectDirs, int port,
+                        SemanticIndex semanticIndex, int threads, BasePath base, Path noticeFile, boolean mcp) {
+        this.mcpEnabled = mcp;
         this.base = base;
         this.noticeFile = noticeFile;
         this.worksDir = worksDir;
@@ -255,7 +269,7 @@ public class PortalServer {
             Project proj = projectMap.get(name);
             return proj == null ? null : readNavbarLabels(proj.projectDir());
         };
-        this.mcpHandler = new McpHandler(worksDir, () -> defaultSearcher, searchers, this::resolveDocRef,
+        if (mcpEnabled) this.mcpHandler = new McpHandler(worksDir, () -> defaultSearcher, searchers, this::resolveDocRef,
             textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
             siblingsResolver, prerequisiteOfResolver, stageBuilder, reindexAllRunner, scanWorksDirRunner,
             updateAllProjectsRunner, navbarLabelsResolver, this::translateCore);
@@ -401,6 +415,10 @@ public class PortalServer {
         // that serves the public site does not contain them.
         // per ProductionModeSpec_260806_oo01, doc_SCIVICS002, 010_concepts)
         if (path.equals("/mcp")) {
+            if (!mcpEnabled) {
+                respond(ex, 404, "text/plain", "Not Found");
+                return;
+            }
             mcpHandler.handle(ex);
             return;
         }

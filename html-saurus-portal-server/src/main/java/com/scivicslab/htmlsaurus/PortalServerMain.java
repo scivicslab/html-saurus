@@ -72,6 +72,15 @@ public final class PortalServerMain {
                 .required(false)
                 .build());
 
+        opts.addOption(Option.builder()
+                .longOpt("no-mcp")
+                .hasArg(false)
+                .desc("""
+                        Do not offer the /mcp endpoint: every request for it is answered 404. The rest of \
+                        the portal is unchanged.""")
+                .required(false)
+                .build());
+
         String description = """
                 Serves every Docusaurus project under one directory, to its author.
 
@@ -92,8 +101,9 @@ public final class PortalServerMain {
             Path worksDir = Path.of(cl.getOptionValue("dir")).toAbsolutePath();
             int port = Integer.parseInt(cl.getOptionValue("port", "8080"));
             int threads = Integer.parseInt(cl.getOptionValue("threads", "0"));
+            boolean mcp = !cl.hasOption("no-mcp");
             try {
-                serve(worksDir, port, threads);
+                serve(worksDir, port, threads, mcp);
             } catch (Exception e) {
                 System.err.println("Portal failed to start: " + e.getMessage());
                 System.exit(1);
@@ -101,7 +111,7 @@ public final class PortalServerMain {
         });
     }
 
-    private void serve(Path worksDir, int port, int threads) throws Exception {
+    private void serve(Path worksDir, int port, int threads, boolean mcp) throws Exception {
         List<Path> projects = Projects.findProjects(worksDir);
         System.out.println("=== html-saurus portal ===");
         System.out.println("  root     : " + worksDir);
@@ -138,7 +148,7 @@ public final class PortalServerMain {
         // vectors take effect on the next restart; after the first build they are cached, so
         // subsequent restarts bind and have semantic search ready quickly.
         SemanticIndex semanticIndex = SemanticIndex.load(projects, BuildStages.SEMANTIC_TOP_K);
-        new PortalServer(worksDir, projects, port, semanticIndex, threads).start();
+        new PortalServer(worksDir, projects, port, semanticIndex, threads, BasePath.current(), PortalNotice.fromEnvironment(), mcp).start();
         System.out.println("Portal serving on http://0.0.0.0:" + port
                 + "  (full-text ready; refreshing semantic vectors, effective next restart...)");
         BuildStages.ensureSemanticVectors(projects);
