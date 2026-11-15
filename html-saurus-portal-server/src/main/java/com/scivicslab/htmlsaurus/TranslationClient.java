@@ -227,6 +227,34 @@ public class TranslationClient {
         return out;
     }
 
+    /**
+     * One chat-completions call with the current model through quarkus-gpu-broker's job queue, at
+     * {@code FOREGROUND} priority, for a question that is not a translation (whether two paragraphs are
+     * one, {@link ParagraphJoinJudge}). The same queue and model the page translation uses.
+     *
+     * @return the model's answer text; completes exceptionally if the broker rejects the job, the job
+     *         fails, or the answer has no content
+     */
+    CompletableFuture<String> chatViaBroker(GpuBrokerClient broker, String system, String user) {
+        CompletableFuture<String> out = new CompletableFuture<>();
+        String model = currentModel();
+        byte[] body = chatRequestJson(system, user, model, 0.0).getBytes(StandardCharsets.UTF_8);
+        try {
+            broker.submit(queueNameFor(model), body, "application/json", Priority.FOREGROUND, result -> {
+                if (result.status() != JobResult.Status.DONE) {
+                    out.completeExceptionally(new IOException("chat failed via gpu-broker: " + result.error()));
+                    return;
+                }
+                String content = parseContent(new String(result.body(), StandardCharsets.UTF_8));
+                if (content == null) out.completeExceptionally(new IOException("the answer has no content"));
+                else out.complete(content);
+            });
+        } catch (GpuBrokerClientException e) {
+            out.completeExceptionally(e);
+        }
+        return out;
+    }
+
     /** Whether {@link #translate} should skip attempting a connection at time {@code nowMs}. */
     boolean isDown(long nowMs) {
         return nowMs < downUntilMs.get();

@@ -65,6 +65,8 @@ public class PortalServer {
     private final EmbeddingClient embed;
     /** Generation client used for on-demand paragraph translation. */
     private final TranslationClient translate;
+    /** Whether two adjacent paragraphs are one sentence cut in two, for the page translation. */
+    private final ParagraphJoinJudge joinJudge;
     /** On-disk cache of past translations, shared across all projects in the portal. */
     private final TranslationCache translationCache;
     /**
@@ -229,6 +231,11 @@ public class PortalServer {
         this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
         this.translate = new TranslationClient(System.getenv("TRANSLATION_SERVER_URL"));
         this.translationCache = TranslationCache.load(worksDir);
+        // Asked through the same broker queue (or translation server) the page translation uses, and
+        // remembered next to the translations (PageTranslationBlocks_261115_oo01).
+        this.joinJudge = new ParagraphJoinJudge(
+                TranslationCache.load(worksDir, ParagraphJoinJudge.CACHE_FILE), joinAsker(),
+                line -> java.util.logging.Logger.getLogger(ParagraphJoinJudge.class.getName()).info(line));
         System.out.println("Semantic related-docs: " + semanticRelated.size() + " entries (in-memory)");
 
         java.util.function.BiFunction<String, String, List<Map<String, String>>> textRelatedResolver = (text, locale) -> {
@@ -534,6 +541,11 @@ public class PortalServer {
         }
         if (path.equals("/api/translate-lookup")) {
             handleTranslateLookup(ex);
+            return;
+        }
+        // Which candidate pairs of paragraphs are one sentence cut in two: {"pairs":[{"a","b"}...]}.
+        if (path.equals("/api/join-check")) {
+            handleJoinCheck(ex);
             return;
         }
 
@@ -3312,6 +3324,62 @@ public class PortalServer {
             sb.append(cached == null ? "null" : jsonStr(cached));
         }
         respond(ex, 200, "application/json; charset=UTF-8", sb.append("]}").toString());
+    }
+
+    /** The most candidate pairs one page may ask about. */
+    private static final int MAX_JOIN_PAIRS = 3000;
+    /** Runs the blocking calls to the translation server when no broker is set; one thread per question. */
+    private static final java.util.concurrent.ExecutorService JOIN_CALLS =
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+
+    /**
+     * How a paragraph-join question reaches the local LLM: through quarkus-gpu-broker's queue when
+     * {@code GPU_BROKER_URL} is set, otherwise to the translation server, as {@link #blockTranslator} does.
+     */
+    private ParagraphJoinJudge.Asker joinAsker() {
+        if (GPU_BROKER != null) {
+            return (system, user) -> translate.chatViaBroker(GPU_BROKER, system, user);
+        }
+        return (system, user) -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                return translate.chat(system, user, (int) ParagraphJoinJudge.ANSWER_TIMEOUT_SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new java.util.concurrent.CompletionException(e);
+            } catch (IOException e) {
+                throw new java.util.concurrent.CompletionException(e);
+            }
+        }, JOIN_CALLS);
+    }
+
+    /**
+     * Handles {@code POST /api/join-check}. Body {@code {"pairs":[{"a":"...","b":"..."}]}}: candidate pairs
+     * of adjacent paragraphs the browser found. Answers {@code {"join":[true,false,...]}}, one per pair:
+     * whether B continues the sentence A leaves unfinished, as {@link ParagraphJoinJudge} decides it.
+     */
+    private void handleJoinCheck(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, Object> body = McpJsonParser.parseObject(
+            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        if (!(body.get("pairs") instanceof List<?> raw) || raw.size() > MAX_JOIN_PAIRS) {
+            respond(ex, 400, "application/json", "{\"error\":\"pairs must hold at most " + MAX_JOIN_PAIRS + " entries\"}");
+            return;
+        }
+        List<ParagraphJoinJudge.Pair> pairs = new ArrayList<>(raw.size());
+        for (Object o : raw) {
+            if (!(o instanceof Map<?, ?> m) || !(m.get("a") instanceof String a) || !(m.get("b") instanceof String b)) {
+                respond(ex, 400, "application/json", "{\"error\":\"each pair needs a and b\"}");
+                return;
+            }
+            pairs.add(new ParagraphJoinJudge.Pair(a, b));
+        }
+        List<Boolean> join = joinJudge.judge(pairs);
+        StringBuilder sb = new StringBuilder("{\"join\":[");
+        for (int i = 0; i < join.size(); i++) sb.append(i > 0 ? "," : "").append(join.get(i));
+        respond(ex, 200, "application/json", sb.append("]}").toString());
     }
 
     /**

@@ -368,27 +368,63 @@ class PageScripts {
               // A paragraph a PDF page break cut in two is translated as one. The PDF import now joins
               // such paragraphs (PageBreakJoin), but pages imported before that keep the cut, and a
               // half translated on its own comes back wrong ("below it." alone became a sentence of
-              // its own). Two paragraphs that follow each other directly are one unit when the first
-              // does not end a sentence; the second, being a <p>, starts no heading, list, table or
-              // code block. The unit's text is the two joined, so it has its own cache entry, and a
-              // paragraph that is not joined keeps its text and so its cached translation. The
+              // its own). A cheap rule finds the candidates: a paragraph that does not end a sentence,
+              // followed directly by another paragraph (a <p> starts no heading, list, table or code
+              // block). The rule also catches headings, labels, command output and index lines, so
+              // the server asks a local LLM whether each candidate's second paragraph continues the
+              // first one's sentence (POST /api/join-check, remembered there), and only those answered
+              // yes are joined. A failed check joins nothing, which is how the page was translated
+              // before. A joined unit's text is the paragraphs joined, so it has its own cache entry;
+              // a paragraph that is not joined keeps its text and its cached translation. The
               // translation is shown once, after the last paragraph of the unit.
               var SENTENCE_END = /[.?!:;。？！]$/;
               var CLOSERS = /["'”’)）」』\\]】*_]+$/;
-              function runsOn(unit, next) {
-                return unit.last.tagName === 'P' && next.el.tagName === 'P' && unit.lang === next.lang
-                  && unit.last.nextElementSibling === next.el
-                  && !SENTENCE_END.test(unit.text.replace(CLOSERS, ''));
+              // How much of each paragraph the server is shown: enough for the sentence across the cut.
+              var JOIN_CONTEXT = 300;
+              function isCandidate(a, b) {
+                return a.el.tagName === 'P' && b.el.tagName === 'P' && a.lang === b.lang
+                  && a.el.nextElementSibling === b.el
+                  && !SENTENCE_END.test(a.text.replace(CLOSERS, ''));
               }
               function joinText(a, b) {
                 if (/\\p{L}-$/u.test(a) && /^\\p{Ll}/u.test(b)) return a.slice(0, -1) + b;
                 return a + ' ' + b;
               }
-              function joinCutParagraphs(blocks) {
+              // The end and the start of a paragraph; a word the cut falls in is left out (at most 40
+              // characters of it, so that text without spaces keeps its clip).
+              function clipEnd(t) {
+                if (t.length <= JOIN_CONTEXT) return t;
+                var cut = t.length - JOIN_CONTEXT, clip = t.slice(cut);
+                return /\\s/.test(t.charAt(cut - 1)) ? clip : clip.replace(/^\\S{1,40}\\s+/, '');
+              }
+              function clipStart(t) {
+                if (t.length <= JOIN_CONTEXT) return t;
+                var clip = t.slice(0, JOIN_CONTEXT);
+                return /\\s/.test(t.charAt(JOIN_CONTEXT)) ? clip : clip.replace(/\\s+\\S{1,40}$/, '');
+              }
+              // Resolves to joinNext: joinNext[i] is true when block i+1 continues block i.
+              function decideJoins(blocks) {
+                var joinNext = blocks.map(function() { return false; });
+                var pairs = [];
+                var at = [];
+                for (var i = 0; i + 1 < blocks.length; i++) {
+                  if (!isCandidate(blocks[i], blocks[i + 1])) continue;
+                  at.push(i);
+                  pairs.push({ a: clipEnd(blocks[i].text), b: clipStart(blocks[i + 1].text) });
+                }
+                if (!pairs.length) return Promise.resolve(joinNext);
+                return postJson(BASE + '/api/join-check', { pairs: pairs })
+                  .then(function(r) {
+                    at.forEach(function(i, k) { joinNext[i] = !!(r.join && r.join[k] === true); });
+                    return joinNext;
+                  })
+                  .catch(function() { return joinNext; });
+              }
+              function joinCutParagraphs(blocks, joinNext) {
                 var units = [];
-                blocks.forEach(function(it) {
+                blocks.forEach(function(it, i) {
                   var unit = units[units.length - 1];
-                  if (unit && runsOn(unit, it)) {
+                  if (unit && joinNext[i - 1]) {
                     unit.text = joinText(unit.text, it.text);
                     unit.last = it.el;
                     // How many paragraphs the unit holds, on its first paragraph (read by the page tests).
@@ -418,11 +454,10 @@ class PageScripts {
                   if (!text) return;
                   items.push({ el: el, text: text, lang: isJapaneseText(text) ? 'English' : 'Japanese', done: false });
                 });
-                items = joinCutParagraphs(items);
                 translated = true;
                 if (!items.length) { btn.innerHTML = shownLabel; return; }
                 var myRun = ++runId;
-                btn.innerHTML = '&#x1F310; Translating\\u2026';
+                btn.innerHTML = '&#x1F310; Checking paragraphs\\u2026';
                 function payload(list) {
                   return list.map(function(it) { return { text: it.text, lang: it.lang }; });
                 }
@@ -466,13 +501,18 @@ class PageScripts {
                   }
                   tick();
                 }
-                postJson(BASE + '/api/translate-page', { label: document.title, blocks: payload(items) })
-                  .then(function(start) {
-                    if (myRun !== runId) { stopJob(start.jobId); return; }
-                    runningJobId = start.jobId;
-                    poll(start.jobId);
-                  })
-                  .catch(function() { if (myRun === runId) failRemaining(); });
+                decideJoins(items).then(function(joinNext) {
+                  if (myRun !== runId) return;
+                  items = joinCutParagraphs(items, joinNext);
+                  btn.innerHTML = '&#x1F310; Translating\\u2026';
+                  postJson(BASE + '/api/translate-page', { label: document.title, blocks: payload(items) })
+                    .then(function(start) {
+                      if (myRun !== runId) { stopJob(start.jobId); return; }
+                      runningJobId = start.jobId;
+                      poll(start.jobId);
+                    })
+                    .catch(function() { if (myRun === runId) failRemaining(); });
+                });
               }
               function clearTranslation() {
                 runId++;
