@@ -325,7 +325,8 @@ class PageRenderer {
             boolean active = topSection != null && topSection.equals("/" + dirNameForSection(section));
             String href = section.href() != null ? prefix + section.href().replaceFirst("^/", "") : "#";
             sb.append("    <a href=\"").append(href).append("\"")
-              .append(active ? " class=\"mob-active\"" : "").append(">")
+              .append(active ? " class=\"mob-active\"" : "")
+              .append(" title=\"").append(escapeHtml(section.label())).append("\">")
               .append(escapeHtml(section.label())).append("</a>\n");
         }
         if (allLocales.size() > 1) {
@@ -523,15 +524,19 @@ class PageRenderer {
     private void renderSidebar(StringBuilder sb, List<SiteNode> nodes, String prefix, String currentPath) {
         sb.append("<ul>\n");
         for (SiteNode node : nodes) {
+            // The sidebar cuts long titles off with an ellipsis (page.css), so every entry carries its
+            // full title as a tooltip, escaped like the text.
+            String fullTitle = escapeHtml(node.label());
             if (node.isDir()) {
                 sb.append("<li>\n");
                 sb.append("  <div class=\"cat-header\" data-cat=\"").append(escapeHtml(stableCatKey(node.href()))).append("\">");
                 if (node.catLink() != null) {
                     String catAbsHref = prefix + node.catLink().replaceFirst("^/", "");
-                    sb.append("<a href=\"").append(catAbsHref).append("\" class=\"cat-label\">")
-                      .append(escapeHtml(node.label())).append("</a>");
+                    sb.append("<a href=\"").append(catAbsHref).append("\" class=\"cat-label\" title=\"")
+                      .append(fullTitle).append("\">").append(fullTitle).append("</a>");
                 } else {
-                    sb.append("<span class=\"cat-label\">").append(escapeHtml(node.label())).append("</span>");
+                    sb.append("<span class=\"cat-label\" title=\"").append(fullTitle).append("\">")
+                      .append(fullTitle).append("</span>");
                 }
                 sb.append("<span class=\"cat-arrow\">▶</span>")
                   .append("</div>\n");
@@ -542,8 +547,8 @@ class PageRenderer {
                 boolean active = currentPath.equals(node.href());
                 String href = prefix + node.href().replaceFirst("^/", "");
                 sb.append("<li><a href=\"").append(href).append("\"")
-                  .append(active ? " class=\"active\"" : "").append(">")
-                  .append(escapeHtml(node.label())).append("</a></li>\n");
+                  .append(active ? " class=\"active\"" : "").append(" title=\"").append(fullTitle).append("\">")
+                  .append(fullTitle).append("</a></li>\n");
             }
         }
         sb.append("</ul>\n");
