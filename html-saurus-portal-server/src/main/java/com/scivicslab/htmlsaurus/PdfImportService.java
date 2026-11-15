@@ -67,12 +67,13 @@ final class PdfImportService {
      */
     static String assembleDocument(List<String> pageBodies, int fromPage, int toPage,
                                     String sourceFilename, String title, String ocrBackendId) {
-        StringBuilder body = new StringBuilder();
+        // A paragraph that runs on to the next page is joined into one (PageBreakJoin); otherwise the
+        // pages are separated by a blank line, as before.
+        String body = "";
         for (int page = fromPage; page < toPage; page++) {
             String p = pageBodies.get(page);
             if (p == null || p.isBlank()) continue;
-            if (!body.isEmpty()) body.append("\n\n");
-            body.append(p);
+            body = body.isEmpty() ? p : PageBreakJoin.join(body, p);
         }
         String frontmatter = "---\n"
             + "title: " + yamlQuote(title) + "\n"
