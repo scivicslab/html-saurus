@@ -31,3 +31,8 @@ E2Eプログラムの結果を報告するとき、`DocIdResolutionE2E`につい
   plain "submit each file as a job" — the single-item path applied per file.
 - Rule: when asked for a bulk version of an existing operation, loop the existing single-item path.
   Do not redesign the job model; do not volunteer cost warnings as a reason to deviate.
+
+## 一部の変更だけをコミットするときは、コミットされる木をビルドしてから push する
+
+- 事象: 別の作業の未コミットの変更と同じファイル（`PortalServer.java`）に自分の変更が混ざっていたので、`git diff -U0` から自分のハンクだけを選んで `git apply --cached --unidiff-zero` で index に載せた。コンテキストの無い挿入ハンクは、行番号だけで位置が決まり、`/api/related` のブロックの内側と、Javadoc の途中に入った。作業ツリーではコンパイルもテストも通っていたので、気づかずに push した。リリース用のクリーンな clone でビルドして、初めてコンパイルエラーと 2 件のテスト失敗で分かった。
+- ルール: 一部の変更だけをコミットするときは、(1) 位置の曖昧なハンク選択を避け、HEAD の内容に自分の編集を当て直した内容を `git hash-object -w` と `git update-index --cacheinfo` で index に載せる、(2) push の前に、コミットされる木そのもの（クリーンな clone か `git stash --keep-index`）でビルドとテストを通す。作業ツリーで通ることは、コミットされる木で通ることを保証しない。
