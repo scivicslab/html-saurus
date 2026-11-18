@@ -396,9 +396,14 @@ public class PortalServer implements PortalReads {
         server.createContext("/", this::handleAll);
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
-        openNode();
+        var announcing = openNode()
+                ? WorkspaceAnnouncer.start(searcherSystem, System.getenv(WorkspaceAnnouncer.ENV), port)
+                : java.util.Optional.<com.scivicslab.pojoactor.core.scheduler.Scheduler>empty();
         // close, not terminate: it also stops the node's receiver.
-        Runtime.getRuntime().addShutdownHook(new Thread(searcherSystem::close));
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            announcing.ifPresent(com.scivicslab.pojoactor.core.scheduler.Scheduler::close);
+            searcherSystem.close();
+        }));
         System.out.println("Portal at http://localhost:" + server.getAddress().getPort());
         System.out.println("Press Ctrl+C to stop.");
         return server;
@@ -2846,17 +2851,21 @@ public class PortalServer implements PortalReads {
      * Opens this portal's node: the gateway {@value PortalNode#GATEWAY} at the root of the tree, and the receiver on
      * 127.0.0.1 at the actor port. A portal without an actor port (HTTP port 0), or one whose actor port is taken,
      * runs on without the node: the pages and the HTTP API do not depend on it.
+     *
+     * @return whether the node is open
      */
-    private void openNode() {
+    private boolean openNode() {
         var me = searcherSystem.getMyNode();
-        if (me.getPort() <= 0) return;
+        if (me.getPort() <= 0) return false;
         try {
             PortalNode.open(searcherSystem, new PortalGateway(this), PortalNode.BIND);
             System.out.println("Node " + me.getNodeId() + " takes messages on " + PortalNode.BIND + ":" + me.getPort()
                     + "; other nodes may call " + PortalNode.GATEWAY + " " + PortalNode.ACTIONS);
+            return true;
         } catch (IOException e) {
             System.err.println("Node " + me.getNodeId() + " could not listen on " + PortalNode.BIND + ":" + me.getPort()
                     + " (" + e.getMessage() + "); other nodes cannot reach this portal");
+            return false;
         }
     }
 
