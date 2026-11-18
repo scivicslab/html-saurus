@@ -42,7 +42,10 @@ public class PortalServer {
     private final List<Project> projects;
     private final Map<String, Project> projectMap;
     private final ActorSystem searcherSystem = new ActorSystem("searcher-system");
-    private final Map<String, ActorRef<LuceneSearcher>> searchers = new LinkedHashMap<>();
+    /** The searchers, held in one place: the children of the actor "searchers" (ActorNodesForWorkspaceAndPortal_261118_oo01). */
+    private final SearcherTree searcherTree = new SearcherTree(searcherSystem);
+    /** Every reader's map of the searchers: a read-only view of {@link #searcherTree}. */
+    private final Map<String, ActorRef<LuceneSearcher>> searchers = searcherTree.view();
     /** Maps searcher key → locale string for language-filtered search. */
     private final Map<String, String> searcherLocales = new LinkedHashMap<>();
     /** The searcher the MCP handler starts from. Re-derived whenever a scan removes a project,
@@ -203,7 +206,7 @@ public class PortalServer {
             projects.add(proj);
             projectMap.put(name, proj);
             // Default index uses the project's defaultLocale analyzer
-            searchers.put(name, searcherSystem.actorOf(name, new LuceneSearcher(proj.indexDir(), proj.defaultLocale())));
+            searcherTree.put(name, new LuceneSearcher(proj.indexDir(), proj.defaultLocale()));
             searcherLocales.put(name, proj.defaultLocale());
             // Load locale-specific indexes from search-index/<locale>/
             try {
@@ -213,7 +216,7 @@ public class PortalServer {
                         .forEach(locDir -> {
                             String loc = locDir.getFileName().toString();
                             String key = name + ":" + loc;
-                            searchers.put(key, searcherSystem.actorOf(key, new LuceneSearcher(locDir, loc)));
+                            searcherTree.put(key, new LuceneSearcher(locDir, loc));
                             searcherLocales.put(key, loc);
                         });
                 }
@@ -757,7 +760,7 @@ public class PortalServer {
                 Project proj = new Project(name, p, p.resolve("static-html"), p.resolve("search-index"), defaultLocale);
                 projects.add(proj);
                 projectMap.put(name, proj);
-                searchers.put(name, searcherSystem.actorOf(name, new LuceneSearcher(proj.indexDir(), defaultLocale)));
+                searcherTree.put(name, new LuceneSearcher(proj.indexDir(), defaultLocale));
                 searcherLocales.put(name, defaultLocale);
                 System.out.println("  Added: " + name);
                 added++;
@@ -813,32 +816,11 @@ public class PortalServer {
                     .toList();
             for (String key : keys) {
                 searcherLocales.remove(key);
-                closeSearcher(key, searchers.remove(key));
+                searcherTree.close(key);
             }
             System.out.println("  Removed: " + proj.name());
         }
         return vanished.size();
-    }
-
-    /**
-     * Closes one searcher's Lucene handles on the searcher's own actor thread, then stops the
-     * actor. The close runs as a message rather than a direct call because {@link LuceneSearcher}
-     * is unsynchronized and owned by its actor; stopping the actor first would cancel the message
-     * and leak the open reader.
-     */
-    private void closeSearcher(String key, ActorRef<LuceneSearcher> ref) {
-        if (ref == null) {
-            return;
-        }
-        try {
-            ref.ask(searcher -> {
-                searcher.close();
-                return Boolean.TRUE;
-            }).get(10, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (Exception e) {
-            System.err.println("Could not close the searcher " + key + ": " + e.getMessage());
-        }
-        ref.close();
     }
 
     // ---- Reindex All API endpoint -------------------------------
