@@ -18,6 +18,15 @@
     -->
 
     <dependencies>
+        <!-- The portal is a node of the distributed actor system (ActorNodesForWorkspaceAndPortal_261118_oo01). -->
+        <dependency>
+            <groupId>com.scivicslab</groupId>
+            <artifactId>turing-workflow</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.scivicslab</groupId>
+            <artifactId>pojo-actor-distributed</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.scivicslab</groupId>
             <artifactId>html-saurus-lib</artifactId>

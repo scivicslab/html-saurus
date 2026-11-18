@@ -24,6 +24,20 @@ final class RelatedDocsView {
 
     /** Writes a hit list as a JSON array of {@link #hitJson(Map)} objects. */
     static void writeJson(HttpExchange ex, List<Map<String, String>> hits) throws IOException {
+        writeJsonText(ex, hitsJson(hits));
+    }
+
+    /** Sends a JSON array already written, with the headers {@link #writeJson} sends. */
+    static void writeJsonText(HttpExchange ex, String json) throws IOException {
+        byte[] body = json.getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        ex.sendResponseHeaders(200, body.length);
+        try (var out = ex.getResponseBody()) { out.write(body); }
+    }
+
+    /** A hit list as the JSON array {@link #writeJson} sends; also what the portal's node answers. */
+    static String hitsJson(List<Map<String, String>> hits) {
         var sb = new StringBuilder("[");
         boolean first = true;
         for (var hit : hits) {
@@ -31,12 +45,7 @@ final class RelatedDocsView {
             first = false;
             sb.append(hitJson(hit));
         }
-        sb.append("]");
-        byte[] body = sb.toString().getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.sendResponseHeaders(200, body.length);
-        try (var out = ex.getResponseBody()) { out.write(body); }
+        return sb.append("]").toString();
     }
 
     /** Serializes one hit map as a JSON object {@code {id,title,path,srcPath,summary}}. Absent

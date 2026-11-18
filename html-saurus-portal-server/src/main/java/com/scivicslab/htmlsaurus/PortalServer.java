@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
  * (both JSON API and server-side rendered HTML), per-project search endpoints, per-project
  * static file serving, and on-demand build triggers via REST API.
  */
-public class PortalServer {
+public class PortalServer implements PortalReads {
 
     /** Represents a single Docusaurus project with its name, root directory, static output, search index paths, and default locale. */
     record Project(String name, Path projectDir, Path staticDir, Path indexDir, String defaultLocale) {}
@@ -41,11 +41,12 @@ public class PortalServer {
 
     private final List<Project> projects;
     private final Map<String, Project> projectMap;
-    private final ActorSystem searcherSystem = new ActorSystem("searcher-system");
+    /** The portal's actor system, which is also its node of the distributed actor system (ActorNodesForWorkspaceAndPortal_261118_oo01). */
+    private final com.scivicslab.pojoactor.distributed.DistributedIIActorSystem searcherSystem;
     /** The searchers, held in one place: the children of the actor "searchers" (ActorNodesForWorkspaceAndPortal_261118_oo01). */
-    private final SearcherTree searcherTree = new SearcherTree(searcherSystem);
+    private final SearcherTree searcherTree;
     /** Every reader's map of the searchers: a read-only view of {@link #searcherTree}. */
-    private final Map<String, ActorRef<LuceneSearcher>> searchers = searcherTree.view();
+    private final Map<String, ActorRef<LuceneSearcher>> searchers;
     /** Maps searcher key → locale string for language-filtered search. */
     private final Map<String, String> searcherLocales = new LinkedHashMap<>();
     /** The searcher the MCP handler starts from. Re-derived whenever a scan removes a project,
@@ -97,8 +98,7 @@ public class PortalServer {
     /** The PDF imports this process is running, and how far each has got
      *  ({@code WhereJobControlBelongs_260901_oo01}). Finished jobs stay readable for an hour so a
      *  browser that was away can still collect the outcome. */
-    private final com.scivicslab.jobregistry.JobRegistry batchJobs =
-            new com.scivicslab.jobregistry.JobRegistry(searcherSystem, 60 * 60 * 1000L);
+    private final com.scivicslab.jobregistry.JobRegistry batchJobs;
     /** Number of not-yet-completed OCR pages {@link GpuBrokerOcrClient} allows in flight per
      *  backend before {@code client.submit} blocks the calling {@code PdfImportJobActor}'s
      *  thread -- generous relative to this codebase's actual concurrent-import-job count, since
@@ -190,6 +190,10 @@ public class PortalServer {
      */
     public PortalServer(Path worksDir, List<Path> projectDirs, int port,
                         SemanticIndex semanticIndex, int threads, BasePath base, Path noticeFile, boolean mcp) {
+        this.searcherSystem = PortalNode.buildSystem(PortalNode.name(port), PortalNode.actorPort(port));
+        this.searcherTree = new SearcherTree(searcherSystem);
+        this.searchers = searcherTree.view();
+        this.batchJobs = new com.scivicslab.jobregistry.JobRegistry(searcherSystem, 60 * 60 * 1000L);
         this.mcpEnabled = mcp;
         this.base = base;
         this.noticeFile = noticeFile;
@@ -392,7 +396,9 @@ public class PortalServer {
         server.createContext("/", this::handleAll);
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
-        Runtime.getRuntime().addShutdownHook(new Thread(searcherSystem::terminate));
+        openNode();
+        // close, not terminate: it also stops the node's receiver.
+        Runtime.getRuntime().addShutdownHook(new Thread(searcherSystem::close));
         System.out.println("Portal at http://localhost:" + server.getAddress().getPort());
         System.out.println("Press Ctrl+C to stop.");
         return server;
@@ -2828,10 +2834,42 @@ public class PortalServer {
         String q = queryParam(ex, "q");
         String lang = queryParam(ex, "lang");
         if (lang.isBlank()) lang = "ja";
-        List<Map<String, String>> hits = globalSearch(q);
+        byte[] body = searchJson(q).getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
+        ex.sendResponseHeaders(200, body.length);
+        try (var out = ex.getResponseBody()) { out.write(body); }
+    }
+
+    /**
+     * Opens this portal's node: the gateway {@value PortalNode#GATEWAY} at the root of the tree, and the receiver on
+     * 127.0.0.1 at the actor port. A portal without an actor port (HTTP port 0), or one whose actor port is taken,
+     * runs on without the node: the pages and the HTTP API do not depend on it.
+     */
+    private void openNode() {
+        var me = searcherSystem.getMyNode();
+        if (me.getPort() <= 0) return;
+        try {
+            PortalNode.open(searcherSystem, new PortalGateway(this), PortalNode.BIND);
+            System.out.println("Node " + me.getNodeId() + " takes messages on " + PortalNode.BIND + ":" + me.getPort()
+                    + "; other nodes may call " + PortalNode.GATEWAY + " " + PortalNode.ACTIONS);
+        } catch (IOException e) {
+            System.err.println("Node " + me.getNodeId() + " could not listen on " + PortalNode.BIND + ":" + me.getPort()
+                    + " (" + e.getMessage() + "); other nodes cannot reach this portal");
+        }
+    }
+
+    // ---- The reads another node may ask for (ActorNodesForWorkspaceAndPortal_261118_oo01) ----
+    // The HTTP handlers and the node's gateway (PortalGateway) answer from these same methods, so the
+    // two cannot answer differently.
+
+    /** Full-text search across every project, as {@code GET /api/search} answers it. */
+    @Override
+    public String searchJson(String q) {
         var sb = new StringBuilder("[");
         boolean first = true;
-        for (var hit : hits) {
+        for (var hit : globalSearch(q == null ? "" : q)) {
             if (!first) sb.append(",");
             first = false;
             sb.append("{")
@@ -2844,13 +2882,55 @@ public class PortalServer {
               .append("\"summary\":").append(jsonStr(hit.get("summary")))
               .append("}");
         }
-        sb.append("]");
-        byte[] body = sb.toString().getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        ex.getResponseHeaders().set("X-Frame-Options", "DENY");
-        ex.sendResponseHeaders(200, body.length);
-        try (var out = ex.getResponseBody()) { out.write(body); }
+        return sb.append("]").toString();
+    }
+
+    /** Query-to-document semantic search, as {@code GET /api/search-semantic} answers it. */
+    @Override
+    public String searchSemanticJson(String q) {
+        return RelatedDocsView.hitsJson(semanticSearch(q == null ? "" : q));
+    }
+
+    /** Documents like {@code text}, as {@code POST /api/find-related} answers it. */
+    @Override
+    public String findRelatedJson(String text) {
+        List<Map<String, String>> hits;
+        try {
+            hits = moreLikeThisAllLocales(text == null ? "" : text.strip(), "");
+        } catch (Exception e) {
+            System.err.println("find-related error: " + e.getMessage());
+            hits = List.of();
+        }
+        return RelatedDocsView.hitsJson(hits);
+    }
+
+    /**
+     * The reference edges of a document, as {@code GET /api/prerequisites} ({@code forward}) or
+     * {@code GET /api/prerequisite-of} ({@code backward}) answer them; empty when {@code id} resolves to no document.
+     */
+    @Override
+    public java.util.Optional<String> referencesJson(String id, boolean forward) {
+        Map<String, String> self = id == null || id.isBlank() ? null : resolveDocRef(id);
+        if (self == null) return java.util.Optional.empty();
+        List<Map<String, String>> hits = forward
+                ? prerequisitesFor(self.getOrDefault("srcPath", ""))
+                : prerequisiteOfIndexNow().getOrDefault(self.getOrDefault("id", ""), List.of());
+        return java.util.Optional.of(RelatedDocsView.hitsJson(hits));
+    }
+
+    /**
+     * The Markdown of one document this portal serves, as it is on disk: {@code path} is relative to the works
+     * directory, as {@code GET /api/source} takes it, and must name a {@code .md} file under the {@code docs/}
+     * directory of a project this portal has registered (decision 6). Empty for anything else.
+     */
+    @Override
+    public java.util.Optional<String> readServedDocument(String path) throws IOException {
+        if (path == null || path.isBlank()) return java.util.Optional.empty();
+        Path file = worksDir.resolve(path).normalize();
+        boolean served = file.getFileName() != null && file.getFileName().toString().endsWith(".md")
+                && projects.stream().anyMatch(p -> file.startsWith(p.projectDir().resolve("docs").normalize()))
+                && Files.isRegularFile(file);
+        return served ? java.util.Optional.of(Files.readString(file, StandardCharsets.UTF_8)) : java.util.Optional.empty();
     }
 
     /**
@@ -3062,7 +3142,7 @@ public class PortalServer {
 
     /** GET /api/search-semantic?q=... — query-to-doc semantic search as JSON. */
     private void handleSearchSemantic(HttpExchange ex) throws IOException {
-        RelatedDocsView.writeJson(ex, semanticSearch(queryParam(ex, "q")));
+        RelatedDocsView.writeJsonText(ex, searchSemanticJson(queryParam(ex, "q")));
     }
 
     /** GET /search-semantic?q=... — semantic search results page (with a query box). */
@@ -3184,18 +3264,10 @@ public class PortalServer {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
-        String text = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8).strip();
-
-        List<Map<String, String>> hits;
-        try {
-            hits = moreLikeThisAllLocales(text, "");
-        } catch (Exception e) {
-            System.err.println("find-related error: " + e.getMessage());
-            hits = List.of();
-        }
+        String text = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         // The same writer /api/related and /api/search-semantic use, so all three routes answer
         // with one hit shape.
-        RelatedDocsView.writeJson(ex, hits);
+        RelatedDocsView.writeJsonText(ex, findRelatedJson(text));
     }
 
     /**
