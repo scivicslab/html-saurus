@@ -75,4 +75,10 @@ class ExternalLinksTest {
                         + "  url: 'https://real.example',\n};");
         assertEquals("real.example", ExternalLinks.ownHostOf(repo));
     }
+
+    @Test
+    void anAddressInsideAnHtmlCommentIsNotCollected() throws IOException {
+        page("a", "<!-- <a href=\"https://hidden.example/x\">h</a> --><a href=\"https://shown.example/y\">s</a>");
+        assertEquals(List.of("https://shown.example/y"), List.copyOf(ExternalLinks.collect(site).keySet()));
+    }
 }

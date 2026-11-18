@@ -72,6 +72,8 @@ public final class LinkChecker {
     /** The locale directory a page sits under, such as {@code /en/}. */
     private static final Pattern LOCALE_PREFIX = Pattern.compile("^/[a-z]{2}(?:-[A-Za-z]{2,4})?/");
     private static final Pattern ENTITY = Pattern.compile("&(?:#(\\d+)|#[xX]([0-9a-fA-F]+)|([A-Za-z]+));");
+    /** An HTML comment: the converter keeps one with the links inside it turned into anchors. */
+    static final Pattern COMMENT = Pattern.compile("<!--.*?-->", Pattern.DOTALL);
     private static final Pattern SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*:");
 
     /**
@@ -116,7 +118,9 @@ public final class LinkChecker {
         List<Finding> findings = new ArrayList<>();
         for (String pageFile : pages) {
             String pageUrl = urlOf(pageFile);
-            String html = Files.readString(siteDir.resolve(pageFile.substring(1)), StandardCharsets.UTF_8);
+            // A reader never sees a comment, so a link inside one is not a link.
+            String html = COMMENT.matcher(
+                    Files.readString(siteDir.resolve(pageFile.substring(1)), StandardCharsets.UTF_8)).replaceAll("");
             Set<String> seen = new LinkedHashSet<>();
             if (refs != null && !refs.isEmpty()) {
                 Matcher ref = DOC_REFERENCE.matcher(html);
@@ -235,7 +239,7 @@ public final class LinkChecker {
     private static Set<String> anchorsOf(Path file) {
         Set<String> ids = new HashSet<>();
         try {
-            Matcher m = ANCHOR.matcher(Files.readString(file, StandardCharsets.UTF_8));
+            Matcher m = ANCHOR.matcher(COMMENT.matcher(Files.readString(file, StandardCharsets.UTF_8)).replaceAll(""));
             while (m.find()) ids.add(unescape(m.group(1) != null ? m.group(1) : m.group(2)));
         } catch (IOException e) {
             // An unreadable target has no anchors to offer, so a fragment aimed at it is reported.

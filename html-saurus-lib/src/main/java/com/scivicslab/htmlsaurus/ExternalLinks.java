@@ -63,7 +63,7 @@ public final class ExternalLinks {
         for (Path page : pages) {
             String rel = "/" + siteDir.relativize(page).toString().replace('\\', '/');
             String url = rel.endsWith("/index.html") ? rel.substring(0, rel.length() - "index.html".length()) : rel;
-            Matcher m = ANCHOR.matcher(Files.readString(page, StandardCharsets.UTF_8));
+            Matcher m = ANCHOR.matcher(LinkChecker.COMMENT.matcher(Files.readString(page, StandardCharsets.UTF_8)).replaceAll(""));
             while (m.find()) {
                 String href = LinkChecker.unescape(m.group(1) != null ? m.group(1) : m.group(2)).strip();
                 if (!(href.startsWith("http://") || href.startsWith("https://"))) continue;

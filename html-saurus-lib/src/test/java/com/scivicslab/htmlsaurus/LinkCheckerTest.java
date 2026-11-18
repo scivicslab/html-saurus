@@ -223,4 +223,13 @@ class LinkCheckerTest {
         page("a", "<a href=\"https://site.example/nowhere/\">x</a>");
         assertEquals(List.of(), LinkChecker.checkInternal(site, repo));
     }
+
+    @Test
+    void aLinkInsideAnHtmlCommentIsNotALinkAndItsIdIsNoTarget() throws IOException {
+        page("a", "<!--\n1. <a href=\"/nowhere\">hidden</a>\n--><a href=\"/b/#only-in-comment\">x</a>");
+        page("b", "<!-- <h2 id=\"only-in-comment\">no</h2> --><p>b</p>");
+        List<LinkChecker.Finding> f = check();
+        assertEquals(1, f.size(), f.toString());
+        assertEquals(LinkChecker.Kind.MISSING_FRAGMENT, f.get(0).kind());
+    }
 }
