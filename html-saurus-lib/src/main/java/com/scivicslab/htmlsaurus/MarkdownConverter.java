@@ -70,6 +70,13 @@ class MarkdownConverter {
      * Admonitions inside fenced code blocks are passed through unchanged.
      */
     String convertMarkdown(String markdown) {
+        // Math is hidden from CommonMark and restored after rendering, so that the browser's KaTeX
+        // auto-render sees the formulas exactly as written (see MathProtector).
+        MathProtector math = new MathProtector();
+        return math.restore(convertProtectedMarkdown(math.protect(markdown)));
+    }
+
+    private String convertProtectedMarkdown(String markdown) {
         // CommonMark ends an HTML block (type 6) at a blank line.
         // Tables with blank lines inside cells would be split: post-blank content
         // rendered as Markdown, and 4-space-indented <td> tags as code blocks.
