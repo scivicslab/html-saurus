@@ -139,7 +139,8 @@ public class PortalServer {
                 "yomitoku", new YomiTokuOcrClient(System.getenv("YOMITOKU_SERVER_URL")),
                 "marker", new MarkerOcrClient(System.getenv("MARKER_SERVER_URL")),
                 "yomitoku-marker", MergedOcrClient.direct(
-                        System.getenv("YOMITOKU_SERVER_URL"), System.getenv("MARKER_SERVER_URL"))
+                        System.getenv("YOMITOKU_SERVER_URL"), System.getenv("MARKER_SERVER_URL")),
+                TextLayerOcrClient.BACKEND_ID, new TextLayerOcrClient()
             );
         }
         return Map.of(
@@ -147,7 +148,9 @@ public class PortalServer {
                     YomiTokuOcrClient::buildRequest, YomiTokuOcrClient::parseResult),
             "marker", new GpuBrokerOcrClient(GPU_BROKER, "marker-ocr", "marker",
                     MarkerOcrClient::buildRequest, MarkerOcrClient::parseResult),
-            "yomitoku-marker", MergedOcrClient.viaGpuBroker(GPU_BROKER)
+            "yomitoku-marker", MergedOcrClient.viaGpuBroker(GPU_BROKER),
+            // Reads the PDF's own text; touches neither a GPU nor the broker.
+            TextLayerOcrClient.BACKEND_ID, new TextLayerOcrClient()
         );
     }
 
@@ -1861,6 +1864,7 @@ public class PortalServer {
                       <option value="yomitoku">YomiToku (Japanese, multi-column)</option>
                       <option value="marker">Marker (math/LaTeX, GPU)</option>
                       <option value="yomitoku-marker">YomiToku + Marker (Japanese with math)</option>
+                      <option value="text-layer">PDF text layer (no OCR; for PDFs made by TeX, Word, etc.)</option>
                     </select>
                   </div>
                   <div class="field">
@@ -1902,6 +1906,7 @@ public class PortalServer {
                       <option value="yomitoku">YomiToku (Japanese, multi-column)</option>
                       <option value="marker">Marker (math/LaTeX, GPU)</option>
                       <option value="yomitoku-marker">YomiToku + Marker (Japanese with math)</option>
+                      <option value="text-layer">PDF text layer (no OCR; for PDFs made by TeX, Word, etc.)</option>
                     </select>
                   </div>
                   <div class="field">
