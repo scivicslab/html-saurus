@@ -1,3 +1,38 @@
+# Export タブ: ディレクトリの全文書を 1 つの PDF にする（2026-11-19）
+
+## 経緯
+- `doc_AASG1` の `AAS-G1` のように、1 つの主題の文書が 1 つのディレクトリにまとまっている。渡す側が 1 本ずつ PDF にするのは負担で、受ける側がファイルを順に読むのも負担になる。
+- ポータルの左ペインに 4 つ目のタブ Export を足し、ディレクトリを選ぶと、その下の全文書をサイドバーの順に並べた 1 つの PDF を作る。設計は `ExportToPdf_261119_oo01`。
+
+## 方針（ユーザー・上長の決定）
+- 印刷は headless Chrome（Java から `ProcessBuilder` で起動）。KaTeX と Mermaid をページの中で描かせるため。Java だけの PDF 道具は採らない。
+- 選べるディレクトリは、文書が 2 本以上ある所と `docs/` の全体。1 つの選択肢の列にして、深さをインデントで見せる。
+- Export タブと `/api/export/*` は開発用の jar だけが持つ。公開用の jar には入れない。
+- E2E は Java Playwright の `main()`（`ExportTabE2E`）。Maven のテストには載せない。
+
+## Plan
+- [x] `PdfExportPlan`: サイドバーの木から部品（ディレクトリの見出しと文書）を順に決める
+- [x] `PdfExportHtml`: 各ページの `<main>` を 1 つの HTML にまとめる（表紙、目次、本文）
+- [x] `ChromePrinter`: Chrome の探し方と印刷
+- [x] `PdfExportFinish`: 目印からページを読み、ページ番号としおりを足す
+- [x] `PdfExportJob`: HTML の作り直し、2 回の印刷、仕上げを Batch Job として走らせる
+- [x] `PdfExportDirectories`: 選べるディレクトリの一覧
+- [x] `PortalServer`: Export タブ、`/api/export/*`、Batch Job の一覧の `Download`、`Clear` で作業ディレクトリを消す
+- [x] ユニットテスト（`@Tag("ExportToPdf_261119_oo01")`）と、公開用の jar にクラスが無いことのテスト
+- [x] `ExportTabE2E`（Java Playwright）を W206 の Pod で実行する
+- [x] `ExportToPdf_261119_oo01`、`ExportTabE2E_261119_oo01` の文書
+
+## Review
+- 直したもの: コンテナ内の Chromium は、`--disable-field-trial-config` が無いと 1 行のページでも印刷が終わらず、`--disable-dev-shm-usage` が無いと長いページで PDF を書かなかった（ログに `Cannot create new shared memory region`）。`ChromePrinter` に両方を足した。
+- 直したもの: 選んだディレクトリのほかに内容の無いプロジェクトで、表題が `docs` になり、見出しだけのページができた。選んだディレクトリの節まで、パスの深さだけ下りて決める。ディレクトリの見出しは、直後の部品と同じページに置く。文書 1 本の入れ物のディレクトリ（`scripts/` を持つもの）は文書として並べる。
+- 直したもの: 止まった仕事と失敗した仕事の作業ディレクトリが `Clear` で消えなかった。`ExportOutcome` が作業ディレクトリを持ち、`Clear` が消す。
+- 既存の `BatchJobListTest` の 2 つ目のテストは、背景のビルドが終わる前にテストを抜けるので、一時ディレクトリの削除が競合して失敗することがあった。ビルドの終了を待つようにした。
+- W206 の Pod で、`doc_AASG1` の複製の `AAS-G1`（文書 25 本）を PDF にして、158 ページ。目次の番号、しおり、見出しの位置、日本語、コードブロック、数式をページの画像で確かめた。
+- 試験: lib 249、build-only 4、production-server 19、portal-server 265。新規は portal-server が 15、production-server が 1。E2E は 18 項目。
+- 確かめていないこと: `mvn exec:java` 経由での E2E の実行（Pod に exec プラグインが無いので、`java -cp` で同じクラスを実行した）、5.12 の `google-chrome-stable` での印刷、Mermaid の図を含むページ。
+
+---
+
 # Import に「PDF の文字情報から取り込む（OCR なし）」を足す（2026-10-21）
 
 ## 経緯

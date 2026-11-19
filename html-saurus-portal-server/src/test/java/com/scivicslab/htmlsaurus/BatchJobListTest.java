@@ -90,6 +90,12 @@ class BatchJobListTest {
             }
             assertTrue(status.contains("\"project\":\"proj\""), status);
             assertTrue(status.contains("\"stage\":\"html\""), status);
+            // The build writes under the temp directory; leaving while it runs makes the cleanup fail.
+            for (int i = 0; i < 100 && status.contains("\"state\":\"running\""); i++) {
+                Thread.sleep(100);
+                status = request("GET", base + "/api/build-status?jobId=" + id);
+            }
+            assertFalse(status.contains("\"state\":\"running\""), "the build should have finished: " + status);
         } finally {
             http.stop(0);
         }

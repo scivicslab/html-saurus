@@ -594,6 +594,21 @@ public class PortalServer implements PortalReads {
             return;
         }
 
+        // Export tab: every document under one directory of a doc project as one PDF
+        // (ExportToPdf_261119_oo01). The job runs in the same JobRegistry as the imports.
+        if (path.equals("/api/export/dirs")) {
+            handleExportDirs(ex);
+            return;
+        }
+        if (path.equals("/api/export/pdf/start")) {
+            handleExportStart(ex);
+            return;
+        }
+        if (path.equals("/api/export/download")) {
+            handleExportDownload(ex);
+            return;
+        }
+
         // Import tab: the job endpoints below serve every import kind, not only PDF -- one
         // JobRegistry holds them all, so the Batch Job list is one list.
         if (path.equals("/api/import/status")) {
@@ -1756,6 +1771,7 @@ public class PortalServer implements PortalReads {
                 <button class="tab-btn active" id="tab-btn-projects" data-tab="projects" onclick="selectTab('projects')">Projects</button>
                 <button class="tab-btn" id="tab-btn-import" data-tab="import" onclick="selectTab('import')">Import</button>
                 <button class="tab-btn" id="tab-btn-batch" data-tab="batch" onclick="selectTab('batch')">Batch Job</button>
+                <button class="tab-btn" id="tab-btn-export" data-tab="export" onclick="selectTab('export')">Export</button>
               </div>
               <div class="tab-panel" id="tab-projects">
               <h2>Search</h2>
@@ -2016,6 +2032,25 @@ public class PortalServer implements PortalReads {
               <div id="import-jobs"></div>
               <p class="hint" id="batch-empty">Nothing running.</p>
               </div>
+              <div class="tab-panel" id="tab-export" hidden>
+              <h2>Export</h2>
+              <p class="hint">Every document under one directory of a project, as one PDF: in the order the
+                sidebar shows them, with the directories as headings and a table of contents with page
+                numbers. The project's HTML is rebuilt first. Making the PDF runs as a batch job.</p>
+              <div class="card">
+                <div class="field">
+                  <span class="field-label">Project</span>
+                  <select id="export-project"></select>
+                </div>
+                <div class="field">
+                  <span class="field-label">Directory (under docs/)</span>
+                  <select id="export-dir"></select>
+                </div>
+                <button class="btn btn-primary" id="export-start" type="button">Make PDF</button>
+                <span class="hint" id="export-status"></span>
+              </div>
+              <div id="export-jobs"></div>
+              </div>
             """);
 
         sb.append("<script>var BASE = " + jsonStr(base.prefix()) + ";</script>\n");
@@ -2147,7 +2182,8 @@ public class PortalServer implements PortalReads {
               document.querySelectorAll('.tab-panel').forEach(function(p) { p.hidden = (p.id !== 'tab-' + name); });
               document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === name); });
               localStorage.setItem('portal-active-tab', name);
-              if (name === 'batch' && typeof refreshImportJobs === 'function') refreshImportJobs();
+              if ((name === 'batch' || name === 'export') && typeof refreshImportJobs === 'function') refreshImportJobs();
+              if (name === 'export' && typeof populateExport === 'function') populateExport();
             }
             // A name stored before a tab was renamed matches no panel, which would hide all of
             // them and leave the sidebar blank.
@@ -2325,6 +2361,12 @@ public class PortalServer implements PortalReads {
                   + '. Translated blocks are kept.';
                 return 'Error: ' + (j.error || 'unknown');
               }
+              if (j.kind === 'export') {
+                if (j.state === 'running') return (j.phase || 'Working') + '...';
+                if (j.state === 'done') return 'Done: ' + j.exportPages + ' page(s), ' + j.exportDocuments + ' document(s).';
+                if (j.state === 'stopped') return 'Stopped. No PDF was made.';
+                return 'Error: ' + (j.error || 'unknown');
+              }
               if (j.kind === 'video') {
                 if (j.state === 'running') return (j.phase || 'Working') + '...';
                 if (j.state === 'done') return 'Done: ' + (j.lastFile || 'transcript saved')
@@ -2365,6 +2407,7 @@ public class PortalServer implements PortalReads {
                 const isBuild = j.kind === 'build' || j.kind === 'update-all-projects';
                 row.appendChild(name);
                 row.appendChild(line);
+                if (j.kind === 'export' && j.state === 'done') row.appendChild(exportDownloadLink(j));
                 // A running build is not offered a Stop button: it is one call into the builder,
                 // which never asks whether it should stop, so the button could only lie.
                 if (!(isBuild && j.state === 'running')) {
@@ -2383,6 +2426,7 @@ public class PortalServer implements PortalReads {
                 }
                 box.appendChild(row);
               });
+              renderExportJobs(jobs.filter(function (j) { return j.kind === 'export'; }));
               // The count on the tab is what makes a background import visible from any tab.
               const tab = document.getElementById('tab-btn-batch');
               if (tab) {
@@ -2391,6 +2435,88 @@ public class PortalServer implements PortalReads {
               }
               return anyRunning;
             }
+            // Export tab (ExportToPdf_261119_oo01): pick a project and a directory under its docs/, and
+            // make one PDF of every document under it. The job is listed here and in Batch Job.
+            function exportDownloadLink(j) {
+              const a = document.createElement('a');
+              a.className = 'btn';
+              a.textContent = 'Download';
+              a.href = BASE + '/api/export/download?jobId=' + encodeURIComponent(j.jobId);
+              a.setAttribute('download', j.exportFile || 'export.pdf');
+              return a;
+            }
+            function renderExportJobs(jobs) {
+              const box = document.getElementById('export-jobs');
+              if (!box) return;
+              box.innerHTML = '';
+              jobs.forEach(function (j) {
+                const row = document.createElement('div');
+                row.className = 'import-job';
+                const name = document.createElement('span');
+                name.className = 'import-job-label';
+                name.textContent = j.label;
+                const line = document.createElement('span');
+                line.className = 'import-job-line';
+                line.textContent = importJobLine(j);
+                row.appendChild(name);
+                row.appendChild(line);
+                if (j.state === 'done') row.appendChild(exportDownloadLink(j));
+                box.appendChild(row);
+              });
+            }
+            async function loadExportDirs() {
+              const project = document.getElementById('export-project').value;
+              const sel = document.getElementById('export-dir');
+              sel.innerHTML = '';
+              if (!project) return;
+              const r = await fetch(BASE + '/api/export/dirs?project=' + encodeURIComponent(project));
+              const j = await r.json();
+              (j.dirs || []).forEach(function (d) {
+                const opt = document.createElement('option');
+                opt.value = d;
+                // One select shows the depth by indentation: the last segment, two spaces per level above it.
+                const segments = d.split('/');
+                opt.textContent = d === '' ? '(whole project)'
+                  : '  '.repeat(segments.length - 1) + segments[segments.length - 1];
+                opt.title = d === '' ? 'docs/' : 'docs/' + d;
+                sel.appendChild(opt);
+              });
+            }
+            function populateExport() {
+              const sel = document.getElementById('export-project');
+              if (!sel || sel.options.length > 0) return;
+              Array.prototype.forEach.call(document.querySelectorAll('.project-name a.project-link'), function (a) {
+                const opt = document.createElement('option');
+                opt.value = a.textContent; opt.textContent = a.textContent;
+                sel.appendChild(opt);
+              });
+              sel.addEventListener('change', loadExportDirs);
+              loadExportDirs();
+            }
+            (function () {
+              const btn = document.getElementById('export-start');
+              if (!btn) return;
+              btn.addEventListener('click', async function () {
+                const status = document.getElementById('export-status');
+                btn.disabled = true;
+                status.textContent = 'Starting...';
+                try {
+                  const r = await fetch(BASE + '/api/export/pdf/start', {method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({project: document.getElementById('export-project').value,
+                                          dir: document.getElementById('export-dir').value})});
+                  const j = await r.json();
+                  status.textContent = r.ok ? 'Started.' : 'Could not start: ' + (j.error || r.status);
+                } catch (e) {
+                  status.textContent = 'Could not start: ' + e;
+                }
+                btn.disabled = false;
+                refreshImportJobs();
+              });
+              // The page may open on this tab (the last one used): fill it now.
+              const panel = document.getElementById('tab-export');
+              if (panel && !panel.hidden) { populateExport(); refreshImportJobs(); }
+            })();
             var importJobsTimer = null;
             async function refreshImportJobs() {
               let jobs;
@@ -3696,11 +3822,93 @@ public class PortalServer implements PortalReads {
         Map<String, Object> body = McpJsonParser.parseObject(
             new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         String jobId = body.get("jobId") instanceof String s ? s : null;
+        com.scivicslab.jobregistry.Job<?> cleared = jobId == null ? null : batchJobs.get(jobId);
         if (jobId == null || !batchJobs.remove(jobId)) {
             respond(ex, 409, "application/json", "{\"error\":\"still running, or no such job\"}");
             return;
         }
+        // An export's PDF goes with its job (ExportToPdf_261119_oo01).
+        if (cleared != null && cleared.result() instanceof ExportOutcome out) {
+            PdfExportJob.deleteDirectory(out.workDirectory());
+        }
         respond(ex, 200, "application/json", "{\"status\":\"ok\"}");
+    }
+
+    /**
+     * Handles {@code GET /api/export/dirs?project=...}: the directories under the project's {@code docs/} that hold at
+     * least one document, as paths relative to {@code docs/}, the whole project ({@code ""}) first
+     * (ExportToPdf_261119_oo01).
+     */
+    private void handleExportDirs(HttpExchange ex) throws IOException {
+        Project proj = projectMap.get(queryParam(ex, "project"));
+        if (proj == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
+            return;
+        }
+        List<String> dirs = PdfExportDirectories.listDirectoriesToOffer(proj.projectDir().resolve("docs"));
+        StringBuilder sb = new StringBuilder("{\"dirs\":[");
+        for (int i = 0; i < dirs.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(jsonStr(dirs.get(i)));
+        }
+        respond(ex, 200, "application/json", sb.append("]}").toString());
+    }
+
+    /**
+     * Handles {@code POST /api/export/pdf/start}. JSON body {@code {"project": "...", "dir": "..."}}, {@code dir}
+     * relative to the project's {@code docs/} ({@code ""} for the whole project). Starts an export job and answers its
+     * id at once (ExportToPdf_261119_oo01).
+     */
+    private void handleExportStart(HttpExchange ex) throws IOException {
+        if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            respond(ex, 405, "text/plain", "Method Not Allowed");
+            return;
+        }
+        Map<String, Object> body = McpJsonParser.parseObject(
+            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        Project proj = body.get("project") instanceof String s ? projectMap.get(s) : null;
+        if (proj == null) {
+            respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
+            return;
+        }
+        String dir = body.get("dir") instanceof String s ? s.replace('\\', '/').replaceAll("^/+|/+$", "") : "";
+        Path docs = proj.projectDir().resolve("docs").normalize();
+        Path chosen = docs.resolve(dir).normalize();
+        if (!chosen.startsWith(docs) || !Files.isDirectory(chosen)) {
+            respond(ex, 400, "application/json", "{\"error\":\"no such directory under docs/: " + dir.replace("\"", "") + "\"}");
+            return;
+        }
+        java.util.Optional<Path> chrome = ChromePrinter.findChrome();
+        if (chrome.isEmpty()) {
+            respond(ex, 500, "application/json", "{\"error\":\"no Chrome to print with: set -D" + ChromePrinter.PROPERTY
+                + " or put one of " + ChromePrinter.CANDIDATES + " on PATH\"}");
+            return;
+        }
+        Path workDir = Files.createTempDirectory("html-saurus-export-");
+        PdfExportJob work = new PdfExportJob(proj.name(), docs, proj.staticDir(), dir, workDir,
+            new ChromePrinter(chrome.get()), () -> runBuildStage(proj, "html"));
+        String label = proj.name() + (dir.isEmpty() ? "" : "/" + dir);
+        com.scivicslab.jobregistry.Job<?> job = batchJobs.submit("export", label, work::exportToPdf, System.currentTimeMillis());
+        respond(ex, 202, "application/json", "{\"jobId\":" + jsonStr(job.id()) + "}");
+    }
+
+    /** Handles {@code GET /api/export/download?jobId=...}: the PDF of a finished export, as a download. */
+    private void handleExportDownload(HttpExchange ex) throws IOException {
+        com.scivicslab.jobregistry.Job<?> job = batchJobs.get(queryParam(ex, "jobId"));
+        if (job == null || !(job.result() instanceof ExportOutcome out) || out.pdf() == null
+                || !Files.isRegularFile(out.pdf())) {
+            respond(ex, 404, "application/json", "{\"error\":\"no finished export with that jobId\"}");
+            return;
+        }
+        byte[] pdf = Files.readAllBytes(out.pdf());
+        String name = out.pdf().getFileName().toString();
+        ex.getResponseHeaders().set("Content-Type", "application/pdf");
+        ex.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"" + name.replaceAll("[^A-Za-z0-9._-]", "_")
+            + "\"; filename*=UTF-8''" + java.net.URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20"));
+        ex.sendResponseHeaders(200, pdf.length);
+        try (java.io.OutputStream os = ex.getResponseBody()) {
+            os.write(pdf);
+        }
     }
 
     /** One import as the Import screen reads it. Shared by the list and the single-job status.
@@ -3724,6 +3932,10 @@ public class PortalServer implements PortalReads {
             + ",\"lastFile\":" + jsonStr(r.lastFile()) + ",\"totalImages\":" + r.totalImages()
             + ",\"state\":" + jsonStr(state)
             + ",\"message\":" + jsonStr(job.result() instanceof BuildOutcome b ? b.message() : "")
+            + (job.result() instanceof ExportOutcome e
+                ? ",\"exportPages\":" + e.pages() + ",\"exportDocuments\":" + e.documents()
+                  + ",\"exportFile\":" + jsonStr(e.pdf() == null ? "" : e.pdf().getFileName().toString())
+                : "")
             + ",\"error\":" + (job.state() == com.scivicslab.jobregistry.Job.State.ERROR
                                  ? jsonStr(job.error()) : "null") + "}";
     }
