@@ -25,6 +25,8 @@ final class ExportPortalTestSupport {
     final HttpClient client = HttpClient.newHttpClient();
     final Path tempDir;
     private HttpServer http;
+    /** The portal the tests talk to, for the places a test may plug a stand-in into. */
+    PortalServer portalServer;
     private String previousChrome;
 
     ExportPortalTestSupport(Path tempDir) {
@@ -40,7 +42,8 @@ final class ExportPortalTestSupport {
         Files.writeString(project.resolve("docs/A/one.md"), "---\ntitle: One\n---\n\nBody.\n");
         Files.writeString(project.resolve("docs/A/two.md"), "---\ntitle: Two\n---\n\nBody.\n");
         BuildStages.build(project.resolve("docs"), project.resolve("static-html"), false);
-        http = new PortalServer(tempDir, List.of(project), 0, null, 0).start();
+        portalServer = new PortalServer(tempDir, List.of(project), 0, null, 0);
+        http = portalServer.start();
         return "http://localhost:" + http.getAddress().getPort();
     }
 
@@ -90,6 +93,15 @@ final class ExportPortalTestSupport {
         if (at < 0) return "(not listed)";
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"state\":\"([a-z]+)\"").matcher(list.substring(at));
         return m.find() ? m.group(1) : "(no state)";
+    }
+
+    /** @return what a job says it is doing, as the Batch Job list shows it */
+    String phaseOf(String base, String jobId) throws Exception {
+        String list = get(base + "/api/import/jobs").body();
+        int at = list.indexOf("\"jobId\":\"" + jobId + "\"");
+        if (at < 0) return "(not listed)";
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"phase\":\"([^\"]*)\"").matcher(list.substring(at));
+        return m.find() ? m.group(1) : "(no phase)";
     }
 
     /** Waits until a job is in the state, or the time is up; returns the state seen last. */

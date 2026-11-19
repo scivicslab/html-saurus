@@ -623,10 +623,6 @@ class PageRenderer {
         return m.matches() ? m.group(2) : name;
     }
 
-    /**
-     * Strips numeric prefixes from every segment of a relative path.
-     * E.g., {@code 010_history/020_intro/file.html} → {@code history/intro/file.html}
-     */
     /** The link tag for the stylesheet of KaTeX's fonts and layout; the PDF export loads the same one. */
     static final String KATEX_STYLESHEET = """
               <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
@@ -634,6 +630,10 @@ class PageRenderer {
                 crossorigin="anonymous">
             """;
 
+    /**
+     * Strips numeric prefixes from every segment of a relative path.
+     * E.g., {@code 010_history/020_intro/file.html} → {@code history/intro/file.html}
+     */
     static String cleanRelPath(String relPath) {
         String[] segments = relPath.split("/");
         StringBuilder sb = new StringBuilder();

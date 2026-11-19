@@ -127,4 +127,27 @@ class ExportStartLoggingTest {
         for (int i = 0; i < 200 && !logged(Level.SEVERE, "Export failed"); i++) Thread.sleep(50);
         assertTrue(logged(Level.SEVERE, "Export failed", "proj"), "log: " + records.stream().map(LogRecord::getMessage).toList());
     }
+
+    @Test
+    void stop_whenAnExportIsStopped_logsThatItWasStopped_notThatItFailed() throws Exception {
+        String base = startPortal();
+        Path chrome = tempDir.resolve("hanging-chrome.sh");
+        Files.writeString(chrome, "#!/bin/sh\nsleep 300 &\nwait\n");
+        Files.setPosixFilePermissions(chrome, PosixFilePermissions.fromString("rwxr-xr-x"));
+        System.setProperty(ChromePrinter.PROPERTY, chrome.toString());
+        String jobId = ExportPortalTestSupport.jobIdOf(start(base, "{\"project\":\"proj\",\"dir\":\"A\"}").body());
+        // Stop is refused while the HTML is rebuilt; wait until the job prints.
+        for (int i = 0; i < 200; i++) {
+            String jobs = client.send(HttpRequest.newBuilder(URI.create(base + "/api/import/jobs")).build(), HttpResponse.BodyHandlers.ofString()).body();
+            if (jobs.contains("Printing")) break;
+            Thread.sleep(50);
+        }
+
+        client.send(HttpRequest.newBuilder(URI.create(base + "/api/import/stop")).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"jobId\":\"" + jobId + "\"}")).build(), HttpResponse.BodyHandlers.ofString());
+
+        for (int i = 0; i < 200 && !logged(Level.INFO, "Export stopped"); i++) Thread.sleep(50);
+        assertTrue(logged(Level.INFO, "Export stopped", "proj"), "log: " + records.stream().map(LogRecord::getMessage).toList());
+        assertTrue(records.stream().noneMatch(r -> r.getLevel().equals(Level.SEVERE)), "a stop was logged as a failure");
+    }
 }

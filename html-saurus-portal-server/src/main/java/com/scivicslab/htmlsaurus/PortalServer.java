@@ -103,6 +103,10 @@ public class PortalServer implements PortalReads {
     /** One lock per project, held while an export rebuilds the project's HTML and reads it (ExportToPdf_261119_oo01). */
     private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantLock> exportLocks =
         new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * How an export rebuilds a project's HTML. The builder is the default; a test plugs in a rebuild it can hold up.
+     */
+    volatile java.util.function.Function<Project, PdfExportJob.HtmlBuild> exportHtmlBuild = proj -> () -> rebuildHtmlOf(proj);
     /** The work directory of each export, so that the ones of jobs the registry forgot can be deleted. */
     private final ExportWorkDirectories exportWorkDirectories = new ExportWorkDirectories();
     /** Number of not-yet-completed OCR pages {@link GpuBrokerOcrClient} allows in flight per
@@ -3933,7 +3937,7 @@ public class PortalServer implements PortalReads {
         String directory = docs.relativize(chosen).toString().replace('\\', '/');
         Path workDir = Files.createTempDirectory(PdfExportJob.WORK_DIRECTORY_PREFIX);
         PdfExportJob work = new PdfExportJob(proj.name(), docs, proj.staticDir(), directory, workDir,
-            new ChromePrinter(chrome.get()), () -> rebuildHtmlOf(proj),
+            new ChromePrinter(chrome.get()), exportHtmlBuild.apply(proj),
             exportLocks.computeIfAbsent(proj.name(), name -> new java.util.concurrent.locks.ReentrantLock()));
         String label = proj.name() + (directory.isEmpty() ? "" : "/" + directory);
         com.scivicslab.jobregistry.Job<?> job = batchJobs.submit("export", label, work::exportToPdf, System.currentTimeMillis());

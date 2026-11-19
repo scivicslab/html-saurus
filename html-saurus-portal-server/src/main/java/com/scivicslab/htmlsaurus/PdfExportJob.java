@@ -162,7 +162,12 @@ final class PdfExportJob {
             LOGGER.log(Level.INFO, "Export done: project {0}, directory ''{1}'', {2} pages{3}",
                     new Object[] {project, dirRel, total, warning.isEmpty() ? "" : "; " + warning});
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Export failed: project {0}, directory ''{1}'': {2}", new Object[] {project, dirRel, e.toString()});
+            // Stop cancels the job first and interrupts the thread after, so a stopped export is already terminal here.
+            if (job.isTerminal()) {
+                LOGGER.log(Level.INFO, "Export stopped: project {0}, directory ''{1}''", new Object[] {project, dirRel});
+            } else {
+                LOGGER.log(Level.SEVERE, "Export failed: project {0}, directory ''{1}'': {2}", new Object[] {project, dirRel, e.toString()});
+            }
             throw e;
         } finally {
             deleteIntermediateFiles();

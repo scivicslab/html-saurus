@@ -9,7 +9,6 @@ class PageScripts {
         return render(BasePath.current());
     }
 
-    /** The script block for a server reached below {@code base}: the calls it makes to the server are written through it. */
     /**
      * The script tags that draw diagrams (Mermaid) and formulas (KaTeX). A page and the PDF export both load them from
      * here, so the version, the integrity hash and the way a diagram or a formula is drawn are the same on screen and
@@ -35,6 +34,7 @@ class PageScripts {
             """.replace("YADOC_BEFORE_MERMAID ", beforeMermaidStartsUp.isEmpty() ? "" : beforeMermaidStartsUp + " ");
     }
 
+    /** The script block for a server reached below {@code base}: the calls it makes to the server are written through it. */
     static String render(BasePath base) {
         return (diagramAndMathScripts("var BASE = 'YADOC_BASE_PATH';") + """
             <script>

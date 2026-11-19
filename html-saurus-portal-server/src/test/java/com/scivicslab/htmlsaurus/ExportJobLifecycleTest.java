@@ -153,4 +153,33 @@ class ExportJobLifecycleTest {
         assertFalse(Files.exists(work), "the work directory of a finished job is left");
         assertEquals(404, portal.get(base + "/api/export/download?jobId=" + jobId).statusCode());
     }
+
+    @Test
+    void stop_whileTheHtmlIsRebuilt_isRefusedWith409_andTheJobKeepsRunning() throws Exception {
+        portal = new ExportPortalTestSupport(tempDir);
+        String base = portal.startPortal();
+        portal.useChrome(portal.script("silent-chrome.sh", "exit 0\n"));
+        java.util.concurrent.CountDownLatch rebuilding = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch finish = new java.util.concurrent.CountDownLatch(1);
+        // A rebuild that takes as long as the test wants, in the place of the builder.
+        portal.portalServer.exportHtmlBuild = project -> () -> {
+            rebuilding.countDown();
+            finish.await();
+            return true;
+        };
+        try {
+            String jobId = ExportPortalTestSupport.jobIdOf(portal.post(base + "/api/export/pdf/start", "{\"project\":\"proj\",\"dir\":\"A\"}").body());
+            assertTrue(rebuilding.await(10, java.util.concurrent.TimeUnit.SECONDS), "the rebuild did not start");
+            assertEquals(PdfExportJob.PHASE_BUILDING_THE_HTML, portal.phaseOf(base, jobId));
+
+            HttpResponse<String> answer = portal.post(base + "/api/import/stop", "{\"jobId\":\"" + jobId + "\"}");
+
+            assertEquals(409, answer.statusCode(), answer.body());
+            assertTrue(answer.body().contains("rebuilding"), answer.body());
+            Thread.sleep(300);
+            assertEquals("running", portal.stateOf(base, jobId), "the refused Stop ended the job");
+        } finally {
+            finish.countDown();
+        }
+    }
 }
