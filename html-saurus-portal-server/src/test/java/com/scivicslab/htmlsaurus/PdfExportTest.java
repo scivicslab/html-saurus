@@ -296,4 +296,22 @@ class PdfExportTest {
         assertFalse(PdfExportFinish.textContainsAny(pdf, List.of("$F=ma$")));
         assertFalse(PdfExportFinish.textContainsAny(pdf, List.of()));
     }
+
+    /** The script tags that load from the CDN, with their attributes, as one line each. */
+    private static List<String> cdnScriptTags(String html) {
+        List<String> tags = new java.util.ArrayList<>();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("<script[^>]*cdn\\.jsdelivr\\.net[^>]*>", java.util.regex.Pattern.DOTALL).matcher(html);
+        while (m.find()) tags.add(m.group().replaceAll("\\s+", " "));
+        return tags;
+    }
+
+    @Test
+    void renderCombinedHtml_loadsKatexAndMermaidThroughTheSameTagsAsAPageOnScreen() throws Exception {
+        PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
+        String printed = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", dir.resolve("static-html"), Map.of());
+        List<String> onScreen = cdnScriptTags(PageScripts.render());
+        assertEquals(3, onScreen.size(), "a page loads Mermaid, KaTeX and its auto-render script: " + onScreen);
+        assertEquals(onScreen, cdnScriptTags(printed), "the versions, integrity hashes and the draw call match the screen's");
+        assertTrue(printed.replaceAll("\\s+", " ").contains("mermaid.initialize({startOnLoad: true});"), "the diagrams are drawn as on screen");
+    }
 }

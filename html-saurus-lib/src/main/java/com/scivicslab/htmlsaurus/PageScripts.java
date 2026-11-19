@@ -10,12 +10,20 @@ class PageScripts {
     }
 
     /** The script block for a server reached below {@code base}: the calls it makes to the server are written through it. */
-    static String render(BasePath base) {
+    /**
+     * The script tags that draw diagrams (Mermaid) and formulas (KaTeX). A page and the PDF export both load them from
+     * here, so the version, the integrity hash and the way a diagram or a formula is drawn are the same on screen and
+     * in print.
+     *
+     * @param beforeMermaidStartsUp statements the inline script runs before it starts Mermaid; empty for none
+     * @return the tags, one after the other, ending in a line break
+     */
+    static String diagramAndMathScripts(String beforeMermaidStartsUp) {
         return """
             <script src="https://cdn.jsdelivr.net/npm/mermaid@11.13.0/dist/mermaid.min.js"
               integrity="sha384-tI0sDqjGJcqrQ8e/XKiQGS+ee11v5knTNWx2goxMBxe4DO9U0uKlfxJtYB9ILZ4j"
               crossorigin="anonymous"></script>
-            <script>var BASE = 'YADOC_BASE_PATH'; mermaid.initialize({startOnLoad: true});</script>
+            <script>YADOC_BEFORE_MERMAID mermaid.initialize({startOnLoad: true});</script>
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
               integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg"
               crossorigin="anonymous"></script>
@@ -24,6 +32,11 @@ class PageScripts {
               crossorigin="anonymous"
               onload="renderMathInElement(document.body, {delimiters: [
                 {left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});"></script>
+            """.replace("YADOC_BEFORE_MERMAID ", beforeMermaidStartsUp.isEmpty() ? "" : beforeMermaidStartsUp + " ");
+    }
+
+    static String render(BasePath base) {
+        return (diagramAndMathScripts("var BASE = 'YADOC_BASE_PATH';") + """
             <script>
             (function() {
               var toggle = document.getElementById('menu-toggle');
@@ -623,6 +636,6 @@ class PageScripts {
               });
             })();
             </script>
-            """.replace("YADOC_BASE_PATH", base.prefix());
+            """).replace("YADOC_BASE_PATH", base.prefix());
     }
 }

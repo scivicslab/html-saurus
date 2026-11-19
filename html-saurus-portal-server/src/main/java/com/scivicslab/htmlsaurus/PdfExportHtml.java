@@ -50,23 +50,14 @@ final class PdfExportHtml {
         StringBuilder sb = new StringBuilder();
         sb.append("<!DOCTYPE html>\n<html lang=\"ja\" data-theme=\"").append(THEME).append("\">\n<head>\n<meta charset=\"UTF-8\">\n");
         sb.append("<title>").append(esc(plan.title())).append("</title>\n");
-        sb.append("""
-            <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap">
-            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-            """);
+        sb.append("<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap\">\n");
+        // The tags that draw formulas and diagrams are the page's own, so print and screen draw them the same way.
+        sb.append(PageRenderer.KATEX_STYLESHEET);
         sb.append("<style>\n").append(pageCss()).append("\n</style>\n");
         sb.append("<style>\n").append(HttpUtils.themeVariables()).append(HttpUtils.docThemeMapping()).append("\n</style>\n");
         sb.append("<style>\n").append(PRINT_CSS).append("\n</style>\n");
-        sb.append("""
-            <script src="https://cdn.jsdelivr.net/npm/mermaid@11.13.0/dist/mermaid.min.js"></script>
-            <script>mermaid.initialize({startOnLoad: true});</script>
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
-              onload="renderMathInElement(document.body, {delimiters: [
-                {left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});"></script>
-            </head>
-            <body>
-            """);
+        sb.append(PageScripts.diagramAndMathScripts(""));
+        sb.append("</head>\n<body>\n");
 
         // Cover
         sb.append("<section class=\"hs-cover\"><div class=\"hs-cover-title\">").append(esc(plan.title()))

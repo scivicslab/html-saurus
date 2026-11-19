@@ -56,6 +56,9 @@ import org.apache.pdfbox.text.PDFTextStripperByArea;
  *   mvn test-compile exec:java -Dexec.mainClass=com.scivicslab.htmlsaurus.ExportTabE2E -Dexec.classpathScope=test
  * </pre>
  *
+ * <p>{@code EXPORT_DOCS}, when given, is the project's {@code docs/} directory; the cover's title is then checked against the
+ * name the sidebar shows for {@code EXPORT_DIR}, which {@code _category_.json} can change.
+ *
  * <p>The PDF is saved as {@code EXPORT_OUT/export.pdf}; the first pages and the pages named by {@code EXPORT_PAGES}
  * (comma-separated page numbers) are rendered to {@code EXPORT_OUT/page-N.png} to be looked at.
  */
@@ -65,6 +68,8 @@ public class ExportTabE2E {
     private static final String PROJECT = System.getenv().getOrDefault("EXPORT_PROJECT", "doc_AASG1");
     private static final String DIRECTORY = System.getenv().getOrDefault("EXPORT_DIR", "AAS-G1");
     private static final Path OUT = Path.of(System.getenv().getOrDefault("EXPORT_OUT", "/tmp/export-out"));
+    /** The project's {@code docs/} on the machine the test runs on, to ask the sidebar what the chosen directory is called. */
+    private static final String DOCS_DIRECTORY = System.getenv().getOrDefault("EXPORT_DOCS", "");
     private static final String PAGES_TO_RENDER = System.getenv().getOrDefault("EXPORT_PAGES", "");
     private static final String BROWSER_PATH = System.getenv("BROWSER_PATH");
     /** How long the export may take; the project's HTML is rebuilt and printed twice. */
@@ -211,9 +216,9 @@ public class ExportTabE2E {
                 pageTexts.add(stripper.getText(document));
             }
             check("every page carries its n / N footer", everyPageHasFooter(pageTexts), "");
-            String lastSegment = DIRECTORY.substring(DIRECTORY.lastIndexOf('/') + 1);
-            check("the cover is titled with the chosen directory", squash(pageTexts.get(0)).contains(squash(lastSegment)),
-                    pageTexts.get(0).strip());
+            String expectedTitle = nameInTheSidebar();
+            check("the cover is titled with the name the sidebar shows for the chosen directory (" + expectedTitle + ")",
+                    squash(pageTexts.get(0)).contains(squash(expectedTitle)), pageTexts.get(0).strip());
             List<Integer> nearlyEmpty = new ArrayList<>();
             for (int i = 1; i < pageTexts.size(); i++) {
                 if (squash(pageTexts.get(i)).length() < 30) nearlyEmpty.add(i + 1);
@@ -256,6 +261,18 @@ public class ExportTabE2E {
 
             renderPages(document, total);
         }
+    }
+
+    /**
+     * What the sidebar calls the chosen directory: its name with the number in front of it dropped, or the label that
+     * {@code _category_.json} gives it. {@code NavTreeBuilder} makes the sidebar, so it is asked; when {@code EXPORT_DOCS}
+     * does not say where the project's {@code docs/} is, the last name of the path is used.
+     */
+    private static String nameInTheSidebar() throws IOException {
+        String lastSegment = DIRECTORY.substring(DIRECTORY.lastIndexOf('/') + 1);
+        if (DOCS_DIRECTORY.isBlank()) return lastSegment;
+        SiteNode tree = new NavTreeBuilder(Path.of(DOCS_DIRECTORY), new MarkdownConverter(), null, null, null).build();
+        return PdfExportPlan.planOfDirectory(tree, DIRECTORY, PROJECT).title();
     }
 
     private static boolean everyPageHasFooter(List<String> pageTexts) {

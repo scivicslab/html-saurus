@@ -160,11 +160,9 @@ class PageRenderer {
               <link rel="preconnect" href="https://fonts.googleapis.com">
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap">
-              <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
-                integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+"
-                crossorigin="anonymous">
-              <style>
             """.formatted(title));
+        sb.append(KATEX_STYLESHEET);
+        sb.append("  <style>\n");
         sb.append(PAGE_CSS);
         sb.append("              </style>\n");
         // Dev only: bake in the shared palette and the --c-* remap so the portal's theme drives
@@ -629,6 +627,13 @@ class PageRenderer {
      * Strips numeric prefixes from every segment of a relative path.
      * E.g., {@code 010_history/020_intro/file.html} → {@code history/intro/file.html}
      */
+    /** The link tag for the stylesheet of KaTeX's fonts and layout; the PDF export loads the same one. */
+    static final String KATEX_STYLESHEET = """
+              <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+                integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+"
+                crossorigin="anonymous">
+            """;
+
     static String cleanRelPath(String relPath) {
         String[] segments = relPath.split("/");
         StringBuilder sb = new StringBuilder();
