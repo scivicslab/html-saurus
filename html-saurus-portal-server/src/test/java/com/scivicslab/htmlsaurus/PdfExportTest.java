@@ -176,6 +176,17 @@ class PdfExportTest {
     }
 
     @Test
+    void bodyOfPage_keepsTheLineBreaksOfAMermaidDiagram_becauseTheDiagramIsOneStatementPerLine() throws Exception {
+        Path staticDir = dir.resolve("static-html");
+        page(staticDir, "/AAS-G1/CHM13-expr1/Plan/",
+                "<h1>Plan</h1><div class=\"mermaid\">graph LR\n  A[Browser] --&gt; B[Portal]\n  B --&gt; C[Chrome]\n</div><p>text</p>");
+        PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
+        String body = PdfExportHtml.bodyOfPage(staticDir, plan.parts().get(1), Map.of());
+        assertTrue(body.contains("graph LR\n  A[Browser] --&gt; B[Portal]\n  B --&gt; C[Chrome]\n"),
+                "Mermaid reads the lines of the diagram as they were written: " + body);
+    }
+
+    @Test
     void renderCombinedHtml_whenADirectoryIsFollowedByASubdirectory_putsTheirHeadingsOnOnePage() throws Exception {
         Path staticDir = dir.resolve("static-html");
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "", "doc_AASG1");

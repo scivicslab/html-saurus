@@ -13,7 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Which directories the Export tab offers (ExportToPdf_261119_oo01): the whole project first, then the directories
- * that hold at least two documents.
+ * whose export holds at least two documents, counted in the sidebar tree.
  */
 @Tag("ExportToPdf_261119_oo01")
 class PdfExportDirectoriesTest {
@@ -21,32 +21,51 @@ class PdfExportDirectoriesTest {
     @TempDir
     Path docs;
 
-    private void document(String relative) throws IOException {
-        Path file = docs.resolve(relative);
-        Files.createDirectories(file.getParent());
-        Files.writeString(file, "---\ntitle: t\n---\n\nbody\n");
+    private void directory(String relative) throws IOException {
+        Files.createDirectories(docs.resolve(relative));
+    }
+
+    private static SiteNode leaf(String title, String href) {
+        return new SiteNode(title, href, false, List.of(), null);
+    }
+
+    private static SiteNode folder(String label, SiteNode... children) {
+        return new SiteNode(label, null, true, List.of(children), null);
     }
 
     @Test
     void listDirectoriesToOffer_whenADirectoryHoldsOnlyOneDocument_doesNotOfferIt() throws IOException {
-        document("AAS-G1/CHM13/010_Plan/010_Plan.md");
-        document("AAS-G1/CHM13/020_Index/020_Index.md");
-        document("AAS-G1/GRCh38/010_Login/010_Login.md");
-        assertEquals(List.of("", "AAS-G1", "AAS-G1/CHM13"), PdfExportDirectories.listDirectoriesToOffer(docs));
+        directory("AAS-G1/CHM13/Plan");
+        directory("AAS-G1/CHM13/Index");
+        directory("AAS-G1/GRCh38/Login");
+        SiteNode tree = folder("docs", folder("AAS-G1",
+                folder("CHM13", leaf("Plan", "/AAS-G1/CHM13/Plan/"), leaf("Index", "/AAS-G1/CHM13/Index/")),
+                folder("GRCh38", leaf("Login", "/AAS-G1/GRCh38/Login/"))));
+        assertEquals(List.of("", "AAS-G1", "AAS-G1/CHM13"), PdfExportDirectories.listDirectoriesToOffer(docs, tree));
     }
 
     @Test
-    void listDirectoriesToOffer_withDirectoriesBuiltButNotDocuments_doesNotCountThem() throws IOException {
-        document("a/one.md");
-        document("a/_draft/two.md");
-        document("a/.hidden/three.md");
-        Files.createDirectories(docs.resolve("a/img"));
-        Files.writeString(docs.resolve("a/img/fig.png"), "x");
-        assertEquals(List.of(""), PdfExportDirectories.listDirectoriesToOffer(docs));
+    void listDirectoriesToOffer_whenTheSidebarLeavesADirectoryOut_doesNotOfferIt() throws IOException {
+        directory("AAS-G1/a");
+        directory("AAS-G1/b");
+        directory("mm/x");
+        directory("mm/y");
+        SiteNode tree = folder("docs", folder("AAS-G1", leaf("A", "/AAS-G1/a/"), leaf("B", "/AAS-G1/b/")));
+        assertEquals(List.of("", "AAS-G1"), PdfExportDirectories.listDirectoriesToOffer(docs, tree));
+    }
+
+    @Test
+    void listDirectoriesToOffer_withDirectoriesTheSiteDoesNotBuild_doesNotOfferThem() throws IOException {
+        directory("a/_draft/one");
+        directory("a/_draft/two");
+        directory(".git/objects");
+        // The sidebar tree has no node for them, as NavTreeBuilder leaves out names that start with _ or .
+        SiteNode tree = folder("docs");
+        assertEquals(List.of(""), PdfExportDirectories.listDirectoriesToOffer(docs, tree));
     }
 
     @Test
     void listDirectoriesToOffer_whenDocsDoesNotExist_offersNothing() throws IOException {
-        assertEquals(List.of(), PdfExportDirectories.listDirectoriesToOffer(docs.resolve("missing")));
+        assertEquals(List.of(), PdfExportDirectories.listDirectoriesToOffer(docs.resolve("missing"), folder("docs")));
     }
 }

@@ -104,6 +104,8 @@ final class PdfExportHtml {
             return "<p class=\"hs-missing\">This page has not been built: " + esc(part.href()) + "</p>\n";
         }
         Document doc = Jsoup.parse(file.toFile(), StandardCharsets.UTF_8.name());
+        // The page's text is kept as it is: pretty-printing turns the line breaks of a Mermaid diagram into spaces.
+        doc.outputSettings().prettyPrint(false);
         Element main = doc.selectFirst("main");
         if (main == null) return "";
         main.select(".copy-bar, .source-footer, .page-last-updated, .page-nav, script").remove();

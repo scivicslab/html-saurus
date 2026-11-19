@@ -3835,8 +3835,8 @@ public class PortalServer implements PortalReads {
     }
 
     /**
-     * Handles {@code GET /api/export/dirs?project=...}: the directories under the project's {@code docs/} that hold at
-     * least one document, as paths relative to {@code docs/}, the whole project ({@code ""}) first
+     * Handles {@code GET /api/export/dirs?project=...}: the directories under the project's {@code docs/} whose export
+     * holds at least two documents, as paths relative to {@code docs/}, the whole project ({@code ""}) first
      * (ExportToPdf_261119_oo01).
      */
     private void handleExportDirs(HttpExchange ex) throws IOException {
@@ -3845,7 +3845,9 @@ public class PortalServer implements PortalReads {
             respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
             return;
         }
-        List<String> dirs = PdfExportDirectories.listDirectoriesToOffer(proj.projectDir().resolve("docs"));
+        Path docs = proj.projectDir().resolve("docs");
+        SiteNode sidebarTree = new NavTreeBuilder(docs, new MarkdownConverter(), null, null, null).build();
+        List<String> dirs = PdfExportDirectories.listDirectoriesToOffer(docs, sidebarTree);
         StringBuilder sb = new StringBuilder("{\"dirs\":[");
         for (int i = 0; i < dirs.size(); i++) {
             if (i > 0) sb.append(",");
