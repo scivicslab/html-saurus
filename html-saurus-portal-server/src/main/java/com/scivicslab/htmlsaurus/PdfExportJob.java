@@ -39,6 +39,21 @@ final class PdfExportJob {
      */
     static final int PRINT_ATTEMPTS = 3;
 
+    /** What a job says it is doing while it rebuilds the project's HTML. */
+    static final String PHASE_BUILDING_THE_HTML = "Building the HTML";
+
+    /**
+     * Tells whether Stop may end an export now. Not while the HTML is rebuilt, nor before the job has said what it does
+     * (it is about to rebuild): the builder never asks whether it should stop, so a stopped rebuild leaves a site half
+     * written, and the portal serves that site.
+     *
+     * @param job the export's job
+     */
+    static boolean mayBeStopped(Job<?> job) {
+        String phase = job.phase();
+        return phase != null && !phase.isEmpty() && !PHASE_BUILDING_THE_HTML.equals(phase);
+    }
+
     /** The name every work directory of an export starts with. */
     static final String WORK_DIRECTORY_PREFIX = "html-saurus-export-";
 
@@ -100,7 +115,7 @@ final class PdfExportJob {
             PdfExportHtml.Prepared combined;
             projectLock.lockInterruptibly();
             try {
-                job.phase("Building the HTML");
+                job.phase(PHASE_BUILDING_THE_HTML);
                 if (!rebuild.rebuildHtml()) {
                     throw new IllegalStateException("The HTML of " + project + " could not be built; the portal's log says why");
                 }
@@ -111,7 +126,7 @@ final class PdfExportJob {
                 plan = PdfExportPlan.planOfDirectory(root, dirRel, project);
                 if (plan.parts().isEmpty()) throw new IllegalStateException("No document is under docs/" + dirRel);
                 String source = project + "/docs" + (dirRel.isBlank() ? "" : "/" + dirRel.replaceAll("^/+|/+$", ""));
-                combined = PdfExportHtml.prepare(plan, source, staticDir);
+                combined = PdfExportHtml.prepare(plan, source, staticDir, workDir.resolve("images"));
             } finally {
                 projectLock.unlock();
             }
@@ -176,6 +191,7 @@ final class PdfExportJob {
             LOGGER.log(Level.WARNING, "Could not delete a file of {0}: {1}", new Object[] {workDir, e.getMessage()});
         }
         deleteDirectory(workDir.resolve("chrome-profile"));
+        deleteDirectory(workDir.resolve("images"));
     }
 
     /**

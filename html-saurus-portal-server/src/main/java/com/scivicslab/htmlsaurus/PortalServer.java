@@ -103,6 +103,8 @@ public class PortalServer implements PortalReads {
     /** One lock per project, held while an export rebuilds the project's HTML and reads it (ExportToPdf_261119_oo01). */
     private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantLock> exportLocks =
         new java.util.concurrent.ConcurrentHashMap<>();
+    /** The work directory of each export, so that the ones of jobs the registry forgot can be deleted. */
+    private final ExportWorkDirectories exportWorkDirectories = new ExportWorkDirectories();
     /** Number of not-yet-completed OCR pages {@link GpuBrokerOcrClient} allows in flight per
      *  backend before {@code client.submit} blocks the calling {@code PdfImportJobActor}'s
      *  thread -- generous relative to this codebase's actual concurrent-import-job count, since
@@ -405,6 +407,13 @@ public class PortalServer implements PortalReads {
         server.createContext("/", this::handleAll);
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
+        // The registry forgets a job an hour after it ended; its PDF is deleted with it.
+        java.util.concurrent.ScheduledExecutorService sweeper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "export-work-directory-sweeper");
+            t.setDaemon(true);
+            return t;
+        });
+        sweeper.scheduleWithFixedDelay(this::deleteWorkDirectoriesOfForgottenExports, 10, 10, java.util.concurrent.TimeUnit.MINUTES);
         var announcing = openNode()
                 ? WorkspaceAnnouncer.start(searcherSystem, System.getenv(WorkspaceAnnouncer.ENV), port)
                 : java.util.Optional.<com.scivicslab.pojoactor.core.scheduler.Scheduler>empty();
@@ -2429,7 +2438,9 @@ public class PortalServer implements PortalReads {
                 if (j.kind === 'export' && j.state === 'done') row.appendChild(exportDownloadLink(j));
                 // A running build is not offered a Stop button: it is one call into the builder,
                 // which never asks whether it should stop, so the button could only lie.
-                if (!(isBuild && j.state === 'running')) {
+                // An export that is rebuilding the HTML cannot be stopped either: a rebuild stopped half way leaves a half-written site.
+                const rebuildingForExport = j.kind === 'export' && j.state === 'running' && (!j.phase || j.phase === 'Building the HTML');
+                if (!(isBuild && j.state === 'running') && !rebuildingForExport) {
                   const btn = document.createElement('button');
                   btn.className = 'btn';
                   btn.type = 'button';
@@ -3862,6 +3873,7 @@ public class PortalServer implements PortalReads {
         if (cleared != null && cleared.result() instanceof ExportOutcome out) {
             PdfExportJob.deleteDirectory(out.workDirectory());
         }
+        exportWorkDirectories.forget(jobId);
         respond(ex, 200, "application/json", "{\"status\":\"ok\"}");
     }
 
@@ -3925,9 +3937,17 @@ public class PortalServer implements PortalReads {
             exportLocks.computeIfAbsent(proj.name(), name -> new java.util.concurrent.locks.ReentrantLock()));
         String label = proj.name() + (directory.isEmpty() ? "" : "/" + directory);
         com.scivicslab.jobregistry.Job<?> job = batchJobs.submit("export", label, work::exportToPdf, System.currentTimeMillis());
+        exportWorkDirectories.remember(job.id(), workDir);
+        deleteWorkDirectoriesOfForgottenExports();
         EXPORT_LOGGER.log(java.util.logging.Level.INFO, "Export started: project {0}, directory ''{1}'', job {2}",
             new Object[] {proj.name(), directory, job.id()});
         respond(ex, 202, "application/json", "{\"jobId\":" + jsonStr(job.id()) + "}");
+    }
+
+    /** Deletes the work directories of the exports whose jobs the registry no longer lists. */
+    private void deleteWorkDirectoriesOfForgottenExports() {
+        int deleted = exportWorkDirectories.deleteOfForgottenJobs(id -> batchJobs.get(id) != null);
+        if (deleted > 0) EXPORT_LOGGER.log(java.util.logging.Level.INFO, "Deleted {0} export work director(ies) of forgotten jobs", deleted);
     }
 
     /** Answers a request to start an export with an error, and logs it: a press of Make PDF must leave a trace. */
@@ -3998,6 +4018,11 @@ public class PortalServer implements PortalReads {
         String jobId = body.get("jobId") instanceof String s ? s : null;
         if (jobId == null || batchJobs.get(jobId) == null) {
             respond(ex, 404, "application/json", "{\"error\":\"unknown or expired jobId\"}");
+            return;
+        }
+        com.scivicslab.jobregistry.Job<?> toStop = batchJobs.get(jobId);
+        if ("export".equals(toStop.kind()) && !PdfExportJob.mayBeStopped(toStop)) {
+            respond(ex, 409, "application/json", "{\"error\":\"the export is rebuilding the HTML, which cannot be stopped half way; Stop works once it prints\"}");
             return;
         }
         batchJobs.stop(jobId);

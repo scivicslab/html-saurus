@@ -102,24 +102,29 @@ final class PdfExportHtml {
      * @param plan      what the PDF holds
      * @param source    where the chosen directory is, shown on the cover
      * @param staticDir the doc project's {@code static-html/}
+     * @param imagesDirectory where the images the pages show are copied to; the combined HTML points at the copies, so a
+     *                        rebuild of the site while Chrome prints does not take the images away
      */
-    static Prepared prepare(PdfExportPlan plan, String source, Path staticDir) throws IOException {
+    static Prepared prepare(PdfExportPlan plan, String source, Path staticDir, Path imagesDirectory) throws IOException {
         Map<String, String> anchorOfHref = new HashMap<>();
         for (PdfExportPlan.Part p : plan.parts()) {
             if (p.href() != null) anchorOfHref.putIfAbsent(normalize(p.href()), p.anchor());
         }
         List<String> bodies = new ArrayList<>();
-        for (PdfExportPlan.Part p : plan.parts()) bodies.add(p.href() == null ? null : bodyOfPage(staticDir, p, anchorOfHref));
+        for (PdfExportPlan.Part p : plan.parts()) bodies.add(p.href() == null ? null : bodyOfPage(staticDir, p, anchorOfHref, imagesDirectory));
         return new Prepared(plan, source, bodies);
     }
 
     /** @return the combined HTML of a plan, read from the built pages and written with the given page numbers */
-    static String renderCombinedHtml(PdfExportPlan plan, String source, Path staticDir, Map<Integer, Integer> pages) throws IOException {
-        return prepare(plan, source, staticDir).render(pages);
+    static String renderCombinedHtml(PdfExportPlan plan, String source, Path staticDir, Path imagesDirectory, Map<Integer, Integer> pages) throws IOException {
+        return prepare(plan, source, staticDir, imagesDirectory).render(pages);
     }
 
-    /** One page's body, ready to sit under its part's heading. */
-    static String bodyOfPage(Path staticDir, PdfExportPlan.Part part, Map<String, String> anchorOfHref) throws IOException {
+    /**
+     * One page's body, ready to sit under its part's heading: only what a document is made of stays (see {@link #SAFE_ELEMENTS}),
+     * and the images are copies in {@code imagesDirectory}.
+     */
+    static String bodyOfPage(Path staticDir, PdfExportPlan.Part part, Map<String, String> anchorOfHref, Path imagesDirectory) throws IOException {
         Path file = builtPageFile(staticDir, part.href());
         if (!Files.isRegularFile(file)) {
             return "<p class=\"hs-missing\">This page has not been built: " + esc(part.href()) + "</p>\n";
@@ -130,14 +135,6 @@ final class PdfExportHtml {
         Element main = doc.selectFirst("main");
         if (main == null) return "";
         main.select(".copy-bar, .source-footer, .page-last-updated, .page-nav, script").remove();
-        // Chrome prints with access to local files, so nothing that loads another page or runs code stays.
-        main.select("iframe, frame, frameset, object, embed, applet, link, base, meta").remove();
-        for (Element e : main.getAllElements()) {
-            for (org.jsoup.nodes.Attribute attribute : new ArrayList<>(e.attributes().asList())) {
-                if (attribute.getKey().toLowerCase(java.util.Locale.ROOT).startsWith("on")) e.removeAttr(attribute.getKey());
-            }
-        }
-        main.select("img[srcset], source[srcset]").removeAttr("srcset");
         Element h1 = main.selectFirst("h1");
         if (h1 != null) h1.remove();
 
@@ -154,6 +151,7 @@ final class PdfExportHtml {
         URI pageUri = file.toUri();
         for (Element img : main.select("img[src], source[src]")) {
             String url = siteImageUrl(staticDir, pageUri, img.attr("src"));
+            if (url != null && url.startsWith("file:")) url = copyOfSiteImage(staticDir, Path.of(URI.create(url)), imagesDirectory);
             if (url == null) img.remove();
             else img.attr("src", url);
         }
@@ -170,7 +168,65 @@ final class PdfExportHtml {
                 else a.unwrap();
             }
         }
-        return main.html() + "\n";
+        for (Element e : main.getAllElements()) {
+            if (e.hasAttr("style") && !isHarmlessStyle(e.attr("style"))) e.removeAttr("style");
+            if (e.tagName().equals("input") && !"checkbox".equalsIgnoreCase(e.attr("type"))) e.remove();
+        }
+        // What is allowed is listed; whatever else a page carries is dropped, text and all for script and style.
+        return Jsoup.clean(main.html(), "", SAFELIST, new Document.OutputSettings().prettyPrint(false)) + "\n";
+    }
+
+    /** The elements a document's page may keep in a PDF. Nothing here loads another file but {@code img}. */
+    static final List<String> SAFE_ELEMENTS = List.of("a", "abbr", "article", "aside", "b", "bdi", "bdo", "blockquote", "br", "caption", "cite",
+            "code", "col", "colgroup", "dd", "del", "details", "dfn", "div", "dl", "dt", "em", "figcaption", "figure", "footer", "h1", "h2",
+            "h3", "h4", "h5", "h6", "header", "hr", "i", "img", "input", "ins", "kbd", "li", "mark", "ol", "p", "pre", "q", "rp", "rt", "ruby",
+            "s", "samp", "section", "small", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td", "tfoot", "th", "thead", "time",
+            "tr", "u", "ul", "var", "wbr");
+
+    private static final org.jsoup.safety.Safelist SAFELIST = documentSafelist();
+
+    private static org.jsoup.safety.Safelist documentSafelist() {
+        org.jsoup.safety.Safelist list = new org.jsoup.safety.Safelist();
+        list.addTags(SAFE_ELEMENTS.toArray(new String[0]));
+        list.addAttributes(":all", "class", "id", "title", "lang", "dir", "style");
+        list.addAttributes("a", "href");
+        list.addProtocols("a", "href", "http", "https", "mailto", "#");
+        list.addAttributes("img", "src", "alt", "width", "height");
+        list.addProtocols("img", "src", "http", "https", "data", "file");
+        list.addAttributes("td", "colspan", "rowspan", "align", "valign");
+        list.addAttributes("th", "colspan", "rowspan", "scope", "align", "valign");
+        list.addAttributes("col", "span");
+        list.addAttributes("colgroup", "span");
+        list.addAttributes("ol", "start", "type", "reversed");
+        list.addAttributes("li", "value");
+        list.addAttributes("details", "open");
+        list.addAttributes("time", "datetime");
+        list.addAttributes("input", "type", "checked", "disabled");
+        list.preserveRelativeLinks(true);
+        return list;
+    }
+
+    /** @return false for a style that could load a file ({@code url()}, {@code image-set()}, {@code @import}) or hide one in an escape */
+    static boolean isHarmlessStyle(String style) {
+        String squashed = style.toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", "");
+        return !(squashed.contains("url(") || squashed.contains("image-set(") || squashed.contains("@import")
+                || squashed.contains("expression(") || squashed.contains("\\") || squashed.contains("/*"));
+    }
+
+    /**
+     * Copies an image of the site into the images directory, keeping its place under {@code static-html/}.
+     *
+     * @return the {@code file:} URL of the copy; {@code null} when the file cannot be copied (it is not there)
+     */
+    private static String copyOfSiteImage(Path staticDir, Path image, Path imagesDirectory) {
+        try {
+            Path copy = imagesDirectory.resolve(staticDir.toAbsolutePath().normalize().relativize(image));
+            Files.createDirectories(copy.getParent());
+            Files.copy(image, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return copy.toUri().toString();
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     /**
@@ -228,7 +284,7 @@ final class PdfExportHtml {
             String noFragment = link.contains("#") ? link.substring(0, link.indexOf('#')) : link;
             if (noFragment.isEmpty()) return null;
             URI resolved = URI.create("http://site" + pageHref).resolve(noFragment);
-            return normalize(resolved.getPath());
+            return resolved.getPath() == null ? null : normalize(resolved.getPath());
         } catch (IllegalArgumentException e) {
             return null;
         }

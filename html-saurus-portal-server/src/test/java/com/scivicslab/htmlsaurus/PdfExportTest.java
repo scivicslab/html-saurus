@@ -118,6 +118,10 @@ class PdfExportTest {
     private Path page(Path staticDir, String href, String main) throws Exception {
         Path file = PdfExportHtml.builtPageFile(staticDir, href);
         Files.createDirectories(file.getParent());
+        // The images the pages in these tests mention are files of the site.
+        Files.writeString(file.getParent().resolve("fig.png"), "png");
+        Files.createDirectories(staticDir.resolve("shared"));
+        Files.writeString(staticDir.resolve("shared/logo.svg"), "svg");
         Files.writeString(file, "<html><body><nav class=\"side\">sidebar</nav><main>" + main + "</main><aside class=\"toc\">toc</aside></body></html>");
         return file;
     }
@@ -137,7 +141,7 @@ class PdfExportTest {
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
         PdfExportPlan.Part planPart = plan.parts().get(1);
         String body = PdfExportHtml.bodyOfPage(staticDir, planPart,
-                Map.of("/AAS-G1/CHM13-expr1/Index/", plan.parts().get(2).anchor()));
+                Map.of("/AAS-G1/CHM13-expr1/Index/", plan.parts().get(2).anchor()), dir.resolve("images"));
 
         assertFalse(body.contains("copy-bar") || body.contains("source-footer") || body.contains("Last updated")
                 || body.contains("page-nav") || body.contains("sidebar"), body);
@@ -145,8 +149,10 @@ class PdfExportTest {
         assertTrue(body.contains("<h3 id=\"d2-problem-definition\">"), "level-2 document: h2 moves to h3, id prefixed: " + body);
         assertTrue(body.contains("<h4>Detail</h4>"), body);
         assertTrue(body.contains("href=\"#d2-problem-definition\""), body);
-        assertTrue(body.contains("src=\"" + staticDir.resolve("AAS-G1/CHM13-expr1/Plan/fig.png").toUri()), body);
-        assertTrue(body.contains("src=\"" + staticDir.resolve("shared/logo.svg").toUri()), body);
+        // The images are copies, under the images directory in the place they have under static-html/.
+        assertTrue(body.contains("src=\"" + dir.resolve("images/AAS-G1/CHM13-expr1/Plan/fig.png").toUri()), body);
+        assertTrue(body.contains("src=\"" + dir.resolve("images/shared/logo.svg").toUri()), body);
+        assertTrue(Files.isRegularFile(dir.resolve("images/AAS-G1/CHM13-expr1/Plan/fig.png")) && Files.isRegularFile(dir.resolve("images/shared/logo.svg")));
         assertTrue(body.contains("href=\"#" + plan.parts().get(2).anchor() + "\">the index</a>"), "a document in the PDF: " + body);
         assertTrue(body.contains("elsewhere") && !body.contains("other/X"), "a document outside the PDF: plain text: " + body);
         assertTrue(body.contains("href=\"https://example.org/\""), body);
@@ -158,7 +164,7 @@ class PdfExportTest {
         Path staticDir = dir.resolve("static-html");
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
         for (PdfExportPlan.Part p : plan.parts()) if (p.href() != null) page(staticDir, p.href(), "<h1>" + p.title() + "</h1><p>body of " + p.title() + "</p>");
-        String first = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", staticDir, Map.of());
+        String first = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", staticDir, dir.resolve("images"), Map.of());
         assertTrue(first.contains("data-theme=\"light-clean\""));
         assertTrue(first.contains("katex") && first.contains("mermaid"), "math and diagrams render as on screen");
         assertTrue(first.contains("doc_AASG1/docs/AAS-G1"));
@@ -167,7 +173,7 @@ class PdfExportTest {
             assertTrue(first.contains("id=\"" + p.anchor() + "\""), p.title());
         }
         assertTrue(first.contains("body of Guide"));
-        String second = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", staticDir, Map.of(1, 3, 2, 3, 3, 4));
+        String second = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", staticDir, dir.resolve("images"), Map.of(1, 3, 2, 3, 3, 4));
         assertTrue(second.contains("hs-toc-page\">3<") && second.contains("hs-toc-page\">4<"));
         // The heading of CHM13-expr1 and its first document share a page; the next document starts a new one.
         assertTrue(second.contains("class=\"hs-part\" id=\"" + plan.parts().get(1).anchor() + "\""), "no break after a directory heading");
@@ -180,7 +186,7 @@ class PdfExportTest {
         page(staticDir, "/AAS-G1/CHM13-expr1/Plan/",
                 "<h1>Plan</h1><div class=\"mermaid\">graph LR\n  A[Browser] --&gt; B[Portal]\n  B --&gt; C[Chrome]\n</div><p>text</p>");
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
-        String body = PdfExportHtml.bodyOfPage(staticDir, plan.parts().get(1), Map.of());
+        String body = PdfExportHtml.bodyOfPage(staticDir, plan.parts().get(1), Map.of(), dir.resolve("images"));
         assertTrue(body.contains("graph LR\n  A[Browser] --&gt; B[Portal]\n  B --&gt; C[Chrome]\n"),
                 "Mermaid reads the lines of the diagram as they were written: " + body);
     }
@@ -201,7 +207,7 @@ class PdfExportTest {
                 <p onmouseover="x()">text</p>
                 """.formatted(secret));
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
-        String body = PdfExportHtml.bodyOfPage(staticDir, plan.parts().get(1), Map.of());
+        String body = PdfExportHtml.bodyOfPage(staticDir, plan.parts().get(1), Map.of(), dir.resolve("images"));
         assertTrue(body.contains("fig.png"), "an image of the site stays: " + body);
         assertTrue(body.contains("https://example.org/x.png"), "an image on the web stays: " + body);
         assertFalse(body.contains("secret.png"), "an image outside the site is dropped: " + body);
@@ -215,7 +221,7 @@ class PdfExportTest {
         Path staticDir = dir.resolve("static-html");
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "", "doc_AASG1");
         for (PdfExportPlan.Part p : plan.parts()) if (p.href() != null) page(staticDir, p.href(), "<p>body of " + p.title() + "</p>");
-        String html = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs", staticDir, Map.of());
+        String html = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs", staticDir, dir.resolve("images"), Map.of());
         // Parts 1 and 2 are the headings of AAS-G1 and of CHM13-expr1 under it: no page break between them.
         assertTrue(html.contains("class=\"hs-part\" id=\"" + plan.parts().get(1).anchor() + "\""), "the subdirectory's heading follows on the same page");
         assertTrue(html.contains("class=\"hs-part hs-break\" id=\"" + plan.parts().get(0).anchor() + "\""), "the first directory starts a page");
@@ -277,7 +283,7 @@ class PdfExportTest {
     void renderCombinedHtml_putsEveryContentsNumberInAColumnOfOneWidth_andNoMarkerInTheText() throws Exception {
         Path staticDir = dir.resolve("static-html");
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
-        String html = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", staticDir, Map.of());
+        String html = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", staticDir, dir.resolve("images"), Map.of());
         assertTrue(html.contains("min-width: 4em; text-align: right"), "a 3-digit placeholder and a 1-digit page take the same width");
         assertFalse(html.contains("HSXA"), "nothing is hidden in the text of the pages");
     }
@@ -308,10 +314,65 @@ class PdfExportTest {
     @Test
     void renderCombinedHtml_loadsKatexAndMermaidThroughTheSameTagsAsAPageOnScreen() throws Exception {
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
-        String printed = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", dir.resolve("static-html"), Map.of());
+        String printed = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", dir.resolve("static-html"), dir.resolve("images"), Map.of());
         List<String> onScreen = cdnScriptTags(PageScripts.render());
         assertEquals(3, onScreen.size(), "a page loads Mermaid, KaTeX and its auto-render script: " + onScreen);
         assertEquals(onScreen, cdnScriptTags(printed), "the versions, integrity hashes and the draw call match the screen's");
         assertTrue(printed.replaceAll("\\s+", " ").contains("mermaid.initialize({startOnLoad: true});"), "the diagrams are drawn as on screen");
+    }
+
+    @Test
+    void bodyOfPage_keepsWhatADocumentIsMadeOf() throws Exception {
+        Path staticDir = dir.resolve("static-html");
+        page(staticDir, "/AAS-G1/CHM13-expr1/Plan/", """
+                <h1>Plan</h1>
+                <h2 id="goal">Goal</h2><p>It is <strong>E</strong> and <em>m</em>, $E = mc^2$, <code>x</code>, H<sub>2</sub>O and x<sup>2</sup>.</p>
+                <div class="mermaid">graph LR
+                  A[Browser] --&gt; B[Portal]
+                </div>
+                <pre><code class="language-java">int x = 1;</code></pre>
+                <table><thead><tr><th scope="col">a</th></tr></thead><tbody><tr><td colspan="2" align="center">1</td></tr></tbody></table>
+                <ul><li>one</li></ul><ol start="3"><li>three</li></ol><blockquote>quote</blockquote>
+                <details><summary>more</summary>text</details>
+                <div class="admonition note"><p>note</p></div>
+                <p><a href="https://example.org/">web</a> <a href="#goal">here</a> <img alt="fig" src="fig.png" width="10"></p>
+                <p style="text-align: center">centered</p>
+                """);
+        PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
+        String body = PdfExportHtml.bodyOfPage(staticDir, plan.parts().get(1), Map.of(), dir.resolve("images"));
+        for (String kept : List.of("<strong>E</strong>", "<em>m</em>", "$E = mc^2$", "<code>x</code>", "<sub>2</sub>", "<sup>2</sup>",
+                "<div class=\"mermaid\">graph LR\n  A[Browser] --&gt; B[Portal]\n</div>", "<code class=\"language-java\">int x = 1;</code>",
+                "<th scope=\"col\">", "colspan=\"2\"", "<ol start=\"3\">", "<blockquote>", "<details><summary>more</summary>",
+                "<div class=\"admonition note\">", "href=\"https://example.org/\"", "href=\"#d2-goal\"", "alt=\"fig\"", "width=\"10\"",
+                "text-align: center")) {
+            assertTrue(body.contains(kept), kept + " is gone: " + body);
+        }
+    }
+
+    @Test
+    void bodyOfPage_dropsEverythingThatCouldReadALocalFileOrRunCode() throws Exception {
+        Path staticDir = dir.resolve("static-html");
+        page(staticDir, "/AAS-G1/CHM13-expr1/Plan/", """
+                <h1>Plan</h1>
+                <style>body { background: url(file:///etc/passwd) }</style>
+                <p style="background: url('file:///etc/passwd')">a</p>
+                <p style="background:URL(file:///etc/hostname)">b</p>
+                <video src="file:///etc/passwd" poster="file:///etc/passwd"><track src="file:///etc/passwd"></video>
+                <audio src="file:///etc/passwd"></audio>
+                <input type="image" src="file:///etc/passwd">
+                <svg><image href="file:///etc/passwd"/><use href="file:///etc/passwd#x"/></svg>
+                <img src="fig.png" srcset="file:///etc/passwd 2x">
+                <iframe src="file:///etc/passwd"></iframe><object data="file:///etc/passwd"></object><embed src="file:///etc/passwd">
+                <form action="https://example.org/"><button>go</button></form>
+                <a href="javascript:alert(1)">js</a><a href="file:///etc/passwd">file</a>
+                <p onclick="x()">c</p><script>alert(1)</script>
+                """);
+        PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
+        String body = PdfExportHtml.bodyOfPage(staticDir, plan.parts().get(1), Map.of(), dir.resolve("images"));
+        for (String gone : List.of("/etc/passwd", "/etc/hostname", "<style", "<video", "<audio", "<track", "<input", "<svg", "<image", "<use",
+                "srcset", "poster", "<iframe", "<object", "<embed", "<form", "<button", "javascript:", "onclick", "<script", "url(")) {
+            assertFalse(body.toLowerCase().contains(gone.toLowerCase()), gone + " is still there: " + body);
+        }
+        assertTrue(body.contains("fig.png"), "the image of the site stays: " + body);
     }
 }

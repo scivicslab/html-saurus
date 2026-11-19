@@ -80,6 +80,11 @@ class PdfExportJobTest {
         final boolean withLinks;
         /** What a part's page says; Chrome prints the text of the page. */
         final String partText;
+        /** Runs when printing starts, before the HTML is read: what another process may do to the site meanwhile. */
+        Runnable beforeLayingOut = () -> { };
+        /** The images of the HTML given to the last printing that were not there to be read. */
+        final List<String> missingImages = new ArrayList<>();
+        final List<String> imageUrls = new ArrayList<>();
 
         StubPrinter(java.util.function.BiFunction<String, Integer, Integer> contentsPages, boolean withLinks) {
             this(contentsPages, withLinks, null);
@@ -93,8 +98,14 @@ class PdfExportJobTest {
 
         @Override
         public void printHtmlToPdf(Path html, Path pdf, Path workDir, Duration timeout) throws IOException {
+            beforeLayingOut.run();
             String text = Files.readString(html, StandardCharsets.UTF_8);
             printed.add(text);
+            Matcher images = Pattern.compile("<img[^>]* src=\"(file:[^\"]+)\"").matcher(text);
+            while (images.find()) {
+                imageUrls.add(images.group(1));
+                if (!Files.exists(Path.of(java.net.URI.create(images.group(1))))) missingImages.add(images.group(1));
+            }
             Files.createDirectories(workDir.resolve("chrome-profile"));
             Files.writeString(workDir.resolve("chrome-profile/state"), "x");
             int contents = contentsPages.apply(text, printed.size());
@@ -259,5 +270,47 @@ class PdfExportJobTest {
         assertFalse(Files.exists(old));
         assertTrue(Files.exists(recent), "a young directory may be an export of another portal");
         assertTrue(Files.exists(other), "only the directories of exports are looked at");
+    }
+
+    @Test
+    void exportToPdf_whenTheSiteIsRebuiltWhileChromePrints_theImagesAreStillThere() throws Exception {
+        Files.createDirectories(staticDir.resolve("A/one"));
+        Files.writeString(staticDir.resolve("A/one/index.html"), "<html><body><main><h1>one</h1><p>text</p><img src=\"fig.png\"></main></body></html>");
+        Files.writeString(staticDir.resolve("A/one/fig.png"), "not really a png");
+        StubPrinter printer = new StubPrinter((html, call) -> 1, true);
+        // Another export, the Projects tab or a build of the MCP rebuilds the project: static-html/ is gone for a while.
+        printer.beforeLayingOut = () -> PdfExportJob.deleteDirectory(staticDir);
+
+        Job<ExportOutcome> job = run(printer, () -> true, new ReentrantLock());
+
+        assertEquals(Job.State.DONE, job.state(), job.error());
+        assertFalse(printer.imageUrls.isEmpty(), "the page has an image the printing should read");
+        assertTrue(printer.missingImages.isEmpty(), "images Chrome would not find: " + printer.missingImages);
+    }
+
+    @Test
+    void mayBeStopped_whileTheHtmlIsRebuilt_isFalse_becauseAStoppedBuildLeavesHalfAWrittenSite() throws Exception {
+        java.util.concurrent.CountDownLatch inRebuild = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        Job<ExportOutcome> job = registry.submit("export", "proj/A", (Job<ExportOutcome> j) -> {
+            j.phase(PdfExportJob.PHASE_BUILDING_THE_HTML);
+            inRebuild.countDown();
+            release.await();
+            j.phase("Printing (1 of at most 3)");
+            Thread.sleep(2_000);
+        }, System.currentTimeMillis());
+        assertTrue(inRebuild.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertFalse(PdfExportJob.mayBeStopped(job), "a rebuild is not stopped half way");
+        release.countDown();
+        for (int i = 0; i < 100 && !PdfExportJob.mayBeStopped(job); i++) Thread.sleep(20);
+        assertTrue(PdfExportJob.mayBeStopped(job), "once it prints, it may be stopped");
+    }
+
+    @Test
+    void mayBeStopped_beforeTheJobHasSaidWhatItDoes_isFalse() throws Exception {
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        Job<ExportOutcome> job = registry.submit("export", "proj/A", (Job<ExportOutcome> j) -> release.await(), System.currentTimeMillis());
+        assertFalse(PdfExportJob.mayBeStopped(job), "a job that has just started is about to rebuild");
+        release.countDown();
     }
 }
