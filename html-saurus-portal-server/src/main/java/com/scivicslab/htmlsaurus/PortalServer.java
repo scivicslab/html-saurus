@@ -99,6 +99,7 @@ public class PortalServer implements PortalReads {
      *  ({@code WhereJobControlBelongs_260901_oo01}). Finished jobs stay readable for an hour so a
      *  browser that was away can still collect the outcome. */
     private final com.scivicslab.jobregistry.JobRegistry batchJobs;
+    private static final java.util.logging.Logger EXPORT_LOGGER = java.util.logging.Logger.getLogger(PortalServer.class.getName());
     /** One lock per project, held while an export rebuilds the project's HTML and reads it (ExportToPdf_261119_oo01). */
     private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantLock> exportLocks =
         new java.util.concurrent.ConcurrentHashMap<>();
@@ -2463,6 +2464,13 @@ public class PortalServer implements PortalReads {
               a.setAttribute('download', j.exportFile || 'export.pdf');
               return a;
             }
+            // The line beside Make PDF: what happened to the press, in red when it failed, so it is not missed.
+            function showExportStatus(text, isError) {
+              const status = document.getElementById('export-status');
+              status.textContent = text;
+              status.style.color = isError ? '#f38ba8' : '';
+              status.style.fontWeight = isError ? '700' : '';
+            }
             function renderExportJobs(jobs) {
               const box = document.getElementById('export-jobs');
               if (!box) return;
@@ -2479,6 +2487,7 @@ public class PortalServer implements PortalReads {
                 line.textContent = importJobLine(j);
                 row.appendChild(name);
                 row.appendChild(line);
+                if (j.state === 'error') line.style.color = '#f38ba8';
                 if (j.state === 'done') row.appendChild(exportDownloadLink(j));
                 box.appendChild(row);
               });
@@ -2516,18 +2525,21 @@ public class PortalServer implements PortalReads {
               const btn = document.getElementById('export-start');
               if (!btn) return;
               btn.addEventListener('click', async function () {
-                const status = document.getElementById('export-status');
                 btn.disabled = true;
-                status.textContent = 'Starting...';
+                showExportStatus('Starting...', false);
                 try {
                   const r = await fetch(BASE + '/api/export/pdf/start', {method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({project: document.getElementById('export-project').value,
                                           dir: document.getElementById('export-dir').value})});
-                  const j = await r.json();
-                  status.textContent = r.ok ? 'Started.' : 'Could not start: ' + (j.error || r.status);
+                  // The answer may not be JSON (a proxy's page, for one), so it is read as text first.
+                  const text = await r.text();
+                  let answer = null;
+                  try { answer = JSON.parse(text); } catch (notJson) { answer = null; }
+                  if (r.ok) showExportStatus('Started. Its progress is listed below.', false);
+                  else showExportStatus('Could not start (HTTP ' + r.status + '): ' + (answer && answer.error ? answer.error : text.slice(0, 200)), true);
                 } catch (e) {
-                  status.textContent = 'Could not start: ' + e;
+                  showExportStatus('Could not start: ' + e + ' (no answer from the portal)', true);
                 }
                 btn.disabled = false;
                 refreshImportJobs();
@@ -3889,20 +3901,20 @@ public class PortalServer implements PortalReads {
             new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         Project proj = body.get("project") instanceof String s ? projectMap.get(s) : null;
         if (proj == null) {
-            respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
+            refuseExport(ex, 404, "Project not found: " + body.get("project"));
             return;
         }
         String dir = body.get("dir") instanceof String s ? s.replace('\\', '/').replaceAll("^/+|/+$", "") : "";
         Path docs = proj.projectDir().resolve("docs").normalize();
         Path chosen = docs.resolve(dir).normalize();
         if (!chosen.startsWith(docs) || !Files.isDirectory(chosen)) {
-            respond(ex, 400, "application/json", "{\"error\":" + jsonStr("no such directory under docs/: " + dir) + "}");
+            refuseExport(ex, 400, "no such directory under docs/: " + dir + " (project " + proj.name() + ")");
             return;
         }
         java.util.Optional<Path> chrome = ChromePrinter.findChrome();
         if (chrome.isEmpty()) {
-            respond(ex, 500, "application/json", "{\"error\":" + jsonStr("no Chrome to print with: set -D" + ChromePrinter.PROPERTY
-                + " or put one of " + ChromePrinter.CANDIDATES + " on PATH") + "}");
+            refuseExport(ex, 500, "no Chrome to print with: set -D" + ChromePrinter.PROPERTY
+                + " or put one of " + ChromePrinter.CANDIDATES + " on PATH");
             return;
         }
         // The directory as the file system names it, so that the label and the PDF's name follow what was found.
@@ -3913,7 +3925,15 @@ public class PortalServer implements PortalReads {
             exportLocks.computeIfAbsent(proj.name(), name -> new java.util.concurrent.locks.ReentrantLock()));
         String label = proj.name() + (directory.isEmpty() ? "" : "/" + directory);
         com.scivicslab.jobregistry.Job<?> job = batchJobs.submit("export", label, work::exportToPdf, System.currentTimeMillis());
+        EXPORT_LOGGER.log(java.util.logging.Level.INFO, "Export started: project {0}, directory ''{1}'', job {2}",
+            new Object[] {proj.name(), directory, job.id()});
         respond(ex, 202, "application/json", "{\"jobId\":" + jsonStr(job.id()) + "}");
+    }
+
+    /** Answers a request to start an export with an error, and logs it: a press of Make PDF must leave a trace. */
+    private void refuseExport(HttpExchange ex, int status, String message) throws IOException {
+        EXPORT_LOGGER.log(java.util.logging.Level.WARNING, "Export not started: {0}", message);
+        respond(ex, status, "application/json", "{\"error\":" + jsonStr(message) + "}");
     }
 
     /** Handles {@code GET /api/export/download?jobId=...}: the PDF of a finished export, as a download. */

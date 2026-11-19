@@ -144,6 +144,11 @@ final class PdfExportJob {
             job.progress(steps, steps);
             job.phase(total + " pages");
             job.result(new ExportOutcome(workDir, out, total, plan.documentCount(), warning));
+            LOGGER.log(Level.INFO, "Export done: project {0}, directory ''{1}'', {2} pages{3}",
+                    new Object[] {project, dirRel, total, warning.isEmpty() ? "" : "; " + warning});
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Export failed: project {0}, directory ''{1}'': {2}", new Object[] {project, dirRel, e.toString()});
+            throw e;
         } finally {
             deleteIntermediateFiles();
         }
