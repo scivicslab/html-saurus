@@ -9,11 +9,12 @@ import java.nio.file.Path;
  * @param pdf       the PDF, or {@code null} while the export is still running or when it did not finish
  * @param pages     its page count
  * @param documents how many documents it holds
+ * @param warning   what the PDF may lack, for the line the browser shows; empty when nothing is known to be missing
  */
-record ExportOutcome(Path workDirectory, Path pdf, int pages, int documents) {
+record ExportOutcome(Path workDirectory, Path pdf, int pages, int documents, String warning) {
 
     /** @return the outcome of an export that has started and has no PDF yet */
     static ExportOutcome startedIn(Path workDirectory) {
-        return new ExportOutcome(workDirectory, null, 0, 0);
+        return new ExportOutcome(workDirectory, null, 0, 0, "");
     }
 }

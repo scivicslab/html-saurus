@@ -6,6 +6,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,17 +32,21 @@ final class PdfExportHtml {
     static final String THEME = "light-clean";
 
     /**
-     * @param plan     what the PDF holds
-     * @param source   where the chosen directory is, shown on the cover, for example {@code doc_AASG1/docs/AAS-G1}
-     * @param staticDir the doc project's {@code static-html/}
-     * @param pages    the page each part starts on, by part number; empty on the first printing, when the table of
-     *                 contents shows {@code 000}
+     * The body of every part, read from the built pages once, so that the combined HTML can be written again with other
+     * page numbers in its table of contents without reading the site again.
+     *
+     * @param plan   what the PDF holds
+     * @param source where the chosen directory is, shown on the cover, for example {@code doc_AASG1/docs/AAS-G1}
+     * @param bodies the body of each part in the order of {@code plan.parts()}; {@code null} for a part with no page
      */
-    static String renderCombinedHtml(PdfExportPlan plan, String source, Path staticDir, Map<Integer, Integer> pages) throws IOException {
-        Map<String, String> anchorOfHref = new HashMap<>();
-        for (PdfExportPlan.Part p : plan.parts()) {
-            if (p.href() != null) anchorOfHref.putIfAbsent(normalize(p.href()), p.anchor());
-        }
+    record Prepared(PdfExportPlan plan, String source, List<String> bodies) {
+
+    /**
+     * @param pages the page each part starts on, by part number; empty on the first printing, when the table of
+     *              contents shows {@code 000}
+     * @return the combined HTML: a cover, the table of contents, and the parts
+     */
+    String render(Map<Integer, Integer> pages) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("<!DOCTYPE html>\n<html lang=\"ja\" data-theme=\"").append(THEME).append("\">\n<head>\n<meta charset=\"UTF-8\">\n");
         sb.append("<title>").append(esc(plan.title())).append("</title>\n");
@@ -80,21 +85,46 @@ final class PdfExportHtml {
 
         // Body
         PdfExportPlan.Part previous = null;
-        for (PdfExportPlan.Part p : plan.parts()) {
+        List<PdfExportPlan.Part> parts = plan.parts();
+        for (int index = 0; index < parts.size(); index++) {
+            PdfExportPlan.Part p = parts.get(index);
             // A directory's heading and the part right after it (its first document or first subdirectory) share a page;
             // every other part starts a new one.
             boolean sharesPage = previous != null && previous.folder() && previous.href() == null && p.level() == previous.level() + 1;
             int h = Math.min(p.level(), 6);
             sb.append("<section class=\"hs-part").append(sharesPage ? "" : " hs-break").append("\" id=\"").append(p.anchor()).append("\">\n");
             sb.append("<h").append(h).append(" class=\"hs-part-title").append(p.folder() ? " hs-folder-title" : "").append("\">")
-              .append(esc(p.title())).append("<span class=\"hs-marker\">").append(p.marker()).append("</span></h").append(h).append(">\n");
+              .append(esc(p.title())).append("</h").append(h).append(">\n");
             // Wrapped in <main> so the page's own "main ..." styles apply as they do on screen.
-            if (p.href() != null) sb.append("<main class=\"hs-main\">\n").append(bodyOfPage(staticDir, p, anchorOfHref)).append("</main>\n");
+            if (bodies.get(index) != null) sb.append("<main class=\"hs-main\">\n").append(bodies.get(index)).append("</main>\n");
             sb.append("</section>\n");
             previous = p;
         }
         sb.append("</body>\n</html>\n");
         return sb.toString();
+    }
+    }
+
+    /**
+     * Reads the body of every part of a plan from the built pages.
+     *
+     * @param plan      what the PDF holds
+     * @param source    where the chosen directory is, shown on the cover
+     * @param staticDir the doc project's {@code static-html/}
+     */
+    static Prepared prepare(PdfExportPlan plan, String source, Path staticDir) throws IOException {
+        Map<String, String> anchorOfHref = new HashMap<>();
+        for (PdfExportPlan.Part p : plan.parts()) {
+            if (p.href() != null) anchorOfHref.putIfAbsent(normalize(p.href()), p.anchor());
+        }
+        List<String> bodies = new ArrayList<>();
+        for (PdfExportPlan.Part p : plan.parts()) bodies.add(p.href() == null ? null : bodyOfPage(staticDir, p, anchorOfHref));
+        return new Prepared(plan, source, bodies);
+    }
+
+    /** @return the combined HTML of a plan, read from the built pages and written with the given page numbers */
+    static String renderCombinedHtml(PdfExportPlan plan, String source, Path staticDir, Map<Integer, Integer> pages) throws IOException {
+        return prepare(plan, source, staticDir).render(pages);
     }
 
     /** One page's body, ready to sit under its part's heading. */
@@ -109,6 +139,14 @@ final class PdfExportHtml {
         Element main = doc.selectFirst("main");
         if (main == null) return "";
         main.select(".copy-bar, .source-footer, .page-last-updated, .page-nav, script").remove();
+        // Chrome prints with access to local files, so nothing that loads another page or runs code stays.
+        main.select("iframe, frame, frameset, object, embed, applet, link, base, meta").remove();
+        for (Element e : main.getAllElements()) {
+            for (org.jsoup.nodes.Attribute attribute : new ArrayList<>(e.attributes().asList())) {
+                if (attribute.getKey().toLowerCase(java.util.Locale.ROOT).startsWith("on")) e.removeAttr(attribute.getKey());
+            }
+        }
+        main.select("img[srcset], source[srcset]").removeAttr("srcset");
         Element h1 = main.selectFirst("h1");
         if (h1 != null) h1.remove();
 
@@ -124,15 +162,9 @@ final class PdfExportHtml {
 
         URI pageUri = file.toUri();
         for (Element img : main.select("img[src], source[src]")) {
-            String src = img.attr("src");
-            if (src.startsWith("data:") || src.startsWith("http://") || src.startsWith("https://")) continue;
-            try {
-                Path target = src.startsWith("/") ? staticDir.resolve(src.substring(1))
-                        : Path.of(pageUri.resolve(src)).normalize();
-                img.attr("src", target.toUri().toString());
-            } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
-                // A src that is not a file path stays as it is.
-            }
+            String url = siteImageUrl(staticDir, pageUri, img.attr("src"));
+            if (url == null) img.remove();
+            else img.attr("src", url);
         }
         for (Element a : main.select("a[href]")) {
             String href = a.attr("href");
@@ -148,6 +180,49 @@ final class PdfExportHtml {
             }
         }
         return main.html() + "\n";
+    }
+
+    /**
+     * Decides what an image's {@code src} becomes in the combined HTML, which is printed from a file URL.
+     *
+     * @return the {@code src} for the combined HTML: a web or {@code data:} URL as it is, a file of the site as a {@code file:}
+     *         URL; {@code null} when the image is another kind of URL, or a file outside {@code static-html/}
+     */
+    static String siteImageUrl(Path staticDir, URI pageUri, String src) {
+        String trimmed = src.strip();
+        if (trimmed.startsWith("data:") || trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+        if (trimmed.startsWith("//")) return null;
+        try {
+            URI parsed = new URI(trimmed.replace(" ", "%20"));
+            if (parsed.getScheme() != null) return null;
+            Path root = staticDir.toAbsolutePath().normalize();
+            Path target = trimmed.startsWith("/") ? root.resolve(parsed.getPath().substring(1))
+                    : Path.of(pageUri.resolve(new URI(null, null, parsed.getPath(), null)));
+            target = target.toAbsolutePath().normalize();
+            return target.startsWith(root) ? target.toUri().toString() : null;
+        } catch (java.net.URISyntaxException | IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
+            return null;
+        }
+    }
+
+    /** How many math expressions {@link #mathExpressions} returns at most. */
+    static final int MATH_SAMPLES = 5;
+
+    /**
+     * Finds math the page's script is expected to turn into formulas: text between {@code $} or {@code $$} outside code.
+     * If one of them is still in the printed PDF as it was written, the script did not run.
+     *
+     * @param html the combined HTML
+     * @return at most {@value #MATH_SAMPLES} expressions, each with its delimiters
+     */
+    static List<String> mathExpressions(String html) {
+        Document doc = Jsoup.parse(html);
+        doc.select("pre, code, script, style").remove();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\\$\\$[^$]+?\\$\\$|\\$[^$\\s][^$]{0,78}?\\$").matcher(doc.body().wholeText());
+        List<String> found = new ArrayList<>();
+        while (found.size() < MATH_SAMPLES && matcher.find()) found.add(matcher.group());
+        return found;
     }
 
     /** @return the built file of a page: {@code static-html/<href>/index.html} */
@@ -193,7 +268,6 @@ final class PdfExportHtml {
         main.hs-main { display: block !important; margin: 0 !important; padding: 0 !important; max-width: none !important;
                        width: auto !important; grid-column: auto !important; }
         .hs-part { margin: 0; padding: 0; }
-        .hs-marker { font-size: 2px; color: #fff; }
         .hs-cover { padding-top: 35vh; text-align: center; }
         .hs-cover-title { font-size: 28pt; font-weight: 700; margin-bottom: 18pt; }
         .hs-cover-source { font-size: 11pt; color: #57606a; font-family: monospace; margin-bottom: 6pt; }
@@ -203,7 +277,7 @@ final class PdfExportHtml {
         .hs-toc-line a { color: inherit !important; text-decoration: none; }
         .hs-toc-line::after { content: ""; }
         .hs-toc-line a { flex: 0 1 auto; }
-        .hs-toc-page { margin-left: auto; padding-left: 12pt; font-variant-numeric: tabular-nums; }
+        .hs-toc-page { margin-left: auto; padding-left: 12pt; min-width: 4em; text-align: right; font-variant-numeric: tabular-nums; }
         .hs-toc-folder { font-weight: 700; margin-top: 4pt; }
         .hs-toc-l2 { padding-left: 1.5em; } .hs-toc-l3 { padding-left: 3em; } .hs-toc-l4 { padding-left: 4.5em; }
         .hs-toc-l5 { padding-left: 6em; } .hs-toc-l6 { padding-left: 7.5em; }

@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * Prints an HTML file to PDF with headless Chrome, the way a browser shows it: KaTeX and Mermaid run, and the fonts
  * of the machine are used (ExportToPdf_261119_oo01).
  */
-final class ChromePrinter {
+final class ChromePrinter implements HtmlToPdfPrinter {
 
     /** The system property that names the Chrome to use. */
     static final String PROPERTY = "html-saurus.chrome";
@@ -47,13 +47,15 @@ final class ChromePrinter {
     }
 
     /**
-     * Prints {@code html} to {@code pdf}.
+     * Prints {@code html} to {@code pdf}. Chrome and the processes it started are killed when the printing is
+     * interrupted, runs past {@code timeout}, or ends in any other way before Chrome has exited.
      *
      * @param workDir where Chrome keeps its profile and its log for this printing
      * @throws IOException when Chrome fails, runs past {@code timeout}, or writes no PDF; the message holds the end of
      *                     its log
      */
-    void printHtmlToPdf(Path html, Path pdf, Path workDir, Duration timeout) throws IOException, InterruptedException {
+    @Override
+    public void printHtmlToPdf(Path html, Path pdf, Path workDir, Duration timeout) throws IOException, InterruptedException {
         Files.deleteIfExists(pdf);
         Path profile = Files.createDirectories(workDir.resolve("chrome-profile"));
         Path log = workDir.resolve("chrome.log");
@@ -71,13 +73,25 @@ final class ChromePrinter {
         if ("root".equals(System.getProperty("user.name"))) cmd.add(1, "--no-sandbox");
         cmd.add(html.toUri().toString());
         Process process = new ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(log.toFile()).start();
-        if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            process.destroyForcibly();
-            throw new IOException("Chrome did not finish printing within " + timeout.toSeconds() + " s: " + tail(log));
+        try {
+            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                throw new IOException("Chrome did not finish printing within " + timeout.toSeconds() + " s: " + tail(log));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } finally {
+            killWithChildren(process);
         }
         if (!Files.isRegularFile(pdf) || Files.size(pdf) == 0) {
             throw new IOException("Chrome wrote no PDF (exit " + process.exitValue() + "): " + tail(log));
         }
+    }
+
+    /** Kills a process that is still running, and every process it started: Chrome runs its renderers as children. */
+    private static void killWithChildren(Process process) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
     }
 
     private static String tail(Path log) {

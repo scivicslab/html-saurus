@@ -27,12 +27,21 @@ record PdfExportPlan(String title, List<Part> parts) {
     record Part(int level, String title, String href, boolean folder, int number) {
         /** @return the id of this part's place in the combined HTML */
         String anchor() {
-            return "hs-part-" + number;
+            return ANCHOR_PREFIX + number;
         }
 
-        /** @return the text that marks this part's page in the printed PDF */
-        String marker() {
-            return String.format("HSXA%04dXZ", number);
+    }
+
+    /** The start of every part's anchor: {@code hs-part-<number>}. */
+    static final String ANCHOR_PREFIX = "hs-part-";
+
+    /** @return the number of the part an anchor names, or {@code null} when the name is not a part's anchor */
+    static Integer partNumberOfAnchor(String name) {
+        if (name == null || !name.startsWith(ANCHOR_PREFIX)) return null;
+        try {
+            return Integer.valueOf(name.substring(ANCHOR_PREFIX.length()));
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

@@ -99,6 +99,9 @@ public class PortalServer implements PortalReads {
      *  ({@code WhereJobControlBelongs_260901_oo01}). Finished jobs stay readable for an hour so a
      *  browser that was away can still collect the outcome. */
     private final com.scivicslab.jobregistry.JobRegistry batchJobs;
+    /** One lock per project, held while an export rebuilds the project's HTML and reads it (ExportToPdf_261119_oo01). */
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantLock> exportLocks =
+        new java.util.concurrent.ConcurrentHashMap<>();
     /** Number of not-yet-completed OCR pages {@link GpuBrokerOcrClient} allows in flight per
      *  backend before {@code client.submit} blocks the calling {@code PdfImportJobActor}'s
      *  thread -- generous relative to this codebase's actual concurrent-import-job count, since
@@ -395,6 +398,8 @@ public class PortalServer implements PortalReads {
      * @throws IOException if the server socket cannot be opened
      */
     public HttpServer start() throws IOException {
+        // A directory an earlier portal left behind has a PDF or a Chrome profile nobody will delete.
+        PdfExportJob.deleteStaleWorkDirectories(Path.of(System.getProperty("java.io.tmpdir")), java.time.Duration.ofDays(1));
         var server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         server.createContext("/", this::handleAll);
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
@@ -1502,6 +1507,17 @@ public class PortalServer implements PortalReads {
     }
 
     /**
+     * Builds a project's HTML for an export.
+     *
+     * @return false when {@code BuildStages.build} reports that the build failed
+     */
+    private boolean rebuildHtmlOf(Project proj) {
+        boolean built = BuildStages.build(proj.projectDir().resolve("docs"), proj.staticDir(), false, threads);
+        if (built) invalidatePrerequisiteOfIndex();
+        return built;
+    }
+
+    /**
      * Runs one build stage ({@code html}, {@code index}, {@code embedding}, or {@code all}) for a
      * project. Shared by {@link #handleBuildStage} (REST) and the MCP {@code build-*} tools.
      *
@@ -2363,7 +2379,8 @@ public class PortalServer implements PortalReads {
               }
               if (j.kind === 'export') {
                 if (j.state === 'running') return (j.phase || 'Working') + '...';
-                if (j.state === 'done') return 'Done: ' + j.exportPages + ' page(s), ' + j.exportDocuments + ' document(s).';
+                if (j.state === 'done') return 'Done: ' + j.exportPages + ' page(s), ' + j.exportDocuments + ' document(s).'
+                  + (j.exportWarning ? ' Warning: ' + j.exportWarning : '');
                 if (j.state === 'stopped') return 'Stopped. No PDF was made.';
                 return 'Error: ' + (j.error || 'unknown');
               }
@@ -2398,6 +2415,7 @@ public class PortalServer implements PortalReads {
                 if (j.state === 'running') anyRunning = true;
                 const row = document.createElement('div');
                 row.className = 'import-job';
+                row.dataset.jobId = j.jobId;
                 const name = document.createElement('span');
                 name.className = 'import-job-label';
                 name.textContent = j.label;
@@ -2452,6 +2470,7 @@ public class PortalServer implements PortalReads {
               jobs.forEach(function (j) {
                 const row = document.createElement('div');
                 row.className = 'import-job';
+                row.dataset.jobId = j.jobId;
                 const name = document.createElement('span');
                 name.className = 'import-job-label';
                 name.textContent = j.label;
@@ -3877,19 +3896,22 @@ public class PortalServer implements PortalReads {
         Path docs = proj.projectDir().resolve("docs").normalize();
         Path chosen = docs.resolve(dir).normalize();
         if (!chosen.startsWith(docs) || !Files.isDirectory(chosen)) {
-            respond(ex, 400, "application/json", "{\"error\":\"no such directory under docs/: " + dir.replace("\"", "") + "\"}");
+            respond(ex, 400, "application/json", "{\"error\":" + jsonStr("no such directory under docs/: " + dir) + "}");
             return;
         }
         java.util.Optional<Path> chrome = ChromePrinter.findChrome();
         if (chrome.isEmpty()) {
-            respond(ex, 500, "application/json", "{\"error\":\"no Chrome to print with: set -D" + ChromePrinter.PROPERTY
-                + " or put one of " + ChromePrinter.CANDIDATES + " on PATH\"}");
+            respond(ex, 500, "application/json", "{\"error\":" + jsonStr("no Chrome to print with: set -D" + ChromePrinter.PROPERTY
+                + " or put one of " + ChromePrinter.CANDIDATES + " on PATH") + "}");
             return;
         }
-        Path workDir = Files.createTempDirectory("html-saurus-export-");
-        PdfExportJob work = new PdfExportJob(proj.name(), docs, proj.staticDir(), dir, workDir,
-            new ChromePrinter(chrome.get()), () -> runBuildStage(proj, "html"));
-        String label = proj.name() + (dir.isEmpty() ? "" : "/" + dir);
+        // The directory as the file system names it, so that the label and the PDF's name follow what was found.
+        String directory = docs.relativize(chosen).toString().replace('\\', '/');
+        Path workDir = Files.createTempDirectory(PdfExportJob.WORK_DIRECTORY_PREFIX);
+        PdfExportJob work = new PdfExportJob(proj.name(), docs, proj.staticDir(), directory, workDir,
+            new ChromePrinter(chrome.get()), () -> rebuildHtmlOf(proj),
+            exportLocks.computeIfAbsent(proj.name(), name -> new java.util.concurrent.locks.ReentrantLock()));
+        String label = proj.name() + (directory.isEmpty() ? "" : "/" + directory);
         com.scivicslab.jobregistry.Job<?> job = batchJobs.submit("export", label, work::exportToPdf, System.currentTimeMillis());
         respond(ex, 202, "application/json", "{\"jobId\":" + jsonStr(job.id()) + "}");
     }
@@ -3902,14 +3924,13 @@ public class PortalServer implements PortalReads {
             respond(ex, 404, "application/json", "{\"error\":\"no finished export with that jobId\"}");
             return;
         }
-        byte[] pdf = Files.readAllBytes(out.pdf());
         String name = out.pdf().getFileName().toString();
         ex.getResponseHeaders().set("Content-Type", "application/pdf");
         ex.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"" + name.replaceAll("[^A-Za-z0-9._-]", "_")
             + "\"; filename*=UTF-8''" + java.net.URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20"));
-        ex.sendResponseHeaders(200, pdf.length);
+        ex.sendResponseHeaders(200, Files.size(out.pdf()));
         try (java.io.OutputStream os = ex.getResponseBody()) {
-            os.write(pdf);
+            Files.copy(out.pdf(), os);
         }
     }
 
@@ -3936,6 +3957,7 @@ public class PortalServer implements PortalReads {
             + ",\"message\":" + jsonStr(job.result() instanceof BuildOutcome b ? b.message() : "")
             + (job.result() instanceof ExportOutcome e
                 ? ",\"exportPages\":" + e.pages() + ",\"exportDocuments\":" + e.documents()
+                  + ",\"exportWarning\":" + jsonStr(e.warning())
                   + ",\"exportFile\":" + jsonStr(e.pdf() == null ? "" : e.pdf().getFileName().toString())
                 : "")
             + ",\"error\":" + (job.state() == com.scivicslab.jobregistry.Job.State.ERROR

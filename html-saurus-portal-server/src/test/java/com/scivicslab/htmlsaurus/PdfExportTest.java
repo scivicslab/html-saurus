@@ -164,7 +164,6 @@ class PdfExportTest {
         assertTrue(first.contains("doc_AASG1/docs/AAS-G1"));
         assertEquals(plan.parts().size(), first.split("hs-toc-page\">000<", -1).length - 1, "first printing: every line shows 000");
         for (PdfExportPlan.Part p : plan.parts()) {
-            assertTrue(first.contains(p.marker()), p.title());
             assertTrue(first.contains("id=\"" + p.anchor() + "\""), p.title());
         }
         assertTrue(first.contains("body of Guide"));
@@ -184,6 +183,31 @@ class PdfExportTest {
         String body = PdfExportHtml.bodyOfPage(staticDir, plan.parts().get(1), Map.of());
         assertTrue(body.contains("graph LR\n  A[Browser] --&gt; B[Portal]\n  B --&gt; C[Chrome]\n"),
                 "Mermaid reads the lines of the diagram as they were written: " + body);
+    }
+
+    @Test
+    void bodyOfPage_dropsWhatWouldReadFilesOutsideTheSite_andWhatRunsCode() throws Exception {
+        Path staticDir = dir.resolve("static-html");
+        Path secret = Files.writeString(dir.resolve("secret.png"), "x");
+        page(staticDir, "/AAS-G1/CHM13-expr1/Plan/", """
+                <h1>Plan</h1>
+                <img id="inside" src="fig.png">
+                <img id="up" src="../../../../secret.png">
+                <img id="absolute" src="file://%s">
+                <img id="schemeless" src="//example.org/x.png">
+                <img id="web" src="https://example.org/x.png">
+                <img id="handler" src="fig.png" onerror="alert(1)" onclick="x()">
+                <iframe src="https://example.org/"></iframe><object data="x"></object><embed src="x">
+                <p onmouseover="x()">text</p>
+                """.formatted(secret));
+        PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
+        String body = PdfExportHtml.bodyOfPage(staticDir, plan.parts().get(1), Map.of());
+        assertTrue(body.contains("fig.png"), "an image of the site stays: " + body);
+        assertTrue(body.contains("https://example.org/x.png"), "an image on the web stays: " + body);
+        assertFalse(body.contains("secret.png"), "an image outside the site is dropped: " + body);
+        assertFalse(body.contains("//example.org/x.png\"") && body.contains("id=\"schemeless\" src"), "a scheme-less URL is dropped: " + body);
+        assertFalse(body.contains("<iframe") || body.contains("<object") || body.contains("<embed"), body);
+        assertFalse(body.contains("onerror") || body.contains("onclick") || body.contains("onmouseover"), body);
     }
 
     @Test
@@ -209,39 +233,20 @@ class PdfExportTest {
         PdfExportJob.deleteDirectory(null);
     }
 
-    private Path pdfWithMarkers(String... pageTexts) throws Exception {
-        Path pdf = dir.resolve("in.pdf");
-        try (PDDocument doc = new PDDocument()) {
-            PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
-            for (String text : pageTexts) {
-                PDPage page = new PDPage();
-                doc.addPage(page);
-                try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
-                    cs.beginText();
-                    cs.setFont(font, 12);
-                    cs.newLineAtOffset(72, 700);
-                    cs.showText(text);
-                    cs.endText();
-                }
-            }
-            doc.save(pdf.toFile());
-        }
-        return pdf;
-    }
-
     @Test
-    void eachPartsPageIsFoundByItsMarker_thenPagesAreNumberedAndBookmarked() throws Exception {
+    void eachPartsPageIsReadFromTheLinksOfTheContents_thenPagesAreNumberedAndBookmarked() throws Exception {
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
-        List<PdfExportPlan.Part> p = plan.parts();
-        Path pdf = pdfWithMarkers("cover", "Contents",
-                "CHM13 " + p.get(0).marker() + " Plan " + p.get(1).marker(), "Index " + p.get(2).marker(),
-                "GRCh38 " + p.get(3).marker() + " Log in " + p.get(4).marker(), "Manuals " + p.get(5).marker(),
-                "Guide " + p.get(6).marker());
-        Map<Integer, Integer> pages = PdfExportFinish.readPartPages(pdf, plan);
-        assertEquals(Map.of(1, 3, 2, 3, 3, 4, 4, 5, 5, 5, 6, 6, 7, 7), pages);
+        Map<Integer, Integer> start = Map.of(1, 3, 2, 3, 3, 4, 4, 5, 5, 5, 6, 6, 7, 7);
+        Path pdf = dir.resolve("in.pdf");
+        ExportTestPdfs.write(pdf, List.of("cover", "Contents", "CHM13 Plan", "Index", "GRCh38 Log in", "Manuals", "Guide"), 2, start);
+
+        PdfExportFinish.PrintedPages found = PdfExportFinish.readPrintedPages(pdf, plan);
+        assertEquals(Map.of(1, 3, 2, 3, 3, 4, 4, 5, 5, 5, 6, 6, 7, 7), found.parts());
+        assertEquals(2, found.contentsPage());
+        Map<Integer, Integer> pages = found.parts();
 
         Path out = dir.resolve("out.pdf");
-        assertEquals(7, PdfExportFinish.stampPageNumbersAndBookmarks(pdf, out, plan, pages, 2));
+        assertEquals(7, PdfExportFinish.stampPageNumbersAndBookmarks(pdf, out, plan, pages, found.contentsPage()));
         try (PDDocument doc = Loader.loadPDF(out.toFile())) {
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setStartPage(4);
@@ -256,5 +261,39 @@ class PdfExportTest {
             for (PDOutlineItem it : chm.children()) under.add(it.getTitle());
             assertEquals(List.of("Plan", "Index"), under, "documents nest under their directory");
         }
+    }
+
+    @Test
+    void readPrintedPages_whenAPartHasNoLink_namesTheParts() throws Exception {
+        PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
+        Path pdf = dir.resolve("in.pdf");
+        ExportTestPdfs.write(pdf, List.of("cover", "Contents", "a"), 2, Map.of(1, 3, 2, 3));
+        IllegalStateException failure = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> PdfExportFinish.readPrintedPages(pdf, plan));
+        assertTrue(failure.getMessage().contains("Index"), failure.getMessage());
+    }
+
+    @Test
+    void renderCombinedHtml_putsEveryContentsNumberInAColumnOfOneWidth_andNoMarkerInTheText() throws Exception {
+        Path staticDir = dir.resolve("static-html");
+        PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "AAS-G1", "doc_AASG1");
+        String html = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs/AAS-G1", staticDir, Map.of());
+        assertTrue(html.contains("min-width: 4em; text-align: right"), "a 3-digit placeholder and a 1-digit page take the same width");
+        assertFalse(html.contains("HSXA"), "nothing is hidden in the text of the pages");
+    }
+
+    @Test
+    void mathExpressions_findsMathOutsideCodeOnly() {
+        String html = "<body><p>The $E = mc^2$ and $$x_1 + x_2$$ here.</p><pre><code>echo $HOME and $PATH</code></pre><p>It costs 5 dollars.</p></body>";
+        assertEquals(List.of("$E = mc^2$", "$$x_1 + x_2$$"), PdfExportHtml.mathExpressions(html));
+    }
+
+    @Test
+    void textContainsAny_ignoresWhiteSpace() throws Exception {
+        Path pdf = dir.resolve("text.pdf");
+        ExportTestPdfs.write(pdf, List.of("The formula $E = mc^2$ here."), 0, Map.of());
+        assertTrue(PdfExportFinish.textContainsAny(pdf, List.of("$E=mc^2$")));
+        assertFalse(PdfExportFinish.textContainsAny(pdf, List.of("$F=ma$")));
+        assertFalse(PdfExportFinish.textContainsAny(pdf, List.of()));
     }
 }

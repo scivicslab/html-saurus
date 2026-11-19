@@ -7,8 +7,10 @@ import com.microsoft.playwright.Download;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.Response;
 import com.microsoft.playwright.options.WaitForSelectorState;
 
+import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -26,7 +28,15 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineNode;
 import org.apache.pdfbox.rendering.PDFRenderer;
+import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDNamedDestination;
+import org.apache.pdfbox.pdmodel.interactive.documentnavigation.destination.PDPageDestination;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.PDFTextStripperByArea;
 
 /**
  * E2E test for the portal's Export tab (ExportToPdf_261119_oo01): picks a directory of a doc project, makes the PDF,
@@ -63,8 +73,14 @@ public class ExportTabE2E {
     private static int passed = 0;
     private static int failed = 0;
 
-    /** One line of the table of contents: the heading and the page it says. */
-    private record ContentsLine(String title, int page) {}
+    /**
+     * One line of the table of contents.
+     *
+     * @param title  the heading the line shows
+     * @param shown  the page number the line shows at its end
+     * @param linked the page the line's link points at
+     */
+    private record ContentsLine(String title, int shown, int linked) {}
 
     public static void main(String[] args) throws Exception {
         Files.createDirectories(OUT);
@@ -117,34 +133,44 @@ public class ExportTabE2E {
         System.out.println("  directories offered: " + values.size());
 
         page.selectOption("#export-dir", DIRECTORY);
-        page.click("#export-start");
-        String line = waitUntilTheExportEnds(page);
+        String jobId = startTheExport(page);
+        String row = "#export-jobs .import-job[data-job-id=\"" + jobId + "\"]";
+        String line = waitUntilTheExportEnds(page, row);
         System.out.println("  job line: " + line);
         check("the export finished", line.startsWith("Done"), line);
         if (!line.startsWith("Done")) return null;
 
-        Download download = page.waitForDownload(() -> page.locator("#export-jobs a.btn").first().click());
+        Download download = page.waitForDownload(() -> page.locator(row + " a.btn").first().click());
         Path pdf = OUT.resolve("export.pdf");
         download.saveAs(pdf);
         check("the browser downloaded a PDF file",
                 download.suggestedFilename().endsWith(".pdf") && fileStartsWithPdfMagic(pdf), download.suggestedFilename());
         System.out.println("  downloaded " + download.suggestedFilename() + " (" + pdf.toFile().length() + " bytes)");
-        check("the Batch Job tab lists the same job with a Download link", batchTabHasDownload(page), "");
+        check("the Batch Job tab lists the same job with a Download link", batchTabHasDownload(page, jobId), "");
         context.close();
         return pdf;
+    }
+
+    /** Presses {@code Make PDF} and reads the id of the job from the answer to that press. */
+    private static String startTheExport(Page page) {
+        Response answer = page.waitForResponse(r -> r.url().contains("/api/export/pdf/start"), () -> page.click("#export-start"));
+        Matcher matcher = Pattern.compile("\"jobId\"\\s*:\\s*\"([^\"]+)\"").matcher(answer.text());
+        if (!matcher.find()) throw new IllegalStateException("No jobId in the answer: " + answer.text());
+        return matcher.group(1);
     }
 
     /**
      * The page's content security policy forbids the string evaluation that {@code waitForFunction} needs, so the line is
      * read again every two seconds.
      *
+     * @param row the selector of the row of the job this test started; other rows are not looked at
      * @return the job's line once it says Done, Error or Stopped; the last line seen when the time is up
      */
-    private static String waitUntilTheExportEnds(Page page) {
+    private static String waitUntilTheExportEnds(Page page, String row) {
         long deadline = System.currentTimeMillis() + EXPORT_TIMEOUT_MS;
         String line = "";
         while (System.currentTimeMillis() < deadline) {
-            Locator lines = page.locator("#export-jobs .import-job-line");
+            Locator lines = page.locator(row + " .import-job-line");
             if (lines.count() > 0) {
                 line = lines.first().innerText();
                 if (line.startsWith("Done") || line.startsWith("Error") || line.startsWith("Stopped")) return line;
@@ -154,9 +180,9 @@ public class ExportTabE2E {
         return line;
     }
 
-    private static boolean batchTabHasDownload(Page page) {
+    private static boolean batchTabHasDownload(Page page, String jobId) {
         page.click("#tab-btn-batch");
-        return page.locator("#import-jobs a.btn").count() >= 1;
+        return page.locator("#import-jobs .import-job[data-job-id=\"" + jobId + "\"] a.btn").count() >= 1;
     }
 
     private static boolean fileStartsWithPdfMagic(Path file) {
@@ -199,28 +225,32 @@ public class ExportTabE2E {
             check("the PDF has bookmarks", bookmarks.size() > 1, "bookmarks " + bookmarks.size());
             if (bookmarks.size() <= 1) return;
 
-            List<ContentsLine> contents = readContentsLines(pageTexts);
+            List<ContentsLine> contents = readContentsLines(document);
             // The first bookmark is Contents itself; the rest are the parts in order, as the contents lines are.
             List<PDOutlineItem> parts = bookmarks.subList(1, bookmarks.size());
             check("the contents have one line per bookmarked part", contents.size() == parts.size(),
                     contents.size() + " lines, " + parts.size() + " bookmarks");
             int wrongNumber = 0;
+            int differentFromBookmark = 0;
             int missingHeading = 0;
-            for (int i = 0; i < Math.min(contents.size(), parts.size()); i++) {
-                int bookmarkPage = document.getPages().indexOf(parts.get(i).findDestinationPage(document)) + 1;
-                String heading = squash(parts.get(i).getTitle());
-                if (contents.get(i).page() != bookmarkPage) {
+            for (int i = 0; i < contents.size(); i++) {
+                ContentsLine line = contents.get(i);
+                if (line.shown() != line.linked()) {
                     wrongNumber++;
-                    System.out.println("    contents says " + contents.get(i).page() + ", bookmark is on " + bookmarkPage
-                            + ": " + parts.get(i).getTitle());
+                    System.out.println("    the line shows " + line.shown() + ", its link points at " + line.linked() + ": " + line.title());
                 }
-                if (bookmarkPage < 1 || !squash(pageTexts.get(bookmarkPage - 1)).contains(heading)) {
+                if (i < parts.size() && document.getPages().indexOf(parts.get(i).findDestinationPage(document)) + 1 != line.linked()) {
+                    differentFromBookmark++;
+                    System.out.println("    the bookmark is not where the link of " + line.title() + " points (page " + line.linked() + ")");
+                }
+                if (line.linked() < 1 || !squash(pageTexts.get(line.linked() - 1)).contains(squash(line.title()))) {
                     missingHeading++;
-                    System.out.println("    page " + bookmarkPage + " does not carry its heading: " + parts.get(i).getTitle());
+                    System.out.println("    page " + line.linked() + " does not carry its heading: " + line.title());
                 }
             }
-            check("every number in the contents is the page its bookmark points at", wrongNumber == 0, wrongNumber + " differ");
-            check("the page every bookmark points at carries that heading", missingHeading == 0, missingHeading + " do not");
+            check("every number a contents line shows is the page its link points at", wrongNumber == 0, wrongNumber + " differ");
+            check("every bookmark is where the link of the same contents line points", differentFromBookmark == 0, differentFromBookmark + " differ");
+            check("the page every contents line points at carries that heading", missingHeading == 0, missingHeading + " do not");
             check("the contents are in the order of the pages", pagesAscend(contents), "");
             check("Japanese text is on the pages", pageTexts.stream().anyMatch(t -> t.matches("(?s).*[぀-ヿ一-鿿].*")), "");
 
@@ -237,7 +267,7 @@ public class ExportTabE2E {
 
     private static boolean pagesAscend(List<ContentsLine> contents) {
         for (int i = 1; i < contents.size(); i++) {
-            if (contents.get(i).page() < contents.get(i - 1).page()) return false;
+            if (contents.get(i).linked() < contents.get(i - 1).linked()) return false;
         }
         return true;
     }
@@ -251,20 +281,42 @@ public class ExportTabE2E {
         }
     }
 
-    /** The lines of the contents page(s): text that ends in a page number. The contents start after the cover. */
-    private static List<ContentsLine> readContentsLines(List<String> pageTexts) {
-        List<ContentsLine> lines = new ArrayList<>();
-        Pattern line = Pattern.compile("^(.*\\S)\\s+(\\d{1,4})\\s*$");
-        boolean inContents = false;
-        for (String text : pageTexts) {
-            if (!inContents && text.contains("Contents")) inContents = true;
-            if (!inContents) continue;
-            int before = lines.size();
-            for (String row : text.split("\\R")) {
-                Matcher m = line.matcher(row);
-                if (m.matches() && !row.contains(" / ")) lines.add(new ContentsLine(m.group(1), Integer.parseInt(m.group(2))));
+    /**
+     * Reads the lines of the table of contents. A line is a link to the anchor of a part, on a page before the first
+     * part; the number it shows is the number at the end of the text row the link sits in. Reading the lines through
+     * their links, not by their look, keeps a heading that wraps or ends in a number from being taken for a line.
+     */
+    private static List<ContentsLine> readContentsLines(PDDocument document) throws IOException {
+        PDDocumentCatalog catalog = document.getDocumentCatalog();
+        List<PDAnnotationLink> links = new ArrayList<>();
+        List<Integer> pagesOfLinks = new ArrayList<>();
+        List<Integer> targets = new ArrayList<>();
+        for (int i = 0; i < document.getNumberOfPages(); i++) {
+            for (PDAnnotation annotation : document.getPage(i).getAnnotations()) {
+                if (!(annotation instanceof PDAnnotationLink link) || !(link.getDestination() instanceof PDNamedDestination named)) continue;
+                if (named.getNamedDestination() == null || !named.getNamedDestination().startsWith("hs-part-")) continue;
+                PDPageDestination target = catalog.findNamedDestinationPage(named);
+                links.add(link);
+                pagesOfLinks.add(i);
+                targets.add(target == null || target.getPage() == null ? -1 : document.getPages().indexOf(target.getPage()) + 1);
             }
-            if (lines.size() == before) break;
+        }
+        int firstPartPage = targets.stream().filter(t -> t > 0).min(Integer::compare).orElse(Integer.MAX_VALUE);
+        List<ContentsLine> lines = new ArrayList<>();
+        PDFTextStripperByArea rows = new PDFTextStripperByArea();
+        for (int n = 0; n < links.size(); n++) {
+            if (pagesOfLinks.get(n) + 1 >= firstPartPage) continue;
+            PDPage page = document.getPage(pagesOfLinks.get(n));
+            PDRectangle box = page.getMediaBox();
+            PDRectangle at = links.get(n).getRectangle();
+            float top = box.getHeight() - at.getUpperRightY();
+            rows.addRegion("row", new Rectangle2D.Float(0, top - 1, box.getWidth(), at.getHeight() + 2));
+            rows.extractRegions(page);
+            String text = rows.getTextForRegion("row").strip().replaceAll("\\s+", " ");
+            rows.removeRegion("row");
+            Matcher number = Pattern.compile("^(.*?)\\s*(\\d{1,4})$").matcher(text);
+            lines.add(number.matches() ? new ContentsLine(number.group(1), Integer.parseInt(number.group(2)), targets.get(n))
+                                       : new ContentsLine(text, -1, targets.get(n)));
         }
         return lines;
     }
