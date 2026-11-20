@@ -27,8 +27,12 @@ final class PortalNode {
     /** The actions other nodes may call on {@link #GATEWAY}: reads only (decision 2). */
     static final List<String> ACTIONS = List.of("search", "searchSemantic", "findRelated", "references", "readDocument");
     /** The allow-list: {@link #GATEWAY} with each of {@link #ACTIONS}, and nothing else. */
-    static final Set<AllowedAction> ALLOWED = ACTIONS.stream()
-            .map(a -> new AllowedAction(GATEWAY, a)).collect(Collectors.toUnmodifiableSet());
+    static final Set<AllowedAction> ALLOWED = java.util.stream.Stream.concat(
+            ACTIONS.stream().map(a -> new AllowedAction(GATEWAY, a)),
+            // Replies from chat-ui to the Revise panel's requests (RevisionPanel_261120_oo01).
+            java.util.stream.Stream.of(new AllowedAction(ChatAsk.CHAT_GATEWAY, "enqueueReply"),
+                    new AllowedAction(ChatAsk.CHAT_GATEWAY, "enqueueCancelResult")))
+            .collect(Collectors.toUnmodifiableSet());
     /** The receiver listens here only. */
     static final String BIND = "127.0.0.1";
     /** The actor port is the HTTP port plus this. */
@@ -61,8 +65,9 @@ final class PortalNode {
     }
 
     /** Puts {@code gateway} at the root of {@code system} as {@value #GATEWAY} and opens the receiver on {@code bind}. */
-    static void open(DistributedIIActorSystem system, PortalGateway gateway, String bind) throws IOException {
+    static void open(DistributedIIActorSystem system, PortalGateway gateway, ChatAsk chatAsk, String bind) throws IOException {
         system.addIIActor(new PortalGatewayIIAR(GATEWAY, gateway, system));
+        if (chatAsk != null) system.addIIActor(new ChatAskIIAR(ChatAsk.CHAT_GATEWAY, chatAsk, system));
         system.startHttpServer(bind, system.getMyNode().getPort());
     }
 }

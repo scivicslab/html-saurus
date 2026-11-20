@@ -253,6 +253,30 @@ final class RevisionService {
         return out;
     }
 
+    /**
+     * The request a chat-ui conversation gets for a harder revision: where the text is, so it can read the whole
+     * document and what it refers to, the rule, the text, and the form of the answer.
+     */
+    static String conversationPrompt(String path, int fromLine, int toLine, String original, String rule) {
+        return "Review lines " + fromLine + "-" + toLine + " of the Markdown file " + path
+                + " (relative to the works directory). You may read the whole file and the documents it refers to.\n\n"
+                + "RULE:\n" + rule + "\n\nTEXT (those lines):\n" + original + "\n\n"
+                + "Answer with JSON only, in this form, and nothing else:\n"
+                + "{\"proposals\":[{\"quote\":\"...\",\"problem\":\"...\",\"fix\":\"...\"}]}\n"
+                + "\"quote\" is copied exactly from TEXT; write \"problem\" and \"fix\" in the language TEXT is written in. "
+                + "Do not change the file yourself.";
+    }
+
+    /**
+     * The proposals in a conversation's reply. A reply that holds no proposals in that form is one proposal whose
+     * problem is the whole reply, so the person still sees what the conversation said.
+     */
+    List<Proposal> proposalsFromReply(String reply) {
+        List<Proposal> out = fromJson(jsonIn(reply).path("proposals"));
+        if (out.isEmpty()) out.add(new Proposal("", reply == null ? "" : reply.strip(), ""));
+        return out;
+    }
+
     /** Asks the LLM for {@code original} with exactly the accepted proposals applied, and nothing else changed. */
     String applyProposals(String original, List<Proposal> accepted) throws IOException, InterruptedException {
         String system = """

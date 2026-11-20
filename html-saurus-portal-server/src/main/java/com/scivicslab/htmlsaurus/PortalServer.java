@@ -71,6 +71,8 @@ public class PortalServer implements PortalReads {
     private final TranslationClient translate;
     /** The Revise panel's work: locating, proposals, write-back, records (RevisionPanel_261120_oo01). */
     private final RevisionService revision;
+    /** Asks chat-ui conversations for the Revise panel's harder revisions (RevisionPanel_261120_oo01). */
+    private final ChatAsk chatAsk;
     /** Whether two adjacent paragraphs are one sentence cut in two, for the page translation. */
     private final ParagraphJoinJudge joinJudge;
     /** On-disk cache of past translations, shared across all projects in the portal. */
@@ -206,6 +208,8 @@ public class PortalServer implements PortalReads {
     public PortalServer(Path worksDir, List<Path> projectDirs, int port,
                         SemanticIndex semanticIndex, int threads, BasePath base, Path noticeFile, boolean mcp) {
         this.searcherSystem = PortalNode.buildSystem(PortalNode.name(port), PortalNode.actorPort(port));
+        this.chatAsk = new ChatAsk(searcherSystem, System.getenv("AI_WORKSPACE_URL"),
+                System.getProperty("html-saurus.chat-ui-nodes"));
         this.searcherTree = new SearcherTree(searcherSystem);
         this.searchers = searcherTree.view();
         this.batchJobs = new com.scivicslab.jobregistry.JobRegistry(searcherSystem, 60 * 60 * 1000L);
@@ -980,6 +984,24 @@ public class PortalServer implements PortalReads {
                 respond(ex, 200, "application/json", json.writeValueAsString(revision.antipatterns()));
                 return;
             }
+            if (action.equals("chat-nodes")) {
+                respond(ex, 200, "application/json", json.writeValueAsString(chatAsk.chatNodes()));
+                return;
+            }
+            if (action.equals("ask-chat") && "GET".equalsIgnoreCase(ex.getRequestMethod())) {
+                ChatAsk.Answer a = chatAsk.answer(queryParam(ex, "id"));
+                if (a == null) {
+                    respond(ex, 404, "application/json", revisionError(json, "no such request"));
+                } else if (!a.answered()) {
+                    respond(ex, 200, "application/json", "{\"answered\":false}");
+                } else {
+                    respond(ex, 200, "application/json", json.writeValueAsString(json.createObjectNode()
+                            .put("answered", true).put("text", a.text())
+                            .set("proposals", RevisionService.toJson(revision.proposalsFromReply(
+                                    a.reply() == null ? a.text() : a.reply())))));
+                }
+                return;
+            }
             if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
                 respond(ex, 405, "text/plain", "Method Not Allowed");
                 return;
@@ -1008,6 +1030,21 @@ public class PortalServer implements PortalReads {
                     List<RevisionService.Proposal> proposals = revision.proposals(original, rule);
                     respond(ex, 200, "application/json", json.writeValueAsString(
                             json.createObjectNode().set("proposals", RevisionService.toJson(proposals))));
+                }
+                case "ask-chat" -> {
+                    String path = in.path("path").asText("");
+                    int from = in.path("fromLine").asInt(), to = in.path("toLine").asInt();
+                    String original = revision.linesIfUnchanged(path, from, to, in.path("hash").asText(""));
+                    if (original == null) {
+                        respond(ex, 409, "application/json", revisionError(json,
+                                "the file changed after the part was taken in; take it in again"));
+                        return;
+                    }
+                    String rule = revision.instruction(in.path("kind").asText(""), in.path("value").asText(""));
+                    String id = chatAsk.ask(in.path("node").asText(""), in.path("chat").asText(""),
+                            RevisionService.conversationPrompt(path, from, to, original, rule));
+                    respond(ex, 200, "application/json", json.writeValueAsString(
+                            json.createObjectNode().put("requestId", id)));
                 }
                 case "apply-proposals" -> {
                     String revised = revision.applyProposals(in.path("original").asText(""),
@@ -2233,6 +2270,18 @@ public class PortalServer implements PortalReads {
                   <span class="field-label">Instruction</span>
                   <textarea id="revise-free" rows="3"></textarea>
                 </div>
+                <div class="field">
+                  <span class="field-label">Ask</span>
+                  <select id="revise-asker">
+                    <option value="local">The local LLM (quick)</option>
+                    <option value="chat">A chat-ui conversation (harder revisions)</option>
+                  </select>
+                </div>
+                <div class="field" id="revise-chat-field" hidden>
+                  <span class="field-label">chat-ui node and conversation</span>
+                  <select id="revise-chat-node"></select>
+                  <textarea id="revise-chat-target" rows="1" placeholder="project1/chat-01"></textarea>
+                </div>
                 <button class="btn btn-primary" id="revise-propose" type="button">Ask for proposals</button>
                 <span class="hint" id="revise-status"></span>
               </div>
@@ -2328,6 +2377,38 @@ public class PortalServer implements PortalReads {
                     $('revise-ask-card').hidden = false;
                   } catch (e) { $('revise-target').textContent = e.message; }
                 });
+                $('revise-asker').addEventListener('change', async function () {
+                  $('revise-chat-field').hidden = this.value !== 'chat';
+                  if (this.value === 'chat' && !$('revise-chat-node').options.length) {
+                    try {
+                      var nodes = await (await fetch(BASE + '/api/revise/chat-nodes')).json();
+                      nodes.forEach(function (n) {
+                        var o = document.createElement('option'); o.value = n; o.textContent = n;
+                        $('revise-chat-node').appendChild(o);
+                      });
+                      if (!nodes.length) say('No chat-ui node is known.', true);
+                    } catch (e) { say('Could not list the chat-ui nodes: ' + e.message, true); }
+                  }
+                });
+                function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+                // A conversation answers when its turn ends, which may take minutes: read where the request stands.
+                async function askConversation(kind, value) {
+                  var node = $('revise-chat-node').value, chat = $('revise-chat-target').value.trim();
+                  if (!node || !chat) throw new Error('Choose a node and name a conversation, e.g. project1/chat-01.');
+                  st.instruction.asked = node + ' ' + chat;
+                  var sent = await post('ask-chat', {node: node, chat: chat, path: st.path, fromLine: st.fromLine,
+                    toLine: st.toLine, hash: st.hash, kind: kind, value: value});
+                  var started = Date.now();
+                  while (Date.now() - started < 60 * 60 * 1000) {
+                    say('Waiting for ' + chat + ' on ' + node + ' (' + Math.round((Date.now() - started) / 1000) + ' s)...');
+                    await sleep(3000);
+                    var r = await fetch(BASE + '/api/revise/ask-chat?id=' + encodeURIComponent(sent.requestId));
+                    var j = await r.json();
+                    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+                    if (j.answered) return j;
+                  }
+                  throw new Error('No reply within an hour; the request may still be answered later.');
+                }
                 $('revise-propose').addEventListener('click', async function () {
                   if (!st) return;
                   var kind = $('revise-kind').value;
@@ -2335,10 +2416,12 @@ public class PortalServer implements PortalReads {
                   st.instruction = {kind: kind, value: value};
                   st.proposals = null; st.accepted = null; st.revised = null; st.logged = false;
                   $('revise-proposals-card').hidden = true; $('revise-diff-card').hidden = true;
-                  say('Asking the local LLM...');
+                  var byChat = $('revise-asker').value === 'chat';
+                  say(byChat ? 'Sending the request...' : 'Asking the local LLM...');
                   try {
-                    var j = await post('proposals', {path: st.path, fromLine: st.fromLine, toLine: st.toLine,
-                      hash: st.hash, kind: kind, value: value});
+                    var j = byChat ? await askConversation(kind, value)
+                      : await post('proposals', {path: st.path, fromLine: st.fromLine, toLine: st.toLine,
+                          hash: st.hash, kind: kind, value: value});
                     st.proposals = j.proposals;
                     var box = $('revise-proposals'); box.innerHTML = '';
                     if (!j.proposals.length) { say('No proposals.'); return; }
@@ -3369,7 +3452,7 @@ public class PortalServer implements PortalReads {
         var me = searcherSystem.getMyNode();
         if (me.getPort() <= 0) return false;
         try {
-            PortalNode.open(searcherSystem, new PortalGateway(this), PortalNode.BIND);
+            PortalNode.open(searcherSystem, new PortalGateway(this), chatAsk, PortalNode.BIND);
             System.out.println("Node " + me.getNodeId() + " takes messages on " + PortalNode.BIND + ":" + me.getPort()
                     + "; other nodes may call " + PortalNode.GATEWAY + " " + PortalNode.ACTIONS);
             return true;

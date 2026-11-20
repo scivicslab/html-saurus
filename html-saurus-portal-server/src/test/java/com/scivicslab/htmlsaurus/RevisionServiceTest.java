@@ -162,6 +162,31 @@ class RevisionServiceTest {
     }
 
     @Test
+    void aConversationsReplyBecomesProposals() {
+        List<RevisionService.Proposal> p = service.proposalsFromReply(
+                "Done.\n{\"proposals\":[{\"quote\":\"q\",\"problem\":\"p\",\"fix\":\"f\"}]}");
+        assertEquals(1, p.size());
+        assertEquals("q", p.get(0).quote());
+        List<RevisionService.Proposal> prose = service.proposalsFromReply("I would move the conclusion first.");
+        assertEquals(1, prose.size());
+        assertEquals("I would move the conclusion first.", prose.get(0).problem(), "a reply without JSON is shown whole");
+    }
+
+    @Test
+    void aConversationIsNamedTheWayChatUiNamesIt() {
+        assertEquals("project9/chat-04", ChatAsk.conversationName("project9/04"));
+        assertEquals("project9/chat-04", ChatAsk.conversationName(" project9/chat-04 "));
+    }
+
+    @Test
+    void theRequestToAConversationSaysWhereTheTextIsAndHowToAnswer() {
+        String prompt = RevisionService.conversationPrompt("doc_x/docs/a.md", 3, 5, "TEXT HERE", "RULE HERE");
+        assertTrue(prompt.contains("lines 3-5 of the Markdown file doc_x/docs/a.md"), prompt);
+        assertTrue(prompt.contains("TEXT HERE") && prompt.contains("RULE HERE"));
+        assertTrue(prompt.contains("{\"proposals\":["));
+    }
+
+    @Test
     void theRevisedTextLosesACodeFenceAroundIt() {
         assertEquals("line one\nline two", RevisionService.stripFence("```markdown\nline one\nline two\n```"));
         assertEquals("plain", RevisionService.stripFence("plain"));
