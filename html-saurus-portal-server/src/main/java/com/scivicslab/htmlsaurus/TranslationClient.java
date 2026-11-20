@@ -181,6 +181,67 @@ public class TranslationClient {
         return model;
     }
 
+    /**
+     * The model to revise text with ({@code RevisionPanel_261120_oo01}): the one chosen as the revision model on AI
+     * workspace's Settings screen, else the translation model ({@link #currentModel()}). Read on every call, since a
+     * revision is asked for one at a time.
+     */
+    String revisionModel() {
+        if (workspaceUrl == null) {
+            return currentModel();
+        }
+        String chosen = null;
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(workspaceUrl + "/api/settings/revision-model"))
+                    .timeout(Duration.ofSeconds(2))
+                    .GET().build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                chosen = parseModel(response.body());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            logger.log(Level.FINE, "Could not ask " + workspaceUrl + " for the revision model", e);
+        }
+        return chosen == null || chosen.isBlank() ? currentModel() : chosen.trim();
+    }
+
+    /**
+     * One chat completion for the Revise panel: the revision model, no thinking, and a long wait, since a person waits
+     * for one answer and the answer may rewrite several paragraphs.
+     *
+     * @return the model's answer text
+     * @throws IOException if the server cannot be reached or answers without content
+     */
+    String chatForRevision(String system, String user) throws IOException, InterruptedException {
+        String model = revisionModel();
+        String body = "{\"model\":" + HttpUtils.jsonStr(model) + ","
+                + "\"temperature\":0.2,"
+                + "\"chat_template_kwargs\":{\"enable_thinking\":false},"
+                + "\"messages\":["
+                + "{\"role\":\"system\",\"content\":" + HttpUtils.jsonStr(system) + "},"
+                + "{\"role\":\"user\",\"content\":" + HttpUtils.jsonStr(user) + "}"
+                + "]}";
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/v1/chat/completions"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .timeout(Duration.ofSeconds(300))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            throw new IOException("generation server " + baseUrl + " answered status " + response.statusCode()
+                    + " for model " + model);
+        }
+        String content = parseContent(response.body());
+        if (content == null) {
+            throw new IOException("generation server " + baseUrl + " answered without content");
+        }
+        return content;
+    }
+
     /** Extracts {@code model} from AI workspace's {@code {"model": "..."}} answer; {@code null} if absent. */
     static String parseModel(String responseBody) {
         Object model = McpJsonParser.parseObject(responseBody).get("model");

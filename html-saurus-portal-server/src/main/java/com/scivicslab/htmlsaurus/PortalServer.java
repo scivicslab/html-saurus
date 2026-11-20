@@ -69,6 +69,8 @@ public class PortalServer implements PortalReads {
     private final EmbeddingClient embed;
     /** Generation client used for on-demand paragraph translation. */
     private final TranslationClient translate;
+    /** The Revise panel's work: locating, proposals, write-back, records (RevisionPanel_261120_oo01). */
+    private final RevisionService revision;
     /** Whether two adjacent paragraphs are one sentence cut in two, for the page translation. */
     private final ParagraphJoinJudge joinJudge;
     /** On-disk cache of past translations, shared across all projects in the portal. */
@@ -250,6 +252,7 @@ public class PortalServer implements PortalReads {
         this.semanticIndex = semanticIndex;
         this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
         this.translate = new TranslationClient(System.getenv("TRANSLATION_SERVER_URL"));
+        this.revision = new RevisionService(worksDir, translate::chatForRevision);
         this.translationCache = TranslationCache.load(worksDir);
         // Asked through the same broker queue (or translation server) the page translation uses, and
         // remembered next to the translations (PageTranslationBlocks_261115_oo01).
@@ -669,6 +672,12 @@ public class PortalServer implements PortalReads {
             return;
         }
 
+        // The Revise panel (development mode only): /api/revise/<action> (RevisionPanel_261120_oo01).
+        if (path.startsWith("/api/revise/")) {
+            handleRevise(ex, path.substring("/api/revise/".length()));
+            return;
+        }
+
         // One representation of a document (text/plain): GET /api/source?path=...&format=... (development
         // mode only). The copy bar opens this in a new tab for each of the three full-text formats.
         if (path.equals("/api/source")) {
@@ -955,6 +964,97 @@ public class PortalServer implements PortalReads {
             }
         }
         respond(ex, 200, "text/plain; charset=UTF-8", body);
+    }
+
+    /**
+     * Handles the Revise panel's requests ({@code RevisionPanel_261120_oo01}). {@code GET antipatterns} lists the
+     * antipattern collection; the rest are {@code POST} with a JSON body:
+     * {@code locate} {path,start,end}, {@code proposals} {path,fromLine,toLine,hash,kind,value},
+     * {@code apply-proposals} {original,proposals}, {@code write} {path,fromLine,toLine,hash,revised} and
+     * {@code log} (one revision's record). A failed LLM call answers 502 with the reason.
+     */
+    private void handleRevise(HttpExchange ex, String action) throws IOException {
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+        try {
+            if (action.equals("antipatterns")) {
+                respond(ex, 200, "application/json", json.writeValueAsString(revision.antipatterns()));
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+                respond(ex, 405, "text/plain", "Method Not Allowed");
+                return;
+            }
+            com.fasterxml.jackson.databind.JsonNode in = json.readTree(ex.getRequestBody());
+            switch (action) {
+                case "locate" -> {
+                    RevisionService.Located l = revision.locate(in.path("path").asText(""),
+                            in.path("start").asText(""), in.path("end").asText(""));
+                    if (l == null) {
+                        respond(ex, 404, "application/json", revisionError(json,
+                                "the selected part was not found in the Markdown file"));
+                    } else {
+                        respond(ex, 200, "application/json", json.writeValueAsString(l));
+                    }
+                }
+                case "proposals" -> {
+                    String original = revision.linesIfUnchanged(in.path("path").asText(""),
+                            in.path("fromLine").asInt(), in.path("toLine").asInt(), in.path("hash").asText(""));
+                    if (original == null) {
+                        respond(ex, 409, "application/json", revisionError(json,
+                                "the file changed after the part was taken in; take it in again"));
+                        return;
+                    }
+                    String rule = revision.instruction(in.path("kind").asText(""), in.path("value").asText(""));
+                    List<RevisionService.Proposal> proposals = revision.proposals(original, rule);
+                    respond(ex, 200, "application/json", json.writeValueAsString(
+                            json.createObjectNode().set("proposals", RevisionService.toJson(proposals))));
+                }
+                case "apply-proposals" -> {
+                    String revised = revision.applyProposals(in.path("original").asText(""),
+                            RevisionService.fromJson(in.path("proposals")));
+                    respond(ex, 200, "application/json", json.writeValueAsString(
+                            json.createObjectNode().put("revised", revised)));
+                }
+                case "write" -> {
+                    String rel = in.path("path").asText("");
+                    RevisionService.WriteResult r = revision.writeBack(rel, in.path("fromLine").asInt(),
+                            in.path("toLine").asInt(), in.path("hash").asText(""), in.path("revised").asText(""));
+                    if (!r.written()) {
+                        respond(ex, 409, "application/json", revisionError(json, r.reason()));
+                        return;
+                    }
+                    Project proj = projectMap.get(rel.contains("/") ? rel.substring(0, rel.indexOf('/')) : rel);
+                    String rebuilt = "no project";
+                    if (proj != null) {
+                        try {
+                            runBuildStage(proj, "html");
+                            rebuilt = "html";
+                        } catch (Exception e) {
+                            rebuilt = "failed: " + e.getMessage();
+                        }
+                    }
+                    respond(ex, 200, "application/json", json.writeValueAsString(json.createObjectNode()
+                            .put("written", true).put("hash", r.hash()).put("rebuilt", rebuilt)));
+                }
+                case "log" -> {
+                    revision.log(in);
+                    respond(ex, 200, "application/json", "{}");
+                }
+                default -> respond(ex, 404, "application/json", revisionError(json, "unknown action " + action));
+            }
+        } catch (IllegalArgumentException e) {
+            respond(ex, 400, "application/json", revisionError(json, e.getMessage()));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            respond(ex, 502, "application/json", revisionError(json, "the LLM call was interrupted"));
+        } catch (IOException e) {
+            respond(ex, 502, "application/json", revisionError(json, e.getMessage()));
+        }
+    }
+
+    private static String revisionError(com.fasterxml.jackson.databind.ObjectMapper json, String message)
+            throws IOException {
+        return json.writeValueAsString(json.createObjectNode().put("error", message == null ? "error" : message));
     }
 
     /**
@@ -1721,6 +1821,28 @@ public class PortalServer implements PortalReads {
                   border: 1px solid var(--border-color); background: var(--bg-primary);
                   color: var(--text-primary); font-size: 0.85rem; box-sizing: border-box; }
                 #tab-import .btn-row { margin-top: 0.6rem; display: flex; gap: 0.5rem; }
+                /* Revise panel (RevisionPanel_261120_oo01). */
+                #tab-revise .hint { font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 0.6rem; }
+                #tab-revise .card { border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 0.8rem;
+                                    padding: 0.75rem 0.9rem; background: var(--bg-tertiary); }
+                #tab-revise .card[hidden], #tab-revise .field[hidden], #tab-revise pre[hidden] { display: none; }
+                #tab-revise .field { margin-bottom: 0.5rem; }
+                #tab-revise .field-label { display: block; font-size: 0.8rem;
+                                           color: var(--text-secondary); margin-bottom: 0.25rem; }
+                #tab-revise select, #tab-revise textarea {
+                  width: 100%%; padding: 0.4rem 0.6rem; border-radius: 6px; box-sizing: border-box;
+                  border: 1px solid var(--border-color); background: var(--bg-primary);
+                  color: var(--text-primary); font-size: 0.85rem; }
+                #tab-revise pre { white-space: pre-wrap; font-size: 0.8rem; max-height: 14rem; overflow: auto;
+                                  background: var(--bg-primary); padding: 0.5rem; border-radius: 6px; margin: 0.4rem 0 0; }
+                .revise-proposal { border-top: 1px solid var(--border-color); padding: 0.5rem 0; font-size: 0.82rem; }
+                .revise-proposal:first-child { border-top: none; }
+                .revise-proposal .quote { font-family: monospace; color: var(--text-primary); }
+                .revise-proposal .problem, .revise-proposal .fix { color: var(--text-secondary); margin-top: 0.2rem; }
+                .revise-diff div { font-family: monospace; font-size: 0.78rem; white-space: pre-wrap; padding: 0 0.3rem; }
+                .revise-diff .del { background: rgba(255, 80, 80, 0.18); text-decoration: line-through; }
+                .revise-diff .add { background: rgba(80, 200, 120, 0.18); }
+                .revise-warning { color: #e0a040; font-size: 0.82rem; margin-top: 0.4rem; }
                 .doc-pane { flex: 1 1 auto; position: relative; min-width: 0; }
                 #doc-frame { width: 100%%; height: 100%%; border: 0; display: block; background: #fff; }
                 #doc-placeholder { position: absolute; inset: 0; display: flex; align-items: center;
@@ -1802,6 +1924,7 @@ public class PortalServer implements PortalReads {
                   <option id="pane-option-import" value="import">Import</option>
                   <option id="pane-option-batch" value="batch">Batch Job</option>
                   <option id="pane-option-export" value="export">Export</option>
+                  <option id="pane-option-revise" value="revise">Revise</option>
                 </select>
               </div>
               <div class="tab-panel" id="tab-projects">
@@ -2082,6 +2205,215 @@ public class PortalServer implements PortalReads {
               </div>
               <div id="export-jobs"></div>
               </div>
+              <div class="tab-panel" id="tab-revise" hidden>
+              <h2>Revise</h2>
+              <p class="hint">Select a part of the document on the right, take it in, choose what to apply, and look
+                at the proposals. The revised text is written back to the Markdown file only after you have seen
+                the difference. Every revision is recorded, written back or not.</p>
+              <div class="card">
+                <button class="btn btn-primary" id="revise-take" type="button">Take in the selection</button>
+                <div class="hint" id="revise-target" style="margin-top:0.5rem"></div>
+                <pre id="revise-original" hidden></pre>
+                <div class="revise-warning" id="revise-generated" hidden></div>
+              </div>
+              <div class="card" id="revise-ask-card" hidden>
+                <div class="field">
+                  <span class="field-label">Apply</span>
+                  <select id="revise-kind">
+                    <option value="propose">Propose fixes</option>
+                    <option value="antipattern">An antipattern</option>
+                    <option value="free">My own instruction</option>
+                  </select>
+                </div>
+                <div class="field" id="revise-antipattern-field" hidden>
+                  <span class="field-label">Antipattern</span>
+                  <select id="revise-antipattern"></select>
+                </div>
+                <div class="field" id="revise-free-field" hidden>
+                  <span class="field-label">Instruction</span>
+                  <textarea id="revise-free" rows="3"></textarea>
+                </div>
+                <button class="btn btn-primary" id="revise-propose" type="button">Ask for proposals</button>
+                <span class="hint" id="revise-status"></span>
+              </div>
+              <div class="card" id="revise-proposals-card" hidden>
+                <div id="revise-proposals"></div>
+                <button class="btn btn-primary" id="revise-make" type="button">Make the revised text</button>
+              </div>
+              <div class="card" id="revise-diff-card" hidden>
+                <div class="revise-diff" id="revise-diff"></div>
+                <div class="field" style="margin-top:0.5rem">
+                  <span class="field-label">Revised text (you may edit it)</span>
+                  <textarea id="revise-revised" rows="8"></textarea>
+                </div>
+                <button class="btn btn-primary" id="revise-write" type="button">Write back</button>
+                <button class="btn" id="revise-discard" type="button">Discard</button>
+              </div>
+              </div>
+              <script>
+              (function () {
+                // RevisionPanel_261120_oo01: one revision at a time, recorded when it is written back or dropped.
+                var st = null;
+                var $ = function (id) { return document.getElementById(id); };
+                function say(text, bad) {
+                  $('revise-status').textContent = text || '';
+                  $('revise-status').style.color = bad ? '#e06060' : 'var(--text-secondary)';
+                }
+                async function post(action, body) {
+                  var r = await fetch(BASE + '/api/revise/' + action, {method: 'POST',
+                    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+                  var j = {};
+                  try { j = await r.json(); } catch (e) {}
+                  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+                  return j;
+                }
+                function blockOf(node) {
+                  while (node && !(node.nodeType === 1 && /^(P|LI|H[1-6]|PRE|TABLE|BLOCKQUOTE)$/.test(node.tagName))) {
+                    node = node.parentNode;
+                  }
+                  return node;
+                }
+                async function record(written) {
+                  if (!st || st.logged || !st.proposals) return;
+                  st.logged = true;
+                  try {
+                    await post('log', {path: st.path, lines: st.fromLine + '-' + st.toLine, original: st.original,
+                      instruction: st.instruction, proposals: st.proposals, accepted: st.accepted || [],
+                      revised: st.revised || null, written: written});
+                  } catch (e) { say('Could not record the revision: ' + e.message, true); }
+                }
+                function reset() {
+                  ['revise-ask-card', 'revise-proposals-card', 'revise-diff-card', 'revise-original', 'revise-generated']
+                    .forEach(function (id) { $(id).hidden = true; });
+                  $('revise-target').textContent = '';
+                  say('');
+                }
+                $('revise-kind').addEventListener('change', async function () {
+                  var k = this.value;
+                  $('revise-antipattern-field').hidden = k !== 'antipattern';
+                  $('revise-free-field').hidden = k !== 'free';
+                  if (k === 'antipattern' && !$('revise-antipattern').options.length) {
+                    try {
+                      var list = await (await fetch(BASE + '/api/revise/antipatterns')).json();
+                      list.forEach(function (a) {
+                        var o = document.createElement('option'); o.value = a.id; o.textContent = a.title;
+                        $('revise-antipattern').appendChild(o);
+                      });
+                    } catch (e) { say('Could not list the antipatterns: ' + e.message, true); }
+                  }
+                });
+                $('revise-take').addEventListener('click', async function () {
+                  await record(false);
+                  reset();
+                  var frame = $('doc-frame');
+                  var win = frame && frame.contentWindow;
+                  var sel = win && win.getSelection();
+                  if (!sel || sel.isCollapsed) { $('revise-target').textContent = 'Select some text in the document first.'; return; }
+                  var vf = win.document.getElementById('view-format');
+                  var path = vf && vf.dataset.path;
+                  if (!path) { $('revise-target').textContent = 'This page has no Markdown source to revise.'; return; }
+                  var a = blockOf(sel.anchorNode), b = blockOf(sel.focusNode);
+                  if (!a || !b) { $('revise-target').textContent = 'The selection is not inside a paragraph, list, heading, table or code block.'; return; }
+                  try {
+                    var l = await post('locate', {path: path, start: a.textContent, end: b.textContent});
+                    st = {path: l.path, fromLine: l.fromLine, toLine: l.toLine, hash: l.hash, original: l.original};
+                    $('revise-target').textContent = l.path + '  lines ' + l.fromLine + '-' + l.toLine;
+                    $('revise-original').textContent = l.original;
+                    $('revise-original').hidden = false;
+                    if (l.generated) {
+                      $('revise-generated').textContent = 'This file is generated from a .lisp rule file beside it; '
+                        + 'it cannot be written back here.';
+                      $('revise-generated').hidden = false;
+                    }
+                    $('revise-ask-card').hidden = false;
+                  } catch (e) { $('revise-target').textContent = e.message; }
+                });
+                $('revise-propose').addEventListener('click', async function () {
+                  if (!st) return;
+                  var kind = $('revise-kind').value;
+                  var value = kind === 'antipattern' ? $('revise-antipattern').value : kind === 'free' ? $('revise-free').value : '';
+                  st.instruction = {kind: kind, value: value};
+                  st.proposals = null; st.accepted = null; st.revised = null; st.logged = false;
+                  $('revise-proposals-card').hidden = true; $('revise-diff-card').hidden = true;
+                  say('Asking the local LLM...');
+                  try {
+                    var j = await post('proposals', {path: st.path, fromLine: st.fromLine, toLine: st.toLine,
+                      hash: st.hash, kind: kind, value: value});
+                    st.proposals = j.proposals;
+                    var box = $('revise-proposals'); box.innerHTML = '';
+                    if (!j.proposals.length) { say('No proposals.'); return; }
+                    j.proposals.forEach(function (p, i) {
+                      var row = document.createElement('label'); row.className = 'revise-proposal'; row.style.display = 'block';
+                      var cb = document.createElement('input'); cb.type = 'checkbox'; cb.dataset.index = i;
+                      var q = document.createElement('span'); q.className = 'quote'; q.textContent = ' ' + p.quote;
+                      var pr = document.createElement('div'); pr.className = 'problem'; pr.textContent = p.problem;
+                      var fx = document.createElement('div'); fx.className = 'fix'; fx.textContent = '-> ' + p.fix;
+                      row.appendChild(cb); row.appendChild(q); row.appendChild(pr); row.appendChild(fx);
+                      box.appendChild(row);
+                    });
+                    $('revise-proposals-card').hidden = false;
+                    say(j.proposals.length + ' proposal(s). Check the ones to take.');
+                  } catch (e) { say(e.message, true); }
+                });
+                function diffLines(a, b) {
+                  var x = a.split('\\n'), y = b.split('\\n'), n = x.length, m = y.length, t = [];
+                  for (var i = 0; i <= n; i++) { t.push(new Array(m + 1).fill(0)); }
+                  for (i = n - 1; i >= 0; i--) for (var j = m - 1; j >= 0; j--)
+                    t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
+                  var out = [], p = 0, q = 0;
+                  while (p < n && q < m) {
+                    if (x[p] === y[q]) { out.push(['', x[p]]); p++; q++; }
+                    else if (t[p + 1][q] >= t[p][q + 1]) { out.push(['del', x[p++]]); }
+                    else { out.push(['add', y[q++]]); }
+                  }
+                  while (p < n) out.push(['del', x[p++]]);
+                  while (q < m) out.push(['add', y[q++]]);
+                  return out;
+                }
+                $('revise-make').addEventListener('click', async function () {
+                  if (!st || !st.proposals) return;
+                  var checked = Array.prototype.slice.call(document.querySelectorAll('#revise-proposals input:checked'))
+                    .map(function (c) { return parseInt(c.dataset.index, 10); });
+                  if (!checked.length) { say('Check at least one proposal.', true); return; }
+                  st.accepted = checked;
+                  say('Making the revised text...');
+                  try {
+                    var j = await post('apply-proposals', {original: st.original,
+                      proposals: checked.map(function (i) { return st.proposals[i]; })});
+                    st.revised = j.revised;
+                    var box = $('revise-diff'); box.innerHTML = '';
+                    diffLines(st.original, j.revised).forEach(function (d) {
+                      var div = document.createElement('div'); div.className = d[0];
+                      div.textContent = (d[0] === 'del' ? '- ' : d[0] === 'add' ? '+ ' : '  ') + d[1];
+                      box.appendChild(div);
+                    });
+                    $('revise-revised').value = j.revised;
+                    $('revise-diff-card').hidden = false;
+                    say('Check the difference, then write it back.');
+                  } catch (e) { say(e.message, true); }
+                });
+                $('revise-write').addEventListener('click', async function () {
+                  if (!st) return;
+                  st.revised = $('revise-revised').value;
+                  say('Writing back and rebuilding the page...');
+                  try {
+                    await post('write', {path: st.path, fromLine: st.fromLine, toLine: st.toLine, hash: st.hash,
+                      revised: st.revised});
+                    await record(true);
+                    st = null;
+                    reset();
+                    say('Written back.');
+                    $('doc-frame').contentWindow.location.reload();
+                  } catch (e) { say(e.message, true); }
+                });
+                $('revise-discard').addEventListener('click', async function () {
+                  await record(false);
+                  st = null;
+                  reset();
+                  say('Discarded.');
+                });
+              })();
+              </script>
             """);
 
         sb.append("<script>var BASE = " + jsonStr(base.prefix()) + ";</script>\n");
