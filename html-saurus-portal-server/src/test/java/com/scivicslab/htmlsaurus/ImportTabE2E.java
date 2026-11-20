@@ -69,7 +69,7 @@ public class ImportTabE2E {
         withPage("T-1: clicking Import tab shows it (PDF sub-panel visible, Word hidden)", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             check(page.isVisible("#tab-import"), "#tab-import must be visible after click");
             check(!page.isVisible("#tab-projects"), "#tab-projects must be hidden after click");
             check(page.isVisible("#import-panel-pdf"), "#import-panel-pdf must be visible by default within Import");
@@ -81,7 +81,7 @@ public class ImportTabE2E {
         withPage("T-2: each type in the dropdown shows its own panel and hides the others", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             String[] types = {"word", "web", "video", "pdf"};
             for (String type : types) {
                 page.selectOption("#import-type", type);
@@ -97,7 +97,7 @@ public class ImportTabE2E {
         withPage("T-3: project dropdowns are populated from the project list", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             for (String type : new String[] {"pdf", "word", "web", "video"}) {
                 page.selectOption("#import-type", type);
                 int count = ((Number) page.evalOnSelector(
@@ -114,7 +114,7 @@ public class ImportTabE2E {
                 Files.write(docx, buildFixtureDocx());
                 page.navigate(BASE_URL + "/");
                 page.waitForLoadState();
-                page.click("#tab-btn-import");
+                page.selectOption("#pane-menu", "import");
                 page.selectOption("#import-type", "word");
                 page.selectOption("#import-word-project", "proj1");
                 page.fill("#import-word-dest", "e2e-import-test");
@@ -154,7 +154,7 @@ public class ImportTabE2E {
             withPage("B-1: importing a web page writes a Markdown file and downloads its image", browser, page -> {
                 page.navigate(BASE_URL + "/");
                 page.waitForLoadState();
-                page.click("#tab-btn-import");
+                page.selectOption("#pane-menu", "import");
                 page.selectOption("#import-type", "web");
                 page.selectOption("#import-web-project", "proj1");
                 page.fill("#import-web-dest", "e2e-import-test");
@@ -234,7 +234,7 @@ public class ImportTabE2E {
                 Files.write(pdf, buildFixturePdfWithImage());
                 page.navigate(BASE_URL + "/");
                 page.waitForLoadState();
-                page.click("#tab-btn-import");
+                page.selectOption("#pane-menu", "import");
                 // PDF is the type dropdown's default option — no need to select it explicitly.
                 page.selectOption("#import-pdf-project", "proj1");
                 page.fill("#import-pdf-dest", "e2e-import-test-pdf");
@@ -246,7 +246,7 @@ public class ImportTabE2E {
                 // Where an import reports itself moved out of the form: it now has a row of its
                 // own under Batch Job, so several can run at once and the form is free
                 // immediately (WhereJobControlBelongs_260901_oo01).
-                page.click("#tab-btn-batch");
+                page.selectOption("#pane-menu", "batch");
                 // This job's own row, found by the file name it is labelled with: the list holds
                 // every import this server has run, so reading the whole panel would let another
                 // job's outcome answer for this one.
@@ -276,13 +276,13 @@ public class ImportTabE2E {
         withPage("T-4: Import form field values survive a page reload", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             page.fill("#import-pdf-dest", "e2e-reload-test");
             page.fill("#import-pdf-title", "E2E Reload Test");
             page.fill("#import-pdf-path", "/tmp/does-not-need-to-exist-for-this-check.pdf");
             page.reload();
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             check("e2e-reload-test".equals(page.inputValue("#import-pdf-dest")),
                     "destination path must survive reload, got: " + page.inputValue("#import-pdf-dest"));
             check("E2E Reload Test".equals(page.inputValue("#import-pdf-title")),
@@ -304,7 +304,7 @@ public class ImportTabE2E {
                 Files.write(pdf, buildFixtureMultiPagePdf(12));
                 page.navigate(BASE_URL + "/");
                 page.waitForLoadState();
-                page.click("#tab-btn-import");
+                page.selectOption("#pane-menu", "import");
                 page.selectOption("#import-pdf-project", "proj1");
                 page.fill("#import-pdf-dest", "e2e-reload-import-test");
                 page.selectOption("#import-pdf-backend", "yomitoku");
@@ -323,7 +323,7 @@ public class ImportTabE2E {
                 // (WhereJobControlBelongs_260901_oo01).
                 page.reload();
                 page.waitForLoadState();
-                page.click("#tab-btn-batch");
+                page.selectOption("#pane-menu", "batch");
                 check(!page.isDisabled("#import-pdf-start"),
                         "Start must stay enabled — one import no longer blocks the next");
                 String fileName = pdf.getFileName().toString();
@@ -352,17 +352,17 @@ public class ImportTabE2E {
         withPage("T-5: the chapter checkbox is off by default and survives a page reload", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             check(!page.isChecked("#import-pdf-chapters"), "the chapter checkbox must be off by default");
             page.check("#import-pdf-chapters");
             page.reload();
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             check(page.isChecked("#import-pdf-chapters"), "the chapter checkbox must stay checked after a reload");
             page.uncheck("#import-pdf-chapters");
             page.reload();
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             check(!page.isChecked("#import-pdf-chapters"), "unchecking must be remembered too");
         });
 
@@ -375,7 +375,7 @@ public class ImportTabE2E {
             });
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             page.fill("#import-pdf-path", "/tmp/not-read-because-the-request-is-answered-by-the-test.pdf");
             page.uncheck("#import-pdf-chapters");
             page.click("#import-pdf-start");
@@ -410,14 +410,14 @@ public class ImportTabE2E {
             });
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             page.selectOption("#import-type", "pdf-bulk");
             check(!page.isChecked("#import-pdf-bulk-chapters"), "the bulk chapter checkbox must be off by default");
             check(!page.isChecked("#import-pdf-chapters"), "the single-PDF checkbox is a separate one and must still be off");
             page.check("#import-pdf-bulk-chapters");
             page.reload();
             page.waitForLoadState();
-            page.click("#tab-btn-import");
+            page.selectOption("#pane-menu", "import");
             page.selectOption("#import-type", "pdf-bulk");
             check(page.isChecked("#import-pdf-bulk-chapters"), "the bulk chapter checkbox must stay checked after a reload");
             check(!page.isChecked("#import-pdf-chapters"), "checking the bulk box must not check the single-PDF one");

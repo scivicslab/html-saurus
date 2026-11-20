@@ -72,7 +72,8 @@ class ExportNotInProductionTest {
     void indexPage_onARunningProductionServer_hasNoExportTab() throws Exception {
         String base = startProductionServer();
         HttpResponse<String> index = send(HttpRequest.newBuilder(URI.create(base + "/")).build());
-        assertFalse(index.body().contains("tab-btn-export"), "the page of the production server has the Export tab");
+        assertFalse(index.body().contains("tab-btn-export") || index.body().contains("pane-option-export"),
+                "the page of the production server has the Export menu item");
         assertFalse(index.body().contains("/api/export/"), "the page of the production server mentions the export API");
     }
 

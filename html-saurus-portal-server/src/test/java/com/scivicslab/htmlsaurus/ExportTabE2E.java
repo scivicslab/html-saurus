@@ -118,9 +118,9 @@ public class ExportTabE2E {
         Page page = context.newPage();
         page.setDefaultTimeout(60_000);
         page.navigate(BASE_URL + "/");
-        check("the left pane has the fourth tab Export", page.locator("#tab-btn-export").count() == 1,
-                "tabs: " + page.locator(".tab-btn").allInnerTexts());
-        page.click("#tab-btn-export");
+        check("the left pane's menu has Export", page.locator("#pane-option-export").count() == 1,
+                "menu: " + page.locator("#pane-menu option").allInnerTexts());
+        page.selectOption("#pane-menu", "export");
         check("the Export panel opens and the others close",
                 page.locator("#tab-export").isVisible() && !page.locator("#tab-projects").isVisible(), "");
 
@@ -186,7 +186,7 @@ public class ExportTabE2E {
     }
 
     private static boolean batchTabHasDownload(Page page, String jobId) {
-        page.click("#tab-btn-batch");
+        page.selectOption("#pane-menu", "batch");
         return page.locator("#import-jobs .import-job[data-job-id=\"" + jobId + "\"] a.btn").count() >= 1;
     }
 

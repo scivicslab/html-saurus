@@ -1691,14 +1691,13 @@ public class PortalServer implements PortalReads {
                 #portal-sidebar h2 { margin-top: 1.5rem; }
                 #portal-sidebar h2:first-of-type { margin-top: 0; }
                 body.sidebar-collapsed #portal-sidebar { display: none; }
-                /* Top-level sidebar tabs: Projects (which contains Search) and Import. */
-                .tab-bar { display: flex; gap: 0.25rem; margin-bottom: 1rem;
-                           border-bottom: 1px solid var(--border-color); }
-                .tab-btn { flex: 1 1 auto; padding: 0.5rem 0.4rem; border: none; background: none;
-                           color: var(--text-secondary); font-size: 0.85rem; cursor: pointer;
-                           border-bottom: 2px solid transparent; }
-                .tab-btn:hover { color: var(--text-primary); }
-                .tab-btn.active { color: var(--text-primary); border-bottom-color: var(--accent-green); }
+                /* The left pane's menu: one dropdown, since the panels keep growing
+                   (RevisionPanel_261120_oo01). Each option shows one .tab-panel. */
+                .pane-menu-bar { margin-bottom: 1rem; padding-bottom: 0.6rem;
+                                 border-bottom: 1px solid var(--border-color); }
+                #pane-menu { width: 100%%; padding: 0.4rem; font-size: 0.9rem;
+                             background: var(--bg-secondary); color: var(--text-primary);
+                             border: 1px solid var(--border-color); border-radius: 4px; }
                 .tab-panel[hidden] { display: none; }
                 /* Import tab: a type picker (dropdown, so adding a type — arxiv, ... — doesn't
                    mean adding a sub-tab) followed by one panel per type, styled after
@@ -1797,11 +1796,13 @@ public class PortalServer implements PortalReads {
         sb.append(PortalNotice.html(noticeFile));
 
             sb.append("""
-              <div class="tab-bar" role="tablist">
-                <button class="tab-btn active" id="tab-btn-projects" data-tab="projects" onclick="selectTab('projects')">Projects</button>
-                <button class="tab-btn" id="tab-btn-import" data-tab="import" onclick="selectTab('import')">Import</button>
-                <button class="tab-btn" id="tab-btn-batch" data-tab="batch" onclick="selectTab('batch')">Batch Job</button>
-                <button class="tab-btn" id="tab-btn-export" data-tab="export" onclick="selectTab('export')">Export</button>
+              <div class="pane-menu-bar">
+                <select id="pane-menu" aria-label="Left pane" onchange="selectTab(this.value)">
+                  <option id="pane-option-projects" value="projects">Projects</option>
+                  <option id="pane-option-import" value="import">Import</option>
+                  <option id="pane-option-batch" value="batch">Batch Job</option>
+                  <option id="pane-option-export" value="export">Export</option>
+                </select>
               </div>
               <div class="tab-panel" id="tab-projects">
               <h2>Search</h2>
@@ -2210,7 +2211,8 @@ public class PortalServer implements PortalReads {
             }
             function selectTab(name) {
               document.querySelectorAll('.tab-panel').forEach(function(p) { p.hidden = (p.id !== 'tab-' + name); });
-              document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === name); });
+              var menu = document.getElementById('pane-menu');
+              if (menu && menu.value !== name) menu.value = name;
               localStorage.setItem('portal-active-tab', name);
               if ((name === 'batch' || name === 'export') && typeof refreshImportJobs === 'function') refreshImportJobs();
               if (name === 'export' && typeof populateExport === 'function') populateExport();
@@ -2461,8 +2463,8 @@ public class PortalServer implements PortalReads {
                 box.appendChild(row);
               });
               renderExportJobs(jobs.filter(function (j) { return j.kind === 'export'; }));
-              // The count on the tab is what makes a background import visible from any tab.
-              const tab = document.getElementById('tab-btn-batch');
+              // The count on the menu item is what makes a background import visible from any panel.
+              const tab = document.getElementById('pane-option-batch');
               if (tab) {
                 const running = jobs.filter(function (j) { return j.state === 'running'; }).length;
                 tab.textContent = running > 0 ? 'Batch Job (' + running + ')' : 'Batch Job';

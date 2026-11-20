@@ -85,7 +85,7 @@ class PortalNoticeTest {
             int at = page.indexOf("id=\"portal-notice\"");
             assertTrue(at > 0, "the notice is on the page");
             assertTrue(page.contains("<code>~/works/doc_*</code>"));
-            assertTrue(at < page.indexOf("class=\"tab-bar\""), "above the tabs, in the sidebar that is always shown");
+            assertTrue(at < page.indexOf("class=\"pane-menu-bar\""), "above the menu, in the sidebar that is always shown");
             assertTrue(page.indexOf("<aside id=\"portal-sidebar\">") < at);
         } finally {
             with.stop(0);
