@@ -80,12 +80,27 @@ public class RevisePanelE2E {
 
             page.selectOption("#revise-kind", "free");
             page.fill("#revise-free", "この段落のうち、短くできる文をすべて挙げ、短くする案を出してください。");
+            // With ASK_CHAT_NODE and ASK_CHAT_TARGET, the proposals come from a chat-ui conversation instead.
+            String chatNode = System.getenv("ASK_CHAT_NODE");
+            if (chatNode != null && !chatNode.isBlank()) {
+                page.selectOption("#revise-asker", "chat");
+                // A locator, not waitForFunction with an argument: the portal's CSP refuses the eval that needs.
+                page.locator("#revise-chat-node option[value='" + chatNode + "']").waitFor(
+                        new com.microsoft.playwright.Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED));
+                page.selectOption("#revise-chat-node", chatNode);
+                page.fill("#revise-chat-target", System.getenv("ASK_CHAT_TARGET"));
+            }
             page.click("#revise-propose");
             page.waitForSelector("#revise-proposals-card", new Page.WaitForSelectorOptions()
                     .setState(WaitForSelectorState.VISIBLE).setTimeout(300_000));
             int proposals = page.locator("#revise-proposals input[type=checkbox]").count();
             System.out.println("proposals: " + page.textContent("#revise-proposals"));
-            check(proposals > 0, "the local LLM's proposals are listed with check boxes", page.textContent("#revise-status"));
+            check(proposals > 0, "the proposals are listed with check boxes", page.textContent("#revise-status"));
+            String expected = System.getenv("EXPECT_PROPOSAL");
+            if (expected != null && !expected.isBlank()) {
+                check(page.textContent("#revise-proposals").contains(expected),
+                        "the proposals came from the asked conversation", page.textContent("#revise-proposals"));
+            }
 
             page.locator("#revise-proposals input[type=checkbox]").first().check();
             page.click("#revise-make");
