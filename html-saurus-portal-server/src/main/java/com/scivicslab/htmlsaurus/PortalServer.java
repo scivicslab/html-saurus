@@ -1733,6 +1733,39 @@ public class PortalServer implements PortalReads {
 
     // ---- Portal index page --------------------------------------
 
+    /** Writes one project's row of the Projects tab: its name, its navbar labels, its locales and its actions. */
+    private void appendProjectRow(StringBuilder sb, Project p) throws IOException {
+        List<String> labels = readNavbarLabels(p.projectDir());
+        String[] i18n = Projects.readI18nConfig(p.projectDir());
+        sb.append("    <div class=\"project-row\">\n");
+        sb.append("      <div class=\"project-name\"><a class=\"project-link\" href=\"").append(escHtml(base.url("/" + p.name() + "/"))).append("\">").append(escHtml(p.name())).append("</a></div>\n");
+        sb.append("      <div class=\"project-labels\" id=\"labels-").append(escHtml(p.name())).append("\">\n");
+        for (String label : labels) {
+            sb.append("        <span class=\"project-label\">").append(escHtml(label)).append("</span>\n");
+        }
+        sb.append("      </div>\n");
+        if (i18n.length > 0) {
+            sb.append("      <div class=\"project-locales\">\n");
+            for (String loc : i18n) {
+                sb.append("        <span class=\"locale-tag\">").append(escHtml(loc)).append("</span>\n");
+            }
+            sb.append("      </div>\n");
+        }
+            String nm = escHtml(p.name());
+            sb.append("      <div class=\"project-actions\">\n");
+            sb.append("        <select class=\"action-select\" id=\"action-").append(nm).append("\" title=\"Choose an action, then Run\">\n");
+            sb.append("          <option value=\"all\">All</option>\n");
+            sb.append("          <option value=\"html\">HTML</option>\n");
+            sb.append("          <option value=\"index\">Index</option>\n");
+            sb.append("          <option value=\"embedding\">Embedding</option>\n");
+            sb.append("          <option value=\"update-list\">Project list</option>\n");
+            sb.append("        </select>\n");
+            sb.append("        <button class=\"btn btn-build\" onclick=\"doAction('").append(nm).append("', this)\">Update</button>\n");
+            sb.append("        <span class=\"build-status\" id=\"status-").append(nm).append("\"></span>\n");
+                sb.append("      </div>\n");
+            sb.append("    </div>\n");
+    }
+
     /**
      * Renders and serves the portal index page listing all registered projects.
      * Each project row shows the project name (opening in a new tab), navbar labels
@@ -1790,6 +1823,14 @@ public class PortalServer implements PortalReads {
                 .project-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
                                padding: 9px 16px; border-bottom: 1px solid var(--border-color); }
                 .project-row:last-child { border-bottom: none; }
+                .project-series { border-bottom: 1px solid var(--border-color); }
+                .project-series:last-child { border-bottom: none; }
+                .project-series-name { cursor: pointer; padding: 9px 16px; font-size: 0.92rem; font-weight: 700;
+                                       color: var(--text-primary); }
+                .project-series-count { margin-left: 0.5rem; font-size: 0.78rem; font-weight: 400;
+                                        color: var(--text-secondary); }
+                .project-series .project-row { padding-left: 34px; border-top: 1px solid var(--border-color);
+                                               border-bottom: none; }
                 .project-name { font-size: 0.92rem; font-weight: 700; min-width: 0;
                                 overflow-wrap: anywhere; }
                 .project-name a { color: var(--text-primary); text-decoration: none; }
@@ -1993,39 +2034,41 @@ public class PortalServer implements PortalReads {
               <div class="project-list">
             """);
 
-        for (Project p : projects) {
-            List<String> labels = readNavbarLabels(p.projectDir());
-            String[] i18n = Projects.readI18nConfig(p.projectDir());
-            sb.append("    <div class=\"project-row\">\n");
-            sb.append("      <div class=\"project-name\"><a class=\"project-link\" href=\"").append(escHtml(base.url("/" + p.name() + "/"))).append("\">").append(escHtml(p.name())).append("</a></div>\n");
-            sb.append("      <div class=\"project-labels\" id=\"labels-").append(escHtml(p.name())).append("\">\n");
-            for (String label : labels) {
-                sb.append("        <span class=\"project-label\">").append(escHtml(label)).append("</span>\n");
+        // Two levels: a series (the name without the digits at its end) opens to its projects; a series of one
+        // project is that project alone (ProjectSeries_261121_oo01).
+        Map<String, Project> projectOfName = new java.util.HashMap<>();
+        for (Project p : projects) projectOfName.put(p.name(), p);
+        for (ProjectSeries.Group group : ProjectSeries.group(new ArrayList<>(projectOfName.keySet()))) {
+            if (!group.isSeries()) {
+                appendProjectRow(sb, projectOfName.get(group.projects().get(0)));
+                continue;
             }
-            sb.append("      </div>\n");
-            if (i18n.length > 0) {
-                sb.append("      <div class=\"project-locales\">\n");
-                for (String loc : i18n) {
-                    sb.append("        <span class=\"locale-tag\">").append(escHtml(loc)).append("</span>\n");
-                }
-                sb.append("      </div>\n");
-            }
-                String nm = escHtml(p.name());
-                sb.append("      <div class=\"project-actions\">\n");
-                sb.append("        <select class=\"action-select\" id=\"action-").append(nm).append("\" title=\"Choose an action, then Run\">\n");
-                sb.append("          <option value=\"all\">All</option>\n");
-                sb.append("          <option value=\"html\">HTML</option>\n");
-                sb.append("          <option value=\"index\">Index</option>\n");
-                sb.append("          <option value=\"embedding\">Embedding</option>\n");
-                sb.append("          <option value=\"update-list\">Project list</option>\n");
-                sb.append("        </select>\n");
-                sb.append("        <button class=\"btn btn-build\" onclick=\"doAction('").append(nm).append("', this)\">Update</button>\n");
-                sb.append("        <span class=\"build-status\" id=\"status-").append(nm).append("\"></span>\n");
-                sb.append("      </div>\n");
-            sb.append("    </div>\n");
+            sb.append("    <details class=\"project-series\" data-series=\"").append(escHtml(group.series())).append("\">\n");
+            sb.append("      <summary class=\"project-series-name\">").append(escHtml(group.series()))
+              .append("<span class=\"project-series-count\">").append(group.projects().size()).append("</span></summary>\n");
+            for (String name : group.projects()) appendProjectRow(sb, projectOfName.get(name));
+            sb.append("    </details>\n");
         }
 
         sb.append("  </div>\n"); // close .project-list
+        // The series a reader opened stay open the next time the portal is opened in this browser.
+        sb.append("""
+            <script>
+            (function () {
+              var KEY = 'portal-open-series';
+              var open = [];
+              try { open = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { open = []; }
+              document.querySelectorAll('details.project-series').forEach(function (d) {
+                if (open.indexOf(d.dataset.series) >= 0) d.open = true;
+                d.addEventListener('toggle', function () {
+                  var now = Array.prototype.map.call(document.querySelectorAll('details.project-series[open]'),
+                    function (x) { return x.dataset.series; });
+                  localStorage.setItem(KEY, JSON.stringify(now));
+                });
+              });
+            })();
+            </script>
+            """);
             sb.append("  </div>\n"); // close .tab-panel#tab-projects
 
             sb.append("""
