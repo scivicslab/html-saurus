@@ -34,9 +34,17 @@ final class MathProtector {
      * Inline math. The opening dollar is not followed by white space, the closing dollar is not
      * preceded by white space and not followed by a digit, so that prices such as
      * {@code $5 and $10} are not read as math. A backslash escapes the next character.
+     *
+     * <p>The body is written as an unrolled loop with possessive quantifiers: runs of ordinary
+     * characters, each run optionally followed by an escaped character. A lazy loop over the
+     * alternative {@code (?:\\.|[^$\\\n])+?} would match the same text, but {@code java.util.regex}
+     * recurses once per character of such a loop, so a formula a few thousand characters long
+     * (OCR output can contain one) throws {@code StackOverflowError} on a page-conversion thread.
+     * The body cannot contain an unescaped {@code $}, so it always ends at the first one and
+     * giving up the lazy search loses no match.</p>
      */
     private static final Pattern INLINE = Pattern.compile(
-            "(?<![\\\\$])\\$(?![\\s$])((?:\\\\.|[^$\\\\\\n])+?)(?<![\\s\\\\])\\$(?!\\d)");
+            "(?<![\\\\$])\\$(?![\\s$])((?:[^$\\\\\\n]|\\\\.)[^$\\\\\\n]*+(?:\\\\.[^$\\\\\\n]*+)*+)(?<![\\s\\\\])\\$(?!\\d)");
 
     private final List<String> formulas = new ArrayList<>();
 
