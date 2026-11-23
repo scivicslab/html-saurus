@@ -124,13 +124,15 @@ class NavTreeBuilder {
 
             var m1 = SIDEBAR_ITEM_PAT.matcher(configContent);
             while (m1.find()) {
+                // Section hrefs carry the directory name without its numeric prefix ("200_x" -> "x"),
+                // so the config's directory name is compared in that same form.
                 String dir = sidebarIdToDirName.get(m1.group(1));
-                if (dir != null) navItems.add(new NavItem(m1.start(), dir, m1.group(2)));
+                if (dir != null) navItems.add(new NavItem(m1.start(), SiteBuilder.stripNumericPrefix(dir), m1.group(2)));
             }
 
             var m2 = DOC_ITEM_PAT.matcher(configContent);
             while (m2.find()) {
-                String dir = m2.group(1).split("/")[0];
+                String dir = SiteBuilder.stripNumericPrefix(m2.group(1).split("/")[0]);
                 if (!dir.isEmpty()) navItems.add(new NavItem(m2.start(), dir, m2.group(2)));
             }
 
