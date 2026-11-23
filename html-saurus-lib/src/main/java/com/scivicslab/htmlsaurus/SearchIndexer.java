@@ -305,6 +305,8 @@ public class SearchIndexer {
 
         Document doc = new Document();
         doc.add(new StoredField("path", href));
+        // Whole-string copy of the path, so a search-scope query can match it (the stored "path" cannot be searched).
+        doc.add(new StringField("path_idx", href, Field.Store.NO));
         doc.add(new StoredField("title", title));
         // Absolute source path of the .md file, so search results can carry the full path.
         doc.add(new StoredField("src_path", mdFile.toAbsolutePath().toString()));
@@ -385,6 +387,8 @@ public class SearchIndexer {
 
         Document doc = new Document();
         doc.add(new StoredField("path", href));
+        // Whole-string copy of the path, so a search-scope query can match it (the stored "path" cannot be searched).
+        doc.add(new StringField("path_idx", href, Field.Store.NO));
         doc.add(new StoredField("title", title));
         doc.add(new StoredField("src_path", mdFile.toAbsolutePath().toString()));
         doc.add(new StoredField("description", ""));
