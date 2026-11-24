@@ -95,6 +95,17 @@ public class SearchIndexer {
         this.blogDir = blogDir;
     }
 
+    /**
+     * The path a reader sees for a page: the project's name, then the page's path. It is the path the
+     * portal puts in every search result, so a search scope written against it selects what the
+     * reader can see, across projects. The project is the directory that holds {@code docs/}.
+     */
+    private String servedPath(String href) {
+        Path project = docsDir.toAbsolutePath().normalize().getParent();
+        String name = project == null || project.getFileName() == null ? "" : project.getFileName().toString();
+        return "/" + name + href;
+    }
+
     /** Whether this locale is the one written at the root, and so carries no locale segment. */
     private boolean isDefaultLocale() {
         return locale == null || locale.equals(defaultLocale);
@@ -305,8 +316,9 @@ public class SearchIndexer {
 
         Document doc = new Document();
         doc.add(new StoredField("path", href));
-        // Whole-string copy of the path, so a search-scope query can match it (the stored "path" cannot be searched).
-        doc.add(new StringField("path_idx", href, Field.Store.NO));
+        // Whole-string copy of the served path (project name + path), so a search-scope query can match it
+        // (the stored "path" cannot be searched).
+        doc.add(new StringField("path_idx", servedPath(href), Field.Store.NO));
         doc.add(new StoredField("title", title));
         // Absolute source path of the .md file, so search results can carry the full path.
         doc.add(new StoredField("src_path", mdFile.toAbsolutePath().toString()));
@@ -387,8 +399,9 @@ public class SearchIndexer {
 
         Document doc = new Document();
         doc.add(new StoredField("path", href));
-        // Whole-string copy of the path, so a search-scope query can match it (the stored "path" cannot be searched).
-        doc.add(new StringField("path_idx", href, Field.Store.NO));
+        // Whole-string copy of the served path (project name + path), so a search-scope query can match it
+        // (the stored "path" cannot be searched).
+        doc.add(new StringField("path_idx", servedPath(href), Field.Store.NO));
         doc.add(new StoredField("title", title));
         doc.add(new StoredField("src_path", mdFile.toAbsolutePath().toString()));
         doc.add(new StoredField("description", ""));

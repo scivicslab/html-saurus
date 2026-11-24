@@ -16,8 +16,9 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * {@code path_idx} holds a page's path as one string, so that a search scope can be written as a
- * path pattern in Lucene query syntax, e.g. {@code path_idx:\/Books\/Chapter08\/*}.
+ * {@code path_idx} holds a page's served path (project name, then the page's path) as one string, so
+ * that a search scope can be written as a path pattern in Lucene query syntax, e.g.
+ * {@code path_idx:\/proj\/Books\/Chapter08\/*}. It is the path the portal shows in every search result.
  *
  * <p>The field was indexed, but the searcher's analyzer table did not list it. A query term on it was
  * then split like ordinary text, and a path never matched as a whole. These tests parse each
@@ -66,29 +67,29 @@ class SearchPathIdxTest {
 
     @Test
     void aDirectoryPrefixSelectsThePagesUnderIt() throws Exception {
-        assertEquals(2, count("path_idx:\\/Books\\/*"));
-        assertEquals(1, count("path_idx:\\/Books\\/Chapter08\\/*"));
-        assertEquals(1, count("path_idx:\\/Notes\\/*"));
+        assertEquals(2, count("path_idx:\\/proj\\/Books\\/*"));
+        assertEquals(1, count("path_idx:\\/proj\\/Books\\/Chapter08\\/*"));
+        assertEquals(1, count("path_idx:\\/proj\\/Notes\\/*"));
     }
 
     @Test
     void aWholePathSelectsThatPage() throws Exception {
-        assertEquals(1, count("path_idx:\\/Books\\/Chapter08\\/TheLispReader\\/"));
-        assertEquals(0, count("path_idx:\\/Books\\/Chapter08\\/Macros\\/"));
+        assertEquals(1, count("path_idx:\\/proj\\/Books\\/Chapter08\\/TheLispReader\\/"));
+        assertEquals(0, count("path_idx:\\/proj\\/Books\\/Chapter08\\/Macros\\/"));
     }
 
     @Test
     void patternsCombineWithOrAndNot() throws Exception {
-        assertEquals(2, count("path_idx:\\/Notes\\/* OR path_idx:\\/Books\\/Chapter09\\/*"));
-        assertEquals(1, count("path_idx:\\/Books\\/* AND NOT path_idx:\\/Books\\/Chapter09\\/*"));
+        assertEquals(2, count("path_idx:\\/proj\\/Notes\\/* OR path_idx:\\/proj\\/Books\\/Chapter09\\/*"));
+        assertEquals(1, count("path_idx:\\/proj\\/Books\\/* AND NOT path_idx:\\/proj\\/Books\\/Chapter09\\/*"));
         // "everything outside" must start from all pages: a bare NOT selects nothing in Lucene.
-        assertEquals(0, count("NOT path_idx:\\/Books\\/*"), "a bare NOT matches nothing");
-        assertEquals(1, count("*:* AND NOT path_idx:\\/Books\\/*"));
+        assertEquals(0, count("NOT path_idx:\\/proj\\/Books\\/*"), "a bare NOT matches nothing");
+        assertEquals(1, count("*:* AND NOT path_idx:\\/proj\\/Books\\/*"));
     }
 
     @Test
     void thePathIsOneStringNotWords() throws Exception {
         assertEquals(0, count("path_idx:Books"), "a path segment alone is not the path");
-        assertEquals(0, count("path_idx:\\/books\\/*"), "the match is case-sensitive, like the path");
+        assertEquals(0, count("path_idx:\\/proj\\/books\\/*"), "the match is case-sensitive, like the path");
     }
 }
