@@ -4,8 +4,8 @@ import com.microsoft.playwright.*;
 
 /**
  * E2E test for portal search: the sidebar's "one form, three search types" widget
- * ({@code #search-input} + {@code search-type} radios, inside the Projects tab —
- * see {@code ImportTab_260806_oo01} for the Projects/Import tab layout), and the two
+ * ({@code #search-input} + {@code search-type} radios, inside the Search panel of the left pane's menu —
+ * see {@code ImportTab_260806_oo01} for the panel layout), and the two
  * standalone results pages it dispatches to ({@code /search} for keyword and embedding,
  * {@code /find-related} for TF-IDF).
  *
@@ -59,7 +59,7 @@ public class PortalSearchE2E {
     // ---- Sidebar widget: #search-input + search-type radios, inside the Projects tab ----------
 
     private static void runSidebarWidget(Browser browser) {
-        withPage("S-1: search widget is visible by default (Projects tab is active on load)", browser, page -> {
+        withPage("S-1: search widget is visible by default (the Search panel is shown on load)", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
             check(page.isVisible("#search-input"), "#search-input must be visible on load");
@@ -121,8 +121,10 @@ public class PortalSearchE2E {
         withPage("U-1: Update All Projects button sits inside the collapsible sidebar", browser, page -> {
             page.navigate(BASE_URL + "/");
             page.waitForLoadState();
+            // The button is in the Projects panel; the Search panel is the one shown on load.
+            page.selectOption("#pane-menu", "projects");
             check(page.isVisible("#update-all-projects-btn"),
-                    "#update-all-projects-btn must be visible on load");
+                    "#update-all-projects-btn must be visible in the Projects panel");
             check(page.querySelector("#portal-sidebar #update-all-projects-btn") != null,
                     "#update-all-projects-btn must be inside #portal-sidebar, not in the header");
             check(page.querySelector("#update-all-projects-status") != null,
