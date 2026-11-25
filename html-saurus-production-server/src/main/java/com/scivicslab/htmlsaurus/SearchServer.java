@@ -40,6 +40,8 @@ public class SearchServer {
     private final Map<String, ActorRef<LuceneSearcher>> localeSearchers = new HashMap<>();
     /** Every path declared in start(), whether or not this deployment registered its handler. */
     private final List<Endpoint> endpoints = new ArrayList<>();
+    /** The access log every context logs to, or {@code null} for none. */
+    private AccessLog accessLog;
     /** Hits per page on the results page, matching the portal's own results page. */
     private static final int HITS_PER_PAGE = 20;
     /** How deep the results page goes; hits beyond this are not reachable by paging. */
@@ -70,6 +72,17 @@ public class SearchServer {
     }
 
     /**
+     * Logs every request to {@code log}, once: its filter is added to each context {@link #register} creates, so a page, a
+     * redirect, a 404 and a search all go through the same hook.
+     *
+     * @return this server
+     */
+    public SearchServer withAccessLog(AccessLog log) {
+        this.accessLog = log;
+        return this;
+    }
+
+    /**
      * Creates and starts the HTTP server.
      *
      * @return the started {@link HttpServer} instance (caller may call {@code stop(0)} when done)
@@ -90,7 +103,10 @@ public class SearchServer {
 
         server.setExecutor(null);
         server.start();
-        Runtime.getRuntime().addShutdownHook(new Thread(searcherSystem::terminate));
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (accessLog != null) accessLog.close();
+            searcherSystem.terminate();
+        }));
         System.out.println("Serving at http://localhost:" + server.getAddress().getPort());
         System.out.println("Press Ctrl+C to stop.");
         return server;
@@ -113,7 +129,8 @@ public class SearchServer {
                           java.util.function.Supplier<HttpHandler> handler) {
         endpoints.add(new Endpoint(path, visibility));
         if (visibility != PUBLIC) return;
-        server.createContext(path, handler.get());
+        var context = server.createContext(path, handler.get());
+        if (accessLog != null) context.getFilters().add(accessLog.filter());
     }
 
     /** Every path this server declared, in the order it declared them. */

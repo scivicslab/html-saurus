@@ -222,6 +222,68 @@ html-saurus reads several Docusaurus project files automatically. None of them a
 
 ---
 
+## アクセスログ（プロダクションモード）
+
+プロダクションモード（`html-saurus-production-server` の `serve`）は、リクエストごとに 1 行、Apache の `combined` 形式でアクセスログを書きます。
+
+```
+203.0.113.5 - - [25/Nov/2026:14:30:12 +0900] "GET /foo/ HTTP/1.1" 200 5123 "https://example/" "Mozilla/5.0 ..."
+```
+
+`LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\""` と同じ並びです。`%l` と `%u` は常に `-`、`%b` はレスポンス本文のバイト数で 0 のときは `-`、時刻はリクエストを受けた時刻をローカルタイムゾーンのオフセット付きで書きます。リクエスト行・Referer・User-Agent は Apache と同じ規則（`\"`、`\\`、制御文字と ASCII 外のバイトは `\xHH`）でエスケープします。
+
+静的ファイル、301 のリダイレクト、404/403、`/search` と各ロケールの `/<locale>/search`、ハンドラが失敗したリクエストも、同じ仕組み（登録した全 context に付ける 1 つの `Filter`）で 1 行ずつ記録します。ハンドラが応答を返す前に例外で終わったリクエストは `500`、何も返さずに終わったものは `000` と書きます。HTTP のリクエスト行として読めない接続（サーバが 400 を返す前の段階）は、Filter まで届かないため記録されません。
+
+### オプション
+
+| オプション | システムプロパティ | 既定値 |
+|---|---|---|
+| `--no-access-log` | `htmlsaurus.access.log=off` | ログを書く |
+| `--log-dir <dir>` | `htmlsaurus.log.dir` | 起動したときのカレントディレクトリの `logs/` |
+| `--access-log <file\|->` | `htmlsaurus.access.log` | `access.log`（`--log-dir` の中。絶対パスならそのまま。`-` は標準出力） |
+| `--access-log-response-time` | `htmlsaurus.access.log.response.time=true` | 付けない |
+| `--access-log-trusted-proxy <list>` | `htmlsaurus.access.log.trusted.proxies` | なし（どのヘッダも信用しない） |
+
+コマンドラインのオプションがシステムプロパティより優先します。`--access-log-response-time` を付けると、各行の最後にリクエストの処理時間（マイクロ秒）を 1 項目足します。既定では付けないので、1 行は Apache の combined 形式とバイト単位で同じです。
+
+```bash
+java -jar html-saurus-production-server.jar serve -d /data/site -p 8080 --log-dir /var/log/html-saurus
+# コンテナ: 標準出力へ
+java -jar html-saurus-production-server.jar serve -d /data/site --access-log -
+```
+
+### クライアントのアドレス（`%h`）
+
+既定では TCP の接続元アドレスを書きます。リバースプロキシや Ingress の後ろでは接続元がプロキシになるため、`--access-log-trusted-proxy 10.0.0.0/8,192.168.1.5` のようにプロキシのアドレス（IP リテラルか CIDR）を指定すると、接続元がそのプロキシのときだけ `X-Forwarded-For` を読みます。ヘッダは右から読み、信用するプロキシのアドレスを飛ばして、最初に現れた信用しないアドレスをクライアントとします。接続元が信用するプロキシでなければ、ヘッダに何が書いてあっても無視します（クライアントが自分でヘッダを付けても、ログのアドレスは変えられません）。ヘッダに IP リテラル以外が混ざっているときも、接続元のアドレスを書きます。
+
+### ファイルの管理（Apache と同じ）
+
+- ファイルは追記で開いたままにし、新規作成のモードは `0640` です。既存のファイルのモードは変えません。ディレクトリがなければ作ります。
+- logrotate に対応します。書き込む前に、1 秒に 1 回以内でパスの指すファイルを調べ、名前が変えられた・消された場合は、パスをもう一度開いて新しいファイルに書きます。`copytruncate` は要りません。
+- 書き込みに失敗しても、配信は止まりません。失敗は数えて、最初の 1 回だけ標準エラーに出し、終了時に失われた行数を出します。次の行は 1 秒以内に再び開き直そうとします。
+- 書き込みはログ専用の 1 つのアクターが行うので、複数のリクエストの行が混ざることはありません。
+
+logrotate の設定例（`/etc/logrotate.d/html-saurus`）:
+
+```
+/var/log/html-saurus/access.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 html-saurus html-saurus
+}
+```
+
+`postrotate` で再読み込みの信号を送る必要はありません。サーバが次の 1 秒以内に新しいファイルを開きます。
+
+### 注意
+
+- Apache と同じく、リクエスト行をクエリ文字列ごと記録します。したがって、`/search?q=...` の検索語がログに残ります。ログの読み取り権限を絞ってください（既定の `0640` はそのためです）。
+- ログの置き場所（`--log-dir`）は、起動するユーザーが書き込めるディレクトリにしてください。k8s やコンテナでは、ボリュームを付けるか `--access-log -` で標準出力に出します。
+
 ## Architecture
 
 ```

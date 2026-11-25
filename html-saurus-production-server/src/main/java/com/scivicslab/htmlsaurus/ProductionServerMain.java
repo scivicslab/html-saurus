@@ -76,6 +76,7 @@ public final class ProductionServerMain {
                 .build());
 
         LinkPolicy.addOptions(opts);
+        AccessLogConfig.addOptions(opts);
 
         String description = """
                 Builds the project and serves it, for readers on the internet.
@@ -106,6 +107,17 @@ public final class ProductionServerMain {
             System.out.println("  port    : " + port);
             System.out.println("=====================================");
 
+            AccessLogConfig accessLogConfig;
+            try {
+                accessLogConfig = AccessLogConfig.from(cl, System::getProperty, Path.of("").toAbsolutePath());
+            } catch (IllegalArgumentException e) {
+                System.err.println(e.getMessage());
+                System.exit(1);
+                return;
+            }
+            System.out.println("  access log : " + (!accessLogConfig.enabled() ? "off"
+                    : accessLogConfig.toStdout() ? "standard output" : accessLogConfig.file()));
+
             try {
                 BuildStages.linkPolicy(LinkPolicy.from(cl));
             } catch (IllegalArgumentException e) {
@@ -121,7 +133,9 @@ public final class ProductionServerMain {
             }
             BuildStages.reindexAll(projectDir, true);
             try {
-                new SearchServer(outDir, indexDir, port).start();
+                SearchServer server = new SearchServer(outDir, indexDir, port);
+                if (accessLogConfig.enabled()) server.withAccessLog(AccessLog.open(accessLogConfig));
+                server.start();
             } catch (java.io.IOException e) {
                 System.err.println("Could not open port " + port + ": " + e.getMessage());
                 System.exit(1);
