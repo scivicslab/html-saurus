@@ -1,6 +1,7 @@
 package com.scivicslab.htmlsaurus;
 
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.core.KeywordAnalyzer;
 import org.apache.lucene.analysis.ja.JapaneseAnalyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -60,6 +61,9 @@ class LuceneSearcher implements Closeable {
         this.analyzer = new PerFieldAnalyzerWrapper(
                 baseAnalyzer,
                 Map.of("doc_id_idx", SearchIndexer.underscoreAnalyzer(),
+                       // The whole path is one term (indexed as a StringField): a query term on it
+                       // must not be split into words, or a path pattern never matches.
+                       "path_idx", new KeywordAnalyzer(),
                        "path_tokens", SearchIndexer.underscoreAnalyzer(),
                        "date", SearchIndexer.underscoreAnalyzer(),
                        "body_ng", SearchIndexer.shingleAnalyzer(new JapaneseAnalyzer())));

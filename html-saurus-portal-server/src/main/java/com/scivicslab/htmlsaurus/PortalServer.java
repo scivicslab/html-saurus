@@ -57,6 +57,8 @@ public class PortalServer implements PortalReads {
      *  (see {@code BuildParallelization_260822_oo01}); {@code <= 0} keeps {@link SiteBuilder}'s own default. */
     private final int threads;
     private final Path worksDir;
+    /** Guards the search-scopes file: a change reads it, edits it and writes it back as one step. */
+    private final Object scopesLock = new Object();
     private McpHandler mcpHandler;
     /**
      * Precomputed semantic (embedding-based) related docs: portalPath -> list of {path,title,summary}.
@@ -538,6 +540,12 @@ public class PortalServer implements PortalReads {
         }
 
 
+
+        // Search scopes (JSON): GET lists them, POST {"name","query"} adds one, DELETE ?id= removes one.
+        if (path.equals("/api/search-scopes")) {
+            handleSearchScopes(ex);
+            return;
+        }
 
         // Cross-project search API (JSON): GET /api/search?q=... (development mode only — the
         // the human-facing equivalent is the SSR /search page below)
@@ -1877,6 +1885,18 @@ public class PortalServer implements PortalReads {
                              background: var(--bg-secondary); color: var(--text-primary);
                              border: 1px solid var(--border-color); border-radius: 4px; }
                 .tab-panel[hidden] { display: none; }
+                .scope-list { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.4rem 0 0.6rem; }
+                .scope-row { display: flex; align-items: flex-start; gap: 0.4rem; font-size: 0.85rem;
+                             color: var(--text-primary); }
+                .scope-row label { cursor: pointer; flex: 1 1 auto; word-break: break-all; }
+                .scope-query { display: block; margin-left: 1.3rem; font-family: monospace; font-size: 0.72rem;
+                               color: var(--text-secondary); }
+                .scope-remove { flex: 0 0 auto; }
+                #scope-form { margin-top: 0.5rem; }
+                #scope-form input[type=text] { width: 100%%; margin-bottom: 0.35rem; padding: 0.4rem 0.55rem;
+                    border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-tertiary);
+                    color: var(--text-primary); font-size: 0.8rem; font-family: monospace; }
+                #scope-form p { font-size: 0.75rem; color: var(--text-secondary); margin: 0.3rem 0; }
                 /* Import tab: a type picker (dropdown, so adding a type — arxiv, ... — doesn't
                    mean adding a sub-tab) followed by one panel per type, styled after
                    quarkus-english-drill's ingest_form.html. */
@@ -1998,6 +2018,7 @@ public class PortalServer implements PortalReads {
             sb.append("""
               <div class="pane-menu-bar">
                 <select id="pane-menu" aria-label="Left pane" onchange="selectTab(this.value)">
+                  <option id="pane-option-search" value="search">Search</option>
                   <option id="pane-option-projects" value="projects">Projects</option>
                   <option id="pane-option-import" value="import">Import</option>
                   <option id="pane-option-batch" value="batch">Batch Job</option>
@@ -2005,7 +2026,7 @@ public class PortalServer implements PortalReads {
                   <option id="pane-option-revise" value="revise">Revise</option>
                 </select>
               </div>
-              <div class="tab-panel" id="tab-projects">
+              <div class="tab-panel" id="tab-search">
               <h2>Search</h2>
               <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.6rem 0 0.75rem;">
                 Enter keywords, or paste a paragraph of text, then pick a search type.</p>
@@ -2024,6 +2045,23 @@ public class PortalServer implements PortalReads {
                 </span>
                 <span id="search-status" style="font-size:0.8rem;color:var(--text-secondary);"></span>
               </div>
+              <h2>Scope</h2>
+              <p style="font-size:0.8rem;color:var(--text-secondary);margin:0.4rem 0;">
+                Tick categories to search only those pages. Nothing ticked searches every page.</p>
+              <div class="scope-list" id="scope-list"></div>
+              <button class="btn" id="scope-add-toggle" onclick="toggleScopeForm()">+ Add search category</button>
+              <span class="build-status" id="scope-status" style="margin-left:0.5rem;"></span>
+              <div id="scope-form" hidden>
+                <input type="text" id="scope-name" placeholder="Name, e.g. Documentation">
+                <input type="text" id="scope-query" placeholder="path_idx:\\/doc_Base010\\/documentation\\/*">
+                <p>A category is a Lucene query on <code>path_idx</code>, the path shown in each result
+                   (<code>/project/page/</code>). Write each <code>/</code> as <code>\\/</code>.
+                   Categories may overlap. &ldquo;Everything else&rdquo; selects the pages that no category selects.</p>
+                <button class="btn" onclick="saveScope()">Save</button>
+                <button class="btn" onclick="toggleScopeForm()">Cancel</button>
+              </div>
+              </div>
+              <div class="tab-panel" id="tab-projects" hidden>
               <h2>Projects</h2>
               <div class="project-actions-all">
                 <button class="btn btn-reload" id="update-all-projects-btn"
@@ -2649,10 +2687,12 @@ public class PortalServer implements PortalReads {
               if (ph) ph.style.display = 'none';
               const typeEl = document.querySelector('input[name="search-type"]:checked');
               const type = typeEl ? typeEl.value : 'fulltext';
+              const scopes = checkedScopeIds().join(',');
+              const scopeQuery = scopes ? '&scopes=' + encodeURIComponent(scopes) : '';
               if (type === 'fulltext') {
-                loadInFrame('/search?q=' + encodeURIComponent(text));
+                loadInFrame('/search?q=' + encodeURIComponent(text) + scopeQuery);
               } else if (type === 'embedding') {
-                loadInFrame('/search-semantic?q=' + encodeURIComponent(text));
+                loadInFrame('/search-semantic?q=' + encodeURIComponent(text) + scopeQuery);
               } else {
                 const form = document.createElement('form');
                 form.method = 'POST'; form.action = BASE + '/find-related'; form.target = 'doc-frame';
@@ -2660,6 +2700,9 @@ public class PortalServer implements PortalReads {
                 const tInput = document.createElement('input');
                 tInput.type = 'hidden'; tInput.name = 'text'; tInput.value = text;
                 form.appendChild(tInput);
+                const sInput = document.createElement('input');
+                sInput.type = 'hidden'; sInput.name = 'scopes'; sInput.value = scopes;
+                form.appendChild(sInput);
                 document.body.appendChild(form);
                 form.submit();
                 document.body.removeChild(form);
@@ -2667,6 +2710,74 @@ public class PortalServer implements PortalReads {
               status.textContent = 'Showing results in the right pane.';
               status.style.color = 'var(--accent-green)';
             }
+            // ---- Search scopes: tick categories to narrow a search to part of the documents ----
+            function scopeStatus(msg, bad) {
+              var el = document.getElementById('scope-status');
+              el.textContent = msg || '';
+              el.style.color = bad ? '#e55' : 'var(--text-secondary)';
+            }
+            function checkedScopeIds() {
+              return Array.prototype.map.call(document.querySelectorAll('.scope-cb:checked'), function(c) { return c.value; });
+            }
+            function renderScopes(data) {
+              var saved = [];
+              try { saved = JSON.parse(localStorage.getItem('portal-scopes-ticked') || '[]'); } catch (e) { saved = []; }
+              var list = document.getElementById('scope-list');
+              list.textContent = '';
+              var rows = data.categories.map(function(c) { return { id: c.id, name: c.name, query: c.query, removable: true }; });
+              rows.push({ id: data.rest.id, name: data.rest.name, query: 'every page that no category above selects', removable: false });
+              rows.forEach(function(r) {
+                var row = document.createElement('div'); row.className = 'scope-row';
+                var label = document.createElement('label');
+                var cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'scope-cb'; cb.value = r.id;
+                cb.checked = saved.indexOf(r.id) >= 0;
+                cb.addEventListener('change', function() { localStorage.setItem('portal-scopes-ticked', JSON.stringify(checkedScopeIds())); });
+                label.appendChild(cb);
+                label.appendChild(document.createTextNode(' ' + r.name));
+                var q = document.createElement('span'); q.className = 'scope-query'; q.textContent = r.query;
+                label.appendChild(q);
+                row.appendChild(label);
+                if (r.removable) {
+                  var rm = document.createElement('button'); rm.className = 'btn scope-remove'; rm.textContent = 'Remove';
+                  rm.addEventListener('click', function() { removeScope(r.id, r.name); });
+                  row.appendChild(rm);
+                }
+                list.appendChild(row);
+              });
+            }
+            async function loadScopes() {
+              try {
+                var res = await fetch(BASE + '/api/search-scopes');
+                renderScopes(await res.json());
+              } catch (e) { scopeStatus('Cannot load the search scopes: ' + e.message, true); }
+            }
+            function toggleScopeForm() {
+              var f = document.getElementById('scope-form');
+              f.hidden = !f.hidden;
+              scopeStatus('');
+              if (!f.hidden) document.getElementById('scope-name').focus();
+            }
+            async function saveScope() {
+              var name = document.getElementById('scope-name').value;
+              var query = document.getElementById('scope-query').value;
+              var res = await fetch(BASE + '/api/search-scopes', { method: 'POST',
+                headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, query: query }) });
+              var data = await res.json();
+              if (!res.ok) { scopeStatus(data.error || 'The category was not saved.', true); return; }
+              document.getElementById('scope-name').value = '';
+              document.getElementById('scope-query').value = '';
+              document.getElementById('scope-form').hidden = true;
+              scopeStatus('');
+              renderScopes(data);
+            }
+            async function removeScope(id, name) {
+              if (!confirm('Remove the category "' + name + '"?')) return;
+              var res = await fetch(BASE + '/api/search-scopes?id=' + encodeURIComponent(id), { method: 'DELETE' });
+              var data = await res.json();
+              if (!res.ok) { scopeStatus(data.error || 'The category was not removed.', true); return; }
+              renderScopes(data);
+            }
+            loadScopes();
             function selectTab(name) {
               document.querySelectorAll('.tab-panel').forEach(function(p) { p.hidden = (p.id !== 'tab-' + name); });
               var menu = document.getElementById('pane-menu');
@@ -2678,8 +2789,8 @@ public class PortalServer implements PortalReads {
             // A name stored before a tab was renamed matches no panel, which would hide all of
             // them and leave the sidebar blank.
             (function () {
-              var stored = localStorage.getItem('portal-active-tab') || 'projects';
-              selectTab(document.getElementById('tab-' + stored) ? stored : 'projects');
+              var stored = localStorage.getItem('portal-active-tab') || 'search';
+              selectTab(document.getElementById('tab-' + stored) ? stored : 'search');
             })();
             (function () {
               // Import type picker: a dropdown rather than sub-tabs, since the list of types keeps
@@ -3365,7 +3476,15 @@ public class PortalServer implements PortalReads {
         catch (NumberFormatException ignored) {}
 
         final String finalLang = lang;
-        List<Map<String, String>> allHits = q.isBlank() ? List.of() : globalSearch(q);
+        String scopesParam = queryParam(ex, "scopes");
+        org.apache.lucene.search.Query scopeFilter;
+        try {
+            scopeFilter = scopeFilter(scopeIds(scopesParam));
+        } catch (Exception e) {
+            respond(ex, 500, "text/plain", "The search scopes cannot be used: " + e.getMessage());
+            return;
+        }
+        List<Map<String, String>> allHits = q.isBlank() ? List.of() : globalSearch(q, scopeFilter);
         int total = allHits.size();
         int totalPages = Math.max(1, (total + PAGE_SIZE - 1) / PAGE_SIZE);
         page = Math.min(page, totalPages);
@@ -3426,6 +3545,8 @@ public class PortalServer implements PortalReads {
         } else {
             sb.append("<p class=\"result-count\"><strong>").append(total)
               .append("</strong> result(s) for &ldquo;").append(escHtml(q)).append("&rdquo;");
+            if (!scopesParam.isBlank())
+                sb.append(" &mdash; in ").append(escHtml(scopeLabel(scopeIds(scopesParam))));
             if (totalPages > 1)
                 sb.append(" &mdash; page ").append(page).append(" / ").append(totalPages);
             sb.append("</p>\n");
@@ -3445,7 +3566,8 @@ public class PortalServer implements PortalReads {
                 if (totalPages > 1) {
                     sb.append("<div class=\"pager\">");
                     String qEnc = java.net.URLEncoder.encode(q, java.nio.charset.StandardCharsets.UTF_8);
-                    String langParam = "&lang=" + java.net.URLEncoder.encode(finalLang, java.nio.charset.StandardCharsets.UTF_8);
+                    String langParam = "&lang=" + java.net.URLEncoder.encode(finalLang, java.nio.charset.StandardCharsets.UTF_8)
+                            + (scopesParam.isBlank() ? "" : "&scopes=" + java.net.URLEncoder.encode(scopesParam, java.nio.charset.StandardCharsets.UTF_8));
                     if (page > 1)
                         sb.append("<a href=\"").append(base.url("/search")).append("?q=").append(qEnc).append(langParam).append("&page=").append(page - 1).append("\">&laquo; Prev</a> ");
                     for (int p = 1; p <= totalPages; p++) {
@@ -3455,7 +3577,7 @@ public class PortalServer implements PortalReads {
                             sb.append("<a href=\"").append(base.url("/search")).append("?q=").append(qEnc).append(langParam).append("&page=").append(p).append("\">").append(p).append("</a> ");
                     }
                     if (page < totalPages)
-                        sb.append("<a href=\"").append(base.url("/search")).append("?q=").append(qEnc).append("&page=").append(page + 1).append("\">Next &raquo;</a>");
+                        sb.append("<a href=\"").append(base.url("/search")).append("?q=").append(qEnc).append(langParam).append("&page=").append(page + 1).append("\">Next &raquo;</a>");
                     sb.append("</div>\n");
                 }
             }
@@ -3464,6 +3586,131 @@ public class PortalServer implements PortalReads {
         sb.append(RelatedDocsView.searchWidgetScript(base));
         sb.append("</body>\n</html>\n");
         respond(ex, 200, "text/html; charset=UTF-8", HttpUtils.injectResponsive(sb.toString()));
+    }
+
+    // ---- Search scopes ------------------------------------------
+
+    /** The server-side file that holds the search scopes. */
+    private Path scopesFile() {
+        return worksDir.resolve(".html-saurus").resolve("search-scopes.json");
+    }
+
+    /** The analyzer a scope query is parsed with, before {@code path_idx} is made one term. */
+    private static org.apache.lucene.analysis.Analyzer scopeBase() {
+        return new JapaneseAnalyzer();
+    }
+
+    /** The ids in a comma-separated {@code scopes} parameter. */
+    private static List<String> scopeIds(String csv) {
+        List<String> ids = new ArrayList<>();
+        if (csv != null) {
+            for (String id : csv.split(",")) {
+                if (!id.isBlank()) ids.add(id.strip());
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * The query that selects the pages of the ticked scopes.
+     *
+     * @return the filter, or {@code null} when no scope is ticked: every page
+     */
+    private org.apache.lucene.search.Query scopeFilter(List<String> ids) throws Exception {
+        if (ids.isEmpty()) return null;
+        synchronized (scopesLock) {
+            return SearchScopes.load(scopesFile()).filter(ids, scopeBase());
+        }
+    }
+
+    /** The names of the ticked scopes, for the line that tells a result list what it was narrowed to. */
+    private String scopeLabel(List<String> ids) {
+        try {
+            List<String> names = new ArrayList<>();
+            synchronized (scopesLock) {
+                for (var c : SearchScopes.load(scopesFile()).categories()) {
+                    if (ids.contains(c.id())) names.add(c.name());
+                }
+            }
+            if (ids.contains(SearchScopes.REST_ID)) names.add(SearchScopes.REST_NAME);
+            return String.join(", ", names);
+        } catch (IOException e) {
+            return String.join(", ", ids);
+        }
+    }
+
+    /**
+     * Keeps the hits whose served path the ticked scopes select. The keyword search narrows inside its query;
+     * the TF-IDF and embedding searches rank on their own, so their hits are narrowed afterwards.
+     */
+    private List<Map<String, String>> inScopes(List<Map<String, String>> hits, String scopesParam) throws Exception {
+        var filter = scopeFilter(scopeIds(scopesParam));
+        if (filter == null) return hits;
+        Set<String> allowed = allowedPaths(filter);
+        List<Map<String, String>> kept = new ArrayList<>();
+        for (var hit : hits) {
+            if (allowed.contains(hit.getOrDefault("path", ""))) kept.add(hit);
+        }
+        return kept;
+    }
+
+    /** The served path ({@code /project/page/}) of every page the filter selects, across all projects and locales. */
+    private Set<String> allowedPaths(org.apache.lucene.search.Query filter) throws IOException {
+        Set<String> paths = new HashSet<>();
+        for (var entry : searchers.entrySet()) {
+            ActorRef<LuceneSearcher> sRef = entry.getValue();
+            if (!sRef.ask(LuceneSearcher::isAvailable).join()) continue;
+            DirectoryReader reader = sRef.ask(s -> {
+                try { return s.getReader(); } catch (IOException e) { throw new RuntimeException(e); }
+            }).join();
+            String key = entry.getKey();
+            String project = key.contains(":") ? key.substring(0, key.indexOf(':')) : key;
+            var searcher = new IndexSearcher(reader);
+            var stored = searcher.storedFields();
+            for (var sd : searcher.search(filter, Math.max(1, reader.maxDoc())).scoreDocs) {
+                String page = stored.document(sd.doc).get("path");
+                if (page != null) paths.add("/" + project + page);
+            }
+        }
+        return paths;
+    }
+
+    /**
+     * {@code /api/search-scopes}: {@code GET} lists the scopes, {@code POST {"name","query"}} adds one,
+     * {@code DELETE ?id=} removes one. Each answers with the scopes as they are afterwards.
+     */
+    private void handleSearchScopes(HttpExchange ex) throws IOException {
+        try {
+            synchronized (scopesLock) {
+                SearchScopes scopes = SearchScopes.load(scopesFile());
+                switch (ex.getRequestMethod().toUpperCase(Locale.ROOT)) {
+                    case "GET" -> { }
+                    case "POST" -> {
+                        Map<String, Object> body = McpJsonParser.parseObject(
+                                new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                        scopes = scopes.add(textOf(body.get("name")), textOf(body.get("query")), scopeBase());
+                        scopes.save(scopesFile());
+                    }
+                    case "DELETE" -> {
+                        scopes = scopes.remove(queryParam(ex, "id"));
+                        scopes.save(scopesFile());
+                    }
+                    default -> {
+                        respond(ex, 405, "text/plain", "Method Not Allowed");
+                        return;
+                    }
+                }
+                RelatedDocsView.writeJsonText(ex, scopes.toJson());
+            }
+        } catch (org.apache.lucene.queryparser.classic.ParseException | IllegalArgumentException e) {
+            respond(ex, 400, "application/json; charset=UTF-8", "{\"error\":" + jsonStr(String.valueOf(e.getMessage())) + "}");
+        } catch (IOException e) {
+            respond(ex, 500, "application/json; charset=UTF-8", "{\"error\":" + jsonStr(String.valueOf(e.getMessage())) + "}");
+        }
+    }
+
+    private static String textOf(Object value) {
+        return value instanceof String s ? s : "";
     }
 
     // ---- Cross-project search -----------------------------------
@@ -3476,7 +3723,14 @@ public class PortalServer implements PortalReads {
         String q = queryParam(ex, "q");
         String lang = queryParam(ex, "lang");
         if (lang.isBlank()) lang = "ja";
-        byte[] body = searchJson(q).getBytes(StandardCharsets.UTF_8);
+        String json;
+        try {
+            json = searchJson(q, scopeFilter(scopeIds(queryParam(ex, "scopes"))));
+        } catch (Exception e) {
+            respond(ex, 500, "text/plain", "The search scopes cannot be used: " + e.getMessage());
+            return;
+        }
+        byte[] body = json.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
         ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
         ex.getResponseHeaders().set("X-Frame-Options", "DENY");
@@ -3513,9 +3767,14 @@ public class PortalServer implements PortalReads {
     /** Full-text search across every project, as {@code GET /api/search} answers it. */
     @Override
     public String searchJson(String q) {
+        return searchJson(q, null);
+    }
+
+    /** As {@link #searchJson(String)}, narrowed to the pages {@code scopeFilter} selects; every page when it is null. */
+    private String searchJson(String q, org.apache.lucene.search.Query scopeFilter) {
         var sb = new StringBuilder("[");
         boolean first = true;
-        for (var hit : globalSearch(q == null ? "" : q)) {
+        for (var hit : globalSearch(q == null ? "" : q, scopeFilter)) {
             if (!first) sb.append(",");
             first = false;
             sb.append("{")
@@ -3587,6 +3846,11 @@ public class PortalServer implements PortalReads {
      */
 
     private List<Map<String, String>> globalSearch(String q, String lang) {
+        return globalSearch(q, lang, null);
+    }
+
+    /** As {@link #globalSearch(String, String)}, narrowed to the pages {@code scopeFilter} selects; every page when it is null. */
+    private List<Map<String, String>> globalSearch(String q, String lang, org.apache.lucene.search.Query scopeFilter) {
         if (q.isBlank()) return List.of();
 
         List<String> projNames = new ArrayList<>();
@@ -3617,7 +3881,13 @@ public class PortalServer implements PortalReads {
             var analyzer = "en".equals(lang) ? new StandardAnalyzer() : new JapaneseAnalyzer();
             var expr = LuceneQueryBuilder.build(LuceneQueryBuilder.fields(), LuceneQueryBuilder.BOOSTS, q);
             var parser = new MultiFieldQueryParser(LuceneQueryBuilder.fields(), analyzer, LuceneQueryBuilder.BOOSTS);
-            var query = parser.parse(expr);
+            org.apache.lucene.search.Query query = parser.parse(expr);
+            if (scopeFilter != null) {
+                query = new org.apache.lucene.search.BooleanQuery.Builder()
+                        .add(query, org.apache.lucene.search.BooleanClause.Occur.MUST)
+                        .add(scopeFilter, org.apache.lucene.search.BooleanClause.Occur.FILTER)
+                        .build();
+            }
             var topDocs = globalSearcher.search(query, 1000);
             var stored = globalSearcher.storedFields();
 
@@ -3664,13 +3934,18 @@ public class PortalServer implements PortalReads {
      * @return merged hit maps across every locale
      */
     private List<Map<String, String>> globalSearch(String q) {
+        return globalSearch(q, (org.apache.lucene.search.Query) null);
+    }
+
+    /** As {@link #globalSearch(String)}, narrowed to the pages {@code scopeFilter} selects; every page when it is null. */
+    private List<Map<String, String>> globalSearch(String q, org.apache.lucene.search.Query scopeFilter) {
         if (q.isBlank()) return List.of();
         java.util.LinkedHashSet<String> locales = new java.util.LinkedHashSet<>();
         for (String loc : searcherLocales.values()) if (loc != null) locales.add(loc);
         List<List<Map<String, String>>> perLocale = new ArrayList<>();
         int max = 0;
         for (String loc : locales) {
-            List<Map<String, String>> r = globalSearch(q, loc);
+            List<Map<String, String>> r = globalSearch(q, loc, scopeFilter);
             if (!r.isEmpty()) { perLocale.add(r); max = Math.max(max, r.size()); }
         }
         return interleaveDedup(perLocale, max);
@@ -3788,13 +4063,26 @@ public class PortalServer implements PortalReads {
 
     /** GET /api/search-semantic?q=... — query-to-doc semantic search as JSON. */
     private void handleSearchSemantic(HttpExchange ex) throws IOException {
-        RelatedDocsView.writeJsonText(ex, searchSemanticJson(queryParam(ex, "q")));
+        String q = queryParam(ex, "q");
+        try {
+            RelatedDocsView.writeJsonText(ex, RelatedDocsView.hitsJson(
+                    inScopes(semanticSearch(q == null ? "" : q), queryParam(ex, "scopes"))));
+        } catch (Exception e) {
+            respond(ex, 500, "text/plain", "The search scopes cannot be used: " + e.getMessage());
+        }
     }
 
     /** GET /search-semantic?q=... — semantic search results page (with a query box). */
     private void handleSearchSemanticPage(HttpExchange ex) throws IOException {
         String q = queryParam(ex, "q");
-        respond(ex, 200, "text/html; charset=UTF-8", RelatedDocsView.searchResultsPage(base, q, semanticSearch(q), true));
+        List<Map<String, String>> hits;
+        try {
+            hits = inScopes(semanticSearch(q), queryParam(ex, "scopes"));
+        } catch (Exception e) {
+            respond(ex, 500, "text/plain", "The search scopes cannot be used: " + e.getMessage());
+            return;
+        }
+        respond(ex, 200, "text/html; charset=UTF-8", RelatedDocsView.searchResultsPage(base, q, hits, true));
     }
 
     /** Embeds the query and ranks all documents by cosine; empty if no index/query or the embed server is down. */
@@ -4697,7 +4985,7 @@ public class PortalServer implements PortalReads {
 
         List<Map<String, String>> hits;
         try {
-            hits = moreLikeThisAllLocales(text, "");
+            hits = inScopes(moreLikeThisAllLocales(text, ""), params.getOrDefault("scopes", ""));
         } catch (Exception e) {
             System.err.println("find-related page error: " + e.getMessage());
             hits = List.of();
