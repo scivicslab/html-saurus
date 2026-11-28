@@ -746,19 +746,7 @@ public class SiteBuilder {
      * formatted as {@code YYYY-MM-DD}, or {@code null} if not tracked or git is unavailable.
      */
     private static String gitLastModified(Path filePath) {
-        try {
-            var pb = new ProcessBuilder(
-                "git", "log", "-1", "--format=%ad", "--date=short", "--",
-                filePath.toAbsolutePath().toString());
-            pb.directory(filePath.getParent().toFile());
-            pb.redirectErrorStream(true);
-            var proc = pb.start();
-            String out = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-            proc.waitFor();
-            return out.isEmpty() ? null : out;
-        } catch (Exception e) {
-            return null;
-        }
+        return GitHistory.lastCommit(filePath, "--format=%ad", "--date=short");
     }
 
 }

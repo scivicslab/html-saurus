@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Pins {@link FeedGenerator#gitLastModifiedIso}: the commit time of a committed file, and {@code null} when the directory is missing. */
+/** Pins {@link FeedGenerator#gitLastModifiedIso}: the commit time of a committed file, and {@code null}, never git's error text, for a file git cannot date. */
 class GitLastModifiedTest {
 
     private static void git(Path dir, String... args) throws IOException, InterruptedException {
@@ -42,6 +42,23 @@ class GitLastModifiedTest {
 
         assertNotNull(iso);
         assertTrue(iso.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}([+-]\\d{2}:\\d{2}|Z)"), iso);
+    }
+
+    @Test
+    void anUntrackedFileGivesNull(@TempDir Path dir) throws Exception {
+        git(dir, "init", "-q");
+        Path file = dir.resolve("b.md");
+        Files.writeString(file, "# b\n");
+
+        assertNull(FeedGenerator.gitLastModifiedIso(file));
+    }
+
+    @Test
+    void aFileOutsideAnyRepositoryGivesNull(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("c.md");
+        Files.writeString(file, "# c\n");
+
+        assertNull(FeedGenerator.gitLastModifiedIso(file));
     }
 
     @Test

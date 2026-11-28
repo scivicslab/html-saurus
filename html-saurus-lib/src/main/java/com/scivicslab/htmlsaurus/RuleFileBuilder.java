@@ -3,8 +3,8 @@ package com.scivicslab.htmlsaurus;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
 
@@ -46,6 +46,11 @@ final class RuleFileBuilder {
      * @param docsDir the docs directory about to be converted to HTML
      */
     static void rebuild(Path docsDir) {
+        rebuild(docsDir, Duration.ofMinutes(TIMEOUT_MINUTES));
+    }
+
+    /** As {@link #rebuild(Path)}, giving the tool {@code timeout} to finish. */
+    static void rebuild(Path docsDir, Duration timeout) {
         if (!hasRuleFiles(docsDir)) {
             return;
         }
@@ -56,18 +61,15 @@ final class RuleFileBuilder {
             return;
         }
         try {
-            Process p = new ProcessBuilder(List.of(tool.toString(), docsDir.toString()))
-                    .redirectErrorStream(true)
-                    .start();
-            String output = new String(p.getInputStream().readAllBytes());
-            if (!p.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES)) {
-                p.destroyForcibly();
-                LOG.warning("make-markdown did not finish within " + TIMEOUT_MINUTES + " minutes for " + docsDir);
+            ExternalProcess.Result r = ExternalProcess.run(
+                    List.of(tool.toString(), docsDir.toString()), null, timeout);
+            if (r.timedOut()) {
+                LOG.warning("make-markdown did not finish within " + timeout + " for " + docsDir);
                 return;
             }
-            output.lines().filter(l -> !l.isBlank()).forEach(l -> System.out.println("  rule file : " + l));
-            if (p.exitValue() != 0) {
-                LOG.warning("make-markdown exited with " + p.exitValue() + " for " + docsDir);
+            r.output().lines().filter(l -> !l.isBlank()).forEach(l -> System.out.println("  rule file : " + l));
+            if (r.exitCode() != 0) {
+                LOG.warning("make-markdown exited with " + r.exitCode() + " for " + docsDir);
             }
         } catch (IOException e) {
             LOG.warning("Could not run " + tool + ": " + e.getMessage());

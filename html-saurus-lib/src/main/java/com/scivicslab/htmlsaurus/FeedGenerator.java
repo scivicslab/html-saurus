@@ -122,19 +122,7 @@ class FeedGenerator {
      * (e.g. {@code 2024-01-15T10:30:00+09:00}), or {@code null} if not tracked.
      */
     static String gitLastModifiedIso(Path filePath) {
-        try {
-            var pb = new ProcessBuilder(
-                "git", "log", "-1", "--format=%aI", "--",
-                filePath.toAbsolutePath().toString());
-            pb.directory(filePath.getParent().toFile());
-            pb.redirectErrorStream(true);
-            var proc = pb.start();
-            String out = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-            proc.waitFor();
-            return out.isEmpty() ? null : out;
-        } catch (Exception e) {
-            return null;
-        }
+        return GitHistory.lastCommit(filePath, "--format=%aI");
     }
 
     /**
