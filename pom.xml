@@ -20,7 +20,8 @@
 
       It now carries none of it: html-saurus-production-server depends on html-saurus-lib and
       nothing else, so McpHandler, the import services and the OCR clients are absent from its
-      jar, and with them PDFBox, POI and jsoup.
+      jar, and with them PDFBox and POI. jsoup stays in the jar: html-saurus-lib uses it to read
+      the tables of a built page (PrintWidthEstimator).
 
       html-saurus-lib holds what every mode needs and declares no HTTP endpoint at all.
     -->

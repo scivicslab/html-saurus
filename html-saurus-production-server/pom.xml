@@ -17,7 +17,8 @@
 
       The only dependency is html-saurus-lib. McpHandler, the import services and the OCR clients
       are in html-saurus-portal-server, which nothing here depends on, so they are not in this jar
-      — and neither are PDFBox, POI and jsoup, which only those classes use.
+      — and neither are PDFBox and POI, which only those classes use. jsoup is in this jar,
+      because html-saurus-lib needs it (PrintWidthEstimator).
     -->
 
     <dependencies>
