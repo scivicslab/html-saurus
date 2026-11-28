@@ -41,11 +41,11 @@ class PrintWidthEstimatorTest {
 
     @Test
     void aNineColumnTableOfLongCellsDoesNotFitPortrait_butFitsLandscape() {
-        TableFit fit = PrintWidthEstimator.analyze(table(9, 2, 30)).get(0);
-        assertEquals(9, fit.columns());
-        assertTrue(!fit.fitsPortrait(PrintWidthEstimator.MIN_COLUMN_FULL_WIDTH_CHARS), "9 columns of 673 px leave under 4 characters each");
+        TableFit fit = PrintWidthEstimator.analyze(table(8, 2, 30)).get(0);
+        assertEquals(8, fit.columns());
+        assertTrue(!fit.fitsPortrait(PrintWidthEstimator.MIN_COLUMN_FULL_WIDTH_CHARS), "8 columns of 673 px leave about 84 px each");
         assertTrue(fit.fitsLandscape(PrintWidthEstimator.MIN_COLUMN_FULL_WIDTH_CHARS));
-        assertEquals(Layout.LANDSCAPE, PrintWidthEstimator.layoutOf(table(9, 2, 30)));
+        assertEquals(Layout.LANDSCAPE, PrintWidthEstimator.layoutOf(table(8, 2, 30)));
     }
 
     @Test
@@ -56,9 +56,10 @@ class PrintWidthEstimatorTest {
     @Test
     void theLowerLimitDecides() {
         String html = table(9, 2, 30);
-        // Landscape gives each of 9 squeezed columns about 1001/9 = 111 px: 4 characters need 89 px, 6 need 121 px.
-        assertEquals(Layout.LANDSCAPE, PrintWidthEstimator.layoutOf(html, 4));
+        // Landscape gives each of 9 squeezed columns about 1001/9 = 111 px: 5 characters need 105 px, 6 need 121 px.
+        assertEquals(Layout.LANDSCAPE, PrintWidthEstimator.layoutOf(html, 5));
         assertEquals(Layout.PORTRAIT, PrintWidthEstimator.layoutOf(html, 6));
+        assertEquals(Layout.PORTRAIT, PrintWidthEstimator.layoutOf(html), "the default limit is 6 characters");
         assertEquals(89, PrintWidthEstimator.limitPx(4), 0.001);
     }
 

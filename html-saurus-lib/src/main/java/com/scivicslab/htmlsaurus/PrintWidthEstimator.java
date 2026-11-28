@@ -24,7 +24,7 @@ import org.jsoup.nodes.TextNode;
 public final class PrintWidthEstimator {
 
     /** The one setting to change: the narrowest a squeezed column may get, in full-width characters. */
-    public static final int MIN_COLUMN_FULL_WIDTH_CHARS = 4;
+    public static final int MIN_COLUMN_FULL_WIDTH_CHARS = 6;
 
     /** Content width of A4 portrait with 16 mm side margins, in CSS px (96 per inch). */
     public static final double PORTRAIT_CONTENT_PX = 673;
