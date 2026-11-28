@@ -355,6 +355,7 @@ final class PdfExportHtml {
         .print-cards table { width: 100%; margin: 0.6rem 0; break-inside: avoid; }
         .print-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
         .print-cards th { width: 8em; }
+        h1, h2, h3, h4, h5, h6 { break-after: avoid; }
         table { break-inside: auto; } tr, img, pre, .katex-display { break-inside: avoid; }
         img { max-width: 100% !important; height: auto; }
         .hs-missing { color: #cf222e; }

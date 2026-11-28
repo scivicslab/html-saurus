@@ -483,6 +483,8 @@ main details.inline-translation > summary .translation-controls button:hover { b
   .print-cards table { width: 100%; margin: 0.6rem 0; break-inside: avoid; }
   .print-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
   .print-cards th { width: 8em; background: var(--c-bg-alt, #f6f8fa); }
+  /* A heading must not be left alone at the foot of a page when the block after it moves on. */
+  main h1, main h2, main h3, main h4, main h5, main h6 { break-after: avoid; }
   /* On screen a table scrolls sideways; on paper nothing scrolls, so it must lay out in full and wrap. */
   main table { display: table !important; overflow: visible !important; }
   main td code, main th code { overflow-wrap: anywhere; }
