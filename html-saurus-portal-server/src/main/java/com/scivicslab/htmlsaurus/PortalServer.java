@@ -314,7 +314,7 @@ public class PortalServer implements PortalReads {
         if (mcpEnabled) this.mcpHandler = new McpHandler(worksDir, () -> defaultSearcher, searchers, this::resolveDocRef,
             textRelatedResolver, semanticQueryResolver, semanticRelatedResolver,
             siblingsResolver, prerequisiteOfResolver, stageBuilder, reindexAllRunner, scanWorksDirRunner,
-            updateAllProjectsRunner, navbarLabelsResolver, this::translateCore);
+            updateAllProjectsRunner, navbarLabelsResolver, this::translateCore, McpSessions.host(searcherSystem));
     }
 
     /**

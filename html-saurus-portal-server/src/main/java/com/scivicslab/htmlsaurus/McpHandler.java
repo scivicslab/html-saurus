@@ -9,8 +9,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -101,8 +99,7 @@ class McpHandler {
     private final Function<String, List<String>> navbarLabelsResolver;
     private final BiFunction<String, String, String> translateFn;
 
-    private final Map<String, String> sessions = new ConcurrentHashMap<>();
-    private final AtomicLong sessionCounter = new AtomicLong();
+    private final ActorRef<McpSessions> sessions;
 
     /**
      * @param docsDir                 the docs/ directory containing raw Markdown source files
@@ -165,7 +162,9 @@ class McpHandler {
                Callable<int[]> scanWorksDirRunner,
                Callable<Integer> updateAllProjectsRunner,
                Function<String, List<String>> navbarLabelsResolver,
-               BiFunction<String, String, String> translateFn) {
+               BiFunction<String, String, String> translateFn,
+               ActorRef<McpSessions> sessions) {
+        this.sessions = sessions;
         this.docsDir = docsDir;
         this.searcher = searcher;
         this.localeSearchers = localeSearchers != null ? localeSearchers : Map.of();
@@ -215,8 +214,7 @@ class McpHandler {
         try {
             result = switch (method) {
                 case "initialize" -> {
-                    newSessionId = "htmlsaurus-" + sessionCounter.incrementAndGet();
-                    sessions.put(newSessionId, "active");
+                    newSessionId = sessions.ask(McpSessions::open).join();
                     yield handleInitialize();
                 }
                 case "notifications/initialized" -> {
@@ -839,7 +837,7 @@ class McpHandler {
         sb.append("}");
 
         // Set session ID header if we have one in the sessions map
-        String lastSession = sessions.keySet().stream().reduce((a, b) -> b).orElse(null);
+        String lastSession = sessions.ask(McpSessions::newest).join();
         if (lastSession != null) {
             ex.getResponseHeaders().set("Mcp-Session-Id", lastSession);
         }

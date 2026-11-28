@@ -6,6 +6,7 @@ import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.pojoactor.distributed.DistributedIIActorSystem;
 import com.scivicslab.pojoactor.distributed.Receipt;
 import com.scivicslab.pojoactor.distributed.RemoteActorRef;
+import com.scivicslab.pojoactor.core.ActorRef;
 
 import java.io.IOException;
 import java.net.URI;
@@ -16,8 +17,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
 
 /**
@@ -50,8 +49,7 @@ final class ChatAsk {
     private final DistributedIIActorSystem system;
     private final String workspaceUrl;
     private final String byHand;
-    private final Map<String, Answer> answers = new ConcurrentHashMap<>();
-    private final AtomicLong next = new AtomicLong();
+    private final ActorRef<ChatAskLedger> ledger;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
 
     /**
@@ -63,6 +61,7 @@ final class ChatAsk {
         this.system = system;
         this.workspaceUrl = workspaceUrl == null || workspaceUrl.isBlank() ? null : workspaceUrl.replaceAll("/+$", "");
         this.byHand = byHand;
+        this.ledger = ChatAskLedger.host(system);
     }
 
     /** @return the names of the chat-ui nodes known now, registering each with the portal's node */
@@ -112,15 +111,14 @@ final class ChatAsk {
      */
     String ask(String node, String target, String prompt) throws IOException {
         if (!chatNodes().contains(node)) throw new IOException("no chat-ui node " + node + " is known");
-        String id = "revise-" + System.currentTimeMillis() + "-" + next.incrementAndGet();
+        String id = ledger.ask(l -> l.open(System.currentTimeMillis())).join();
         String body = JSON.createObjectNode().put("requestId", id).put("sender", SENDER)
                 .put("senderNode", system.getMyNode().getNodeId()).put("target", conversationName(target))
                 .put("prompt", prompt).put("urgent", false).toString();
-        answers.put(id, new Answer(false, null, null));
         RemoteActorRef gateway = system.getRemoteActor(node, CHAT_GATEWAY);
         Receipt receipt = gateway.sendWithRetry("enqueueRequest", body, 3, Duration.ofSeconds(1));
         if (!receipt.accepted()) {
-            answers.remove(id);
+            ledger.tell(l -> l.withdraw(id));
             throw new IOException("node " + node + " did not take the request: " + receipt.detail());
         }
         return id;
@@ -134,7 +132,7 @@ final class ChatAsk {
 
     /** @return where the request {@code id} stands, or {@code null} when this portal sent no such request */
     Answer answer(String id) {
-        return answers.get(id);
+        return ledger.ask(l -> l.answer(id)).join();
     }
 
     /** Takes a reply chat-ui sent to a request of this portal. */
@@ -142,9 +140,11 @@ final class ChatAsk {
         try {
             JsonNode m = JSON.readTree(args);
             String id = m.path("requestId").asText("");
-            if (!answers.containsKey(id)) return new ActionResult(false, "no request " + id + " was sent from here");
             String reply = m.hasNonNull("reply") ? m.get("reply").asText() : null;
-            answers.put(id, new Answer(true, reply, m.path("text").asText("")));
+            String text = m.path("text").asText("");
+            if (!ledger.ask(l -> l.accept(id, reply, text)).join()) {
+                return new ActionResult(false, "no request " + id + " was sent from here");
+            }
             return new ActionResult(true, "reply to " + id + " taken");
         } catch (IOException e) {
             return new ActionResult(false, "unreadable reply: " + e.getMessage());
