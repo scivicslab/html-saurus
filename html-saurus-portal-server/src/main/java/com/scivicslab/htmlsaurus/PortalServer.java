@@ -39,16 +39,16 @@ public class PortalServer implements PortalReads {
     private static final String PORTAL_FAVICON_BASE64 =
             "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";
 
-    private final List<Project> projects;
-    private final Map<String, Project> projectMap;
+    /** The projects, in list order, and the locale of each searcher key; scans change them while requests read them. */
+    private final ActorRef<ProjectRegistry> registry;
+    /** The semantic index and the backward prerequisite index, replaced as a whole when they are rebuilt. */
+    private final ActorRef<DerivedIndexes> derived;
     /** The portal's actor system, which is also its node of the distributed actor system (ActorNodesForWorkspaceAndPortal_261118_oo01). */
     private final com.scivicslab.pojoactor.distributed.DistributedIIActorSystem searcherSystem;
     /** The searchers, held in one place: the children of the actor "searchers" (ActorNodesForWorkspaceAndPortal_261118_oo01). */
     private final SearcherTree searcherTree;
     /** Every reader's map of the searchers: a read-only view of {@link #searcherTree}. */
     private final Map<String, ActorRef<LuceneSearcher>> searchers;
-    /** Maps searcher key → locale string for language-filtered search. */
-    private final Map<String, String> searcherLocales = new LinkedHashMap<>();
     /** The searcher the MCP handler starts from. Re-derived whenever a scan removes a project,
      *  since the one it pointed at may be the searcher that scan closed. */
     private volatile ActorRef<LuceneSearcher> defaultSearcher;
@@ -66,9 +66,6 @@ public class PortalServer implements PortalReads {
      * Precomputed semantic (embedding-based) related docs: portalPath -> list of {path,title,summary}.
      * Replaced wholesale by {@link #reloadSemanticIndex()}; read through the field every time.
      */
-    private volatile Map<String, List<Map<String, String>>> semanticRelated;
-    /** In-memory semantic index (document vectors) for query-to-doc search; may be null. */
-    private volatile SemanticIndex semanticIndex;
     /** Embedding client used to embed search queries at request time. */
     private final EmbeddingClient embed;
     /** Generation client used for on-demand paragraph translation. */
@@ -93,7 +90,6 @@ public class PortalServer implements PortalReads {
      * happen to be in {@code works}. A build stage or a reindex replaces it outright, so an edit
      * published through either is visible from both directions.
      */
-    private volatile Map<String, List<Map<String, String>>> prerequisiteOfIndex = null;
     /** Maximum results returned by semantic query search. */
     private static final int SEARCH_TOP_N = 20;
 
@@ -226,18 +222,17 @@ public class PortalServer implements PortalReads {
         this.scopesStore = SearchScopesStore.host(searcherSystem, scopesFile());
         this.port = port;
         this.threads = threads;
-        this.projects = new ArrayList<>();
-        this.projectMap = new LinkedHashMap<>();
+        this.registry = ProjectRegistry.host(searcherSystem);
+        this.derived = DerivedIndexes.host(searcherSystem);
         for (Path p : projectDirs) {
             String name = p.getFileName().toString();
             String[] i18n = Projects.readI18nConfig(p);
             String defaultLocale = (i18n.length > 0 && !i18n[0].isBlank()) ? i18n[0] : "ja";
             Project proj = new Project(name, p, p.resolve("static-html"), p.resolve("search-index"), defaultLocale);
-            projects.add(proj);
-            projectMap.put(name, proj);
+            registry.tell(r -> r.add(proj));
             // Default index uses the project's defaultLocale analyzer
             searcherTree.put(name, new LuceneSearcher(proj.indexDir(), proj.defaultLocale()));
-            searcherLocales.put(name, proj.defaultLocale());
+            registry.tell(r -> r.setLocale(name, proj.defaultLocale()));
             // Load locale-specific indexes from search-index/<locale>/
             try {
                 if (Files.isDirectory(proj.indexDir())) {
@@ -247,7 +242,7 @@ public class PortalServer implements PortalReads {
                             String loc = locDir.getFileName().toString();
                             String key = name + ":" + loc;
                             searcherTree.put(key, new LuceneSearcher(locDir, loc));
-                            searcherLocales.put(key, loc);
+                            registry.tell(r -> r.setLocale(key, loc));
                         });
                 }
             } catch (IOException e) {
@@ -258,9 +253,9 @@ public class PortalServer implements PortalReads {
         this.defaultSearcher = searchers.values().stream().findFirst().orElse(null);
         // Semantic related-docs: render the in-memory neighbour index into portal URLs
         // (project-prefixed: /<project>/<page>). Empty index -> empty map -> widget shows nothing.
-        this.semanticRelated = semanticIndex == null ? Map.of()
+        Map<String, List<Map<String, String>>> initialRelated = semanticIndex == null ? Map.of()
                 : semanticIndex.servedMap((projectName, path) -> "/" + projectName + path);
-        this.semanticIndex = semanticIndex;
+        derived.tell(x -> x.installSemantic(semanticIndex, initialRelated));
         this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
         this.translate = new TranslationClient(System.getenv("TRANSLATION_SERVER_URL"),
                 TranslationEndpointState.host(searcherSystem));
@@ -271,7 +266,7 @@ public class PortalServer implements PortalReads {
         this.joinJudge = new ParagraphJoinJudge(
                 TranslationCache.load(worksDir, ParagraphJoinJudge.CACHE_FILE), joinAsker(),
                 line -> java.util.logging.Logger.getLogger(ParagraphJoinJudge.class.getName()).info(line));
-        System.out.println("Semantic related-docs: " + semanticRelated.size() + " entries (in-memory)");
+        System.out.println("Semantic related-docs: " + initialRelated.size() + " entries (in-memory)");
 
         java.util.function.BiFunction<String, String, List<Map<String, String>>> textRelatedResolver = (text, locale) -> {
             try {
@@ -286,7 +281,7 @@ public class PortalServer implements PortalReads {
         };
         java.util.function.Function<String, List<Map<String, String>>> semanticQueryResolver = this::semanticSearch;
         java.util.function.Function<String, List<Map<String, String>>> semanticRelatedResolver =
-            p -> semanticRelated.getOrDefault(p, List.of());
+            p -> semanticRelated().getOrDefault(p, List.of());
         java.util.function.Function<String, List<Map<String, String>>> siblingsResolver = ref -> {
             Map<String, String> self = resolveDocRef(ref);
             return self == null ? List.of() : directorySiblings(self.getOrDefault("srcPath", ""));
@@ -297,7 +292,7 @@ public class PortalServer implements PortalReads {
                 : prerequisiteOfIndexNow().getOrDefault(self.getOrDefault("id", ""), List.of());
         };
         McpHandler.StageBuilder stageBuilder = (project, stage) -> {
-            Project proj = projectMap.get(project);
+            Project proj = project(project);
             if (proj == null) return null;
             long start = System.currentTimeMillis();
             runBuildStage(proj, stage);
@@ -308,7 +303,7 @@ public class PortalServer implements PortalReads {
         // No job: an MCP caller waits for the answer, so there is nobody polling for progress.
         java.util.concurrent.Callable<Integer> updateAllProjectsRunner = () -> updateAllProjectsCore(null)[0];
         java.util.function.Function<String, List<String>> navbarLabelsResolver = name -> {
-            Project proj = projectMap.get(name);
+            Project proj = project(name);
             return proj == null ? null : readNavbarLabels(proj.projectDir());
         };
         if (mcpEnabled) this.mcpHandler = new McpHandler(worksDir, () -> defaultSearcher, searchers, this::resolveDocRef,
@@ -326,7 +321,25 @@ public class PortalServer implements PortalReads {
      * project should not wait for that walk. The walk happens when the answer is actually wanted.
      */
     private void invalidatePrerequisiteOfIndex() {
-        prerequisiteOfIndex = null;
+        derived.tell(DerivedIndexes::invalidatePrerequisiteOf);
+    }
+
+    private Map<String, List<Map<String, String>>> semanticRelated() {
+        return derived.ask(DerivedIndexes::semanticRelated).join();
+    }
+
+    /** The projects, in list order, as a copy the caller owns. */
+    private List<Project> projects() {
+        return registry.ask(ProjectRegistry::snapshot).join();
+    }
+
+    private Project project(String name) {
+        return registry.ask(r -> r.project(name)).join();
+    }
+
+    /** The locale of each searcher key, as a copy the caller owns. */
+    private Map<String, String> searcherLocales() {
+        return registry.ask(ProjectRegistry::searcherLocales).join();
     }
 
     /**
@@ -340,31 +353,33 @@ public class PortalServer implements PortalReads {
      * @return the index, or an empty map when the walk failed
      */
     private Map<String, List<Map<String, String>>> prerequisiteOfIndexNow() {
-        Map<String, List<Map<String, String>>> current = prerequisiteOfIndex;
+        Map<String, List<Map<String, String>>> current = derived.ask(DerivedIndexes::prerequisiteOf).join();
         if (current != null) {
             return current;
         }
+        long generation = derived.ask(DerivedIndexes::prerequisiteOfGeneration).join();
         try {
-            rebuildPrerequisiteOfIndex();
+            Map<String, List<Map<String, String>>> built = buildPrerequisiteOfIndex();
+            // Refused when an invalidation came in during the walk; this request still gets what it built.
+            derived.ask(x -> x.installPrerequisiteOf(built, generation)).join();
+            return built;
         } catch (Exception e) {
             System.err.println("Warning: could not build prerequisite-of index: " + e.getMessage());
             return Map.of();
         }
-        current = prerequisiteOfIndex;
-        return current == null ? Map.of() : current;
     }
 
     /**
-     * Rebuilds {@link #prerequisiteOfIndex} by walking every project's {@code docs/} tree and
+     * Builds the backward index by walking every project's {@code docs/} tree and
      * reading each document's {@code ## 参考文献} section via {@link PrerequisiteSection#extractRefs}.
      * Swaps the whole map atomically at the end — never a partial update — so concurrent readers
      * never see a half-built index. See {@code PrerequisiteOf_260806_oo01}
      * (doc_SCIVICS002/html-saurus/040_design).
      */
-    private void rebuildPrerequisiteOfIndex() {
+    private Map<String, List<Map<String, String>>> buildPrerequisiteOfIndex() {
         long walkStart = System.currentTimeMillis();
         Map<String, List<Map<String, String>>> next = new LinkedHashMap<>();
-        for (Project p : projects) {
+        for (Project p : projects()) {
             Path projectDocsDir = p.projectDir().resolve("docs");
             if (!Files.isDirectory(projectDocsDir)) continue;
             List<Path> mdFiles;
@@ -408,9 +423,9 @@ public class PortalServer implements PortalReads {
                 }
             }
         }
-        prerequisiteOfIndex = next;
         System.out.println("prerequisite-of index: " + next.size() + " document(s) referenced, "
             + (System.currentTimeMillis() - walkStart) + "ms");
+        return next;
     }
 
     /**
@@ -764,7 +779,7 @@ public class PortalServer implements PortalReads {
         String projectName = slash >= 0 ? stripped.substring(0, slash) : stripped;
         String rest = slash >= 0 ? stripped.substring(slash) : "/";
 
-        Project proj = projectMap.get(projectName);
+        Project proj = project(projectName);
         if (proj == null) {
             respond(ex, 404, "text/plain", "Project not found: " + projectName);
             return;
@@ -824,16 +839,15 @@ public class PortalServer implements PortalReads {
         int added = 0;
         for (Path p : found) {
             String name = p.getFileName().toString();
-            if (!projectMap.containsKey(name)) {
+            if (project(name) == null) {
                 BuildStages.build(p.resolve("docs"), p.resolve("static-html"), false, threads);
                 BuildStages.reindex(p.resolve("docs"), p.resolve("search-index"));
                 String[] i18n = Projects.readI18nConfig(p);
                 String defaultLocale = (i18n.length > 0 && !i18n[0].isBlank()) ? i18n[0] : "ja";
                 Project proj = new Project(name, p, p.resolve("static-html"), p.resolve("search-index"), defaultLocale);
-                projects.add(proj);
-                projectMap.put(name, proj);
+                registry.tell(r -> r.add(proj));
                 searcherTree.put(name, new LuceneSearcher(proj.indexDir(), defaultLocale));
-                searcherLocales.put(name, defaultLocale);
+                registry.tell(r -> r.setLocale(name, defaultLocale));
                 System.out.println("  Added: " + name);
                 added++;
             }
@@ -844,12 +858,12 @@ public class PortalServer implements PortalReads {
             // Same order a fresh start gives: Projects.findProjects sorts, and the portal draws the
             // list in list order. Appending would leave a project found by a scan at the bottom
             // until the next restart moved it to where its name says it belongs.
-            projects.sort(java.util.Comparator.comparing(Project::name));
+            registry.tell(ProjectRegistry::sortByName);
             // The MCP handler's starting searcher may be one this scan just closed.
             this.defaultSearcher = searchers.values().stream().findFirst().orElse(null);
             invalidatePrerequisiteOfIndex();
         }
-        return new int[]{projects.size(), added, removed};
+        return new int[]{projects().size(), added, removed};
     }
 
     /**
@@ -876,18 +890,13 @@ public class PortalServer implements PortalReads {
      * @return the number of projects removed
      */
     private int removeVanishedProjects(java.util.Set<String> foundNames) {
-        List<Project> vanished = projects.stream()
-                .filter(proj -> !foundNames.contains(proj.name()))
-                .toList();
+        List<Project> vanished = registry.ask(r -> r.removeNotIn(foundNames)).join();
         for (Project proj : vanished) {
-            projects.remove(proj);
-            projectMap.remove(proj.name());
             String localePrefix = proj.name() + ":";
             List<String> keys = searchers.keySet().stream()
                     .filter(key -> key.equals(proj.name()) || key.startsWith(localePrefix))
                     .toList();
             for (String key : keys) {
-                searcherLocales.remove(key);
                 searcherTree.close(key);
             }
             System.out.println("  Removed: " + proj.name());
@@ -921,12 +930,12 @@ public class PortalServer implements PortalReads {
      */
     private int reindexAllCore() throws Exception {
         System.out.println("Reindex all requested");
-        for (Project p : projects) {
+        for (Project p : projects()) {
             BuildStages.reindexAll(p.projectDir(), false);
             System.out.println("  Reindexed: " + p.name());
         }
         invalidatePrerequisiteOfIndex();
-        return projects.size();
+        return projects().size();
     }
 
     /**
@@ -1071,7 +1080,7 @@ public class PortalServer implements PortalReads {
                         respond(ex, 409, "application/json", revisionError(json, r.reason()));
                         return;
                     }
-                    Project proj = projectMap.get(rel.contains("/") ? rel.substring(0, rel.indexOf('/')) : rel);
+                    Project proj = project(rel.contains("/") ? rel.substring(0, rel.indexOf('/')) : rel);
                     String rebuilt = "no project";
                     if (proj != null) {
                         try {
@@ -1340,7 +1349,7 @@ public class PortalServer implements PortalReads {
      * Handles {@code GET /api/prerequisite-of?id=<docId>} (alias {@code ?ref=...}). Returns the
      * documents whose own {@code ## 参考文献} section names the referenced document as a
      * prerequisite — the reverse direction of {@link #handlePrerequisites}, served from the
-     * precomputed {@link #prerequisiteOfIndex} rather than read fresh per request, per
+     * precomputed the backward index rather than read fresh per request, per
      * {@code PrerequisiteOf_260806_oo01} (doc_SCIVICS002/html-saurus/040_design). Returns HTTP 404
      * only when {@code id}/{@code ref} itself does not resolve; a document nobody references
      * returns an empty array, not 404.
@@ -1443,7 +1452,7 @@ public class PortalServer implements PortalReads {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
-        Project proj = projectMap.get(name);
+        Project proj = project(name);
         if (proj == null) {
             respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
             return;
@@ -1479,7 +1488,7 @@ public class PortalServer implements PortalReads {
         }
         String stage = rest.substring(0, slash);
         String name = rest.substring(slash + 1);
-        Project proj = projectMap.get(name);
+        Project proj = project(name);
         if (proj == null) {
             respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
             return;
@@ -1510,7 +1519,7 @@ public class PortalServer implements PortalReads {
      * built pages that resolve to nothing, as {@code {"project","count","findings":[{"page","href","kind"}]}}.
      */
     private void handleLinkCheck(HttpExchange ex) throws IOException {
-        Project p = projectMap.get(queryParam(ex, "project"));
+        Project p = project(queryParam(ex, "project"));
         if (p == null) {
             respond(ex, 404, "application/json", "{\"error\":\"no such project\"}");
             return;
@@ -1612,8 +1621,8 @@ public class PortalServer implements PortalReads {
         reportProgress(job, "scanning " + worksDir);
         int[] scan = scanWorksDirCore();
 
-        // Copied because the rescan above appends to the live list.
-        List<Project> targets = List.copyOf(projects);
+        // A copy, so the rescan above cannot change what is walked.
+        List<Project> targets = projects();
         int total = targets.size();
 
         for (int i = 0; i < total; i++) {
@@ -1659,7 +1668,7 @@ public class PortalServer implements PortalReads {
      * Runs one build stage ({@code html}, {@code index}, {@code embedding}, or {@code all}) for a
      * project. Shared by {@link #handleBuildStage} (REST) and the MCP {@code build-*} tools.
      *
-     * <p>A successful stage also marks {@link #prerequisiteOfIndex} stale. Editing a document's
+     * <p>A successful stage also marks the backward index stale. Editing a document's
      * {@code ## 参考文献} section and pressing Update or Rebuild is the ordinary way to publish that
      * edit, and without this the forward direction would answer from the edited file while the
      * backward direction went on answering from an index built before it — the same edit visible
@@ -1703,7 +1712,7 @@ public class PortalServer implements PortalReads {
             respond(ex, 405, "text/plain", "Method Not Allowed");
             return;
         }
-        Project proj = projectMap.get(name);
+        Project proj = project(name);
         if (proj == null) {
             respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
             return;
@@ -1969,7 +1978,7 @@ public class PortalServer implements PortalReads {
                 <div class="recent-menu" id="recent-menu"></div>
               </div>
               <div class="header-right">
-            """.formatted(projects.size()));
+            """.formatted(projects().size()));
             sb.append("""
                 <label style="font-size:0.8rem;color:var(--text-secondary)">Theme:
                   <select id="theme-select">
@@ -2054,7 +2063,7 @@ public class PortalServer implements PortalReads {
         // Two levels: a series (the name without the digits at its end) opens to its projects; a series of one
         // project is that project alone (ProjectSeries_261121_oo01).
         Map<String, Project> projectOfName = new java.util.HashMap<>();
-        for (Project p : projects) projectOfName.put(p.name(), p);
+        for (Project p : projects()) projectOfName.put(p.name(), p);
         for (ProjectSeries.Group group : ProjectSeries.group(new ArrayList<>(projectOfName.keySet()))) {
             if (!group.isSeries()) {
                 appendProjectRow(sb, projectOfName.get(group.projects().get(0)));
@@ -3807,7 +3816,7 @@ public class PortalServer implements PortalReads {
         if (path == null || path.isBlank()) return java.util.Optional.empty();
         Path file = worksDir.resolve(path).normalize();
         boolean served = file.getFileName() != null && file.getFileName().toString().endsWith(".md")
-                && projects.stream().anyMatch(p -> file.startsWith(p.projectDir().resolve("docs").normalize()))
+                && projects().stream().anyMatch(p -> file.startsWith(p.projectDir().resolve("docs").normalize()))
                 && Files.isRegularFile(file);
         return served ? java.util.Optional.of(Files.readString(file, StandardCharsets.UTF_8)) : java.util.Optional.empty();
     }
@@ -3829,6 +3838,7 @@ public class PortalServer implements PortalReads {
 
         List<String> projNames = new ArrayList<>();
         List<DirectoryReader> readers = new ArrayList<>();
+        Map<String, String> searcherLocales = searcherLocales();
         for (var entry : searchers.entrySet()) {
             String key = entry.getKey();
             String keyLocale = searcherLocales.get(key);
@@ -3915,7 +3925,7 @@ public class PortalServer implements PortalReads {
     private List<Map<String, String>> globalSearch(String q, org.apache.lucene.search.Query scopeFilter) {
         if (q.isBlank()) return List.of();
         java.util.LinkedHashSet<String> locales = new java.util.LinkedHashSet<>();
-        for (String loc : searcherLocales.values()) if (loc != null) locales.add(loc);
+        for (String loc : searcherLocales().values()) if (loc != null) locales.add(loc);
         List<List<Map<String, String>>> perLocale = new ArrayList<>();
         int max = 0;
         for (String loc : locales) {
@@ -3950,12 +3960,12 @@ public class PortalServer implements PortalReads {
      * that has since moved keeps being offered at an address that is no longer there.
      */
     void reloadSemanticIndex() {
-        List<Path> dirs = projects.stream().map(Project::projectDir).toList();
+        List<Path> dirs = projects().stream().map(Project::projectDir).toList();
         SemanticIndex loaded = SemanticIndex.load(dirs, BuildStages.SEMANTIC_TOP_K);
-        this.semanticIndex = loaded;
-        this.semanticRelated = loaded == null ? Map.of()
+        Map<String, List<Map<String, String>>> related = loaded == null ? Map.of()
                 : loaded.servedMap((projectName, path) -> "/" + projectName + path);
-        System.out.println("Semantic related-docs: " + semanticRelated.size() + " entries (reloaded)");
+        derived.tell(x -> x.installSemantic(loaded, related));
+        System.out.println("Semantic related-docs: " + related.size() + " entries (reloaded)");
     }
 
     /** Queries a single project's Lucene index and appends matching results to the output list. */
@@ -4032,7 +4042,7 @@ public class PortalServer implements PortalReads {
 
     /** GET /api/related-semantic?path=... — returns the precomputed embedding-based neighbours as JSON. */
     private void handleRelatedSemantic(HttpExchange ex) throws IOException {
-        RelatedDocsView.writeJson(ex, semanticRelated.getOrDefault(queryParam(ex, "path"), List.of()));
+        RelatedDocsView.writeJson(ex, semanticRelated().getOrDefault(queryParam(ex, "path"), List.of()));
     }
 
     /** GET /api/search-semantic?q=... — query-to-doc semantic search as JSON. */
@@ -4061,6 +4071,7 @@ public class PortalServer implements PortalReads {
 
     /** Embeds the query and ranks all documents by cosine; empty if no index/query or the embed server is down. */
     private List<Map<String, String>> semanticSearch(String q) {
+        SemanticIndex semanticIndex = derived.ask(DerivedIndexes::semanticIndex).join();
         if (semanticIndex == null || q == null || q.isBlank()) {
             return List.of();
         }
@@ -4083,7 +4094,7 @@ public class PortalServer implements PortalReads {
         String docPath = queryParam(ex, "path");
         respond(ex, 200, "text/html; charset=UTF-8",
                 RelatedDocsView.pageHtml(base, "Related (semantic)", docPath,
-                        semanticRelated.getOrDefault(docPath, List.of())));
+                        semanticRelated().getOrDefault(docPath, List.of())));
     }
 
     /**
@@ -4110,7 +4121,7 @@ public class PortalServer implements PortalReads {
         String projectName = slash >= 0 ? stripped.substring(0, slash) : stripped;
         String pagePath = slash >= 0 ? stripped.substring(slash) : "/";
 
-        Project proj = projectMap.get(projectName);
+        Project proj = project(projectName);
         if (proj == null) return List.of();
 
         // Determine locale from pagePath prefix
@@ -4609,7 +4620,7 @@ public class PortalServer implements PortalReads {
      * (ExportToPdf_261119_oo01).
      */
     private void handleExportDirs(HttpExchange ex) throws IOException {
-        Project proj = projectMap.get(queryParam(ex, "project"));
+        Project proj = project(queryParam(ex, "project"));
         if (proj == null) {
             respond(ex, 404, "application/json", "{\"error\":\"Project not found\"}");
             return;
@@ -4637,7 +4648,7 @@ public class PortalServer implements PortalReads {
         }
         Map<String, Object> body = McpJsonParser.parseObject(
             new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-        Project proj = body.get("project") instanceof String s ? projectMap.get(s) : null;
+        Project proj = body.get("project") instanceof String s ? project(s) : null;
         if (proj == null) {
             refuseExport(ex, 404, "Project not found: " + body.get("project"));
             return;
@@ -4833,7 +4844,7 @@ public class PortalServer implements PortalReads {
      *         with the reason it will not
      */
     private ImportTarget resolveImportTarget(HttpExchange ex, Map<String, String> form) throws IOException {
-        Project proj = projectMap.get(form.get("project"));
+        Project proj = project(form.get("project"));
         if (proj == null) {
             respond(ex, 404, "application/json", "{\"error\":\"unknown project\"}");
             return null;
@@ -5074,6 +5085,7 @@ public class PortalServer implements PortalReads {
 
         List<String> keys = new ArrayList<>();
         List<DirectoryReader> readers = new ArrayList<>();
+        Map<String, String> searcherLocales = searcherLocales();
         for (var entry : searchers.entrySet()) {
             String key = entry.getKey();
             String keyLocale = searcherLocales.get(key);
@@ -5158,7 +5170,7 @@ public class PortalServer implements PortalReads {
     private List<Map<String, String>> moreLikeThisAllLocales(String bodyText, String excludePath) throws Exception {
         if (bodyText == null || bodyText.isBlank()) return List.of();
         java.util.LinkedHashSet<String> locales = new java.util.LinkedHashSet<>();
-        for (String loc : searcherLocales.values()) if (loc != null) locales.add(loc);
+        for (String loc : searcherLocales().values()) if (loc != null) locales.add(loc);
         List<List<Map<String, String>>> perLocale = new ArrayList<>();
         int max = 0;
         for (String loc : locales) {
