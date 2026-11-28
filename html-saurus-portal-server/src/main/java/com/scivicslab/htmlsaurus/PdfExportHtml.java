@@ -355,7 +355,6 @@ final class PdfExportHtml {
         main table.rule-cards + .table-cards { display: block !important; }
         main table.rule-table + .table-cards { display: none !important; }
         .table-cards table { width: 100%; margin: 0.6rem 0; break-inside: avoid; }
-        .table-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
         .table-cards th { width: 8em; }
         h1, h2, h3, h4, h5, h6 { break-after: avoid; }
         table { break-inside: auto; } tr, img, pre, .katex-display { break-inside: avoid; }

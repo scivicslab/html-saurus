@@ -331,17 +331,12 @@ public final class PrintWidthEstimator {
 
     // ---------------------------------------------------------------- the reflowed copy
 
-    /** One small table per body row: a heading (the first column's value), then a name and value for each other column. */
+    /** One small table per body row: a name and a value for every column, the first column included. */
     private static Element cardsOf(Table t) {
         Element block = new Element("div").addClass(CARDS_CLASS);
-        int number = 0;
         for (List<Cell> row : t.rows()) {
-            number++;
-            Element card = block.appendElement("table").addClass("print-card");
-            String heading = row.isEmpty() || row.get(0) == null ? "" : row.get(0).element().text();
-            card.appendElement("caption").text(heading.isBlank() ? "Row " + number : heading);
-            Element body = card.appendElement("tbody");
-            for (int c = 1; c < row.size(); c++) {
+            Element body = block.appendElement("table").addClass("print-card").appendElement("tbody");
+            for (int c = 0; c < row.size(); c++) {
                 Cell cell = row.get(c);
                 if (cell == null || cell.empty()) continue;
                 Element tr = body.appendElement("tr");

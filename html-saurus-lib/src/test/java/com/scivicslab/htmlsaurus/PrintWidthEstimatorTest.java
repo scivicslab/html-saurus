@@ -184,14 +184,19 @@ class PrintWidthEstimatorTest {
     }
 
     @Test
-    void theCardsHaveOneSmallTablePerRowHeadedByTheFirstColumn() {
+    void theCardsHaveOneSmallTablePerRowWithAHeadingForEveryColumnTheFirstIncluded() {
         String html = "<table>" + row("th", "ID", "名前", "説明")
                 + row("td", "A1", "あ", "説<code>明</code>1") + row("td", "A2", "い", "説明2") + "</table>";
         var doc = Jsoup.parseBodyFragment(PrintWidthEstimator.decide(html).html());
         assertEquals(2, doc.select(".table-cards table.print-card").size());
-        assertEquals("A1", doc.selectFirst(".table-cards caption").text());
-        assertEquals(2, doc.select(".table-cards table").first().select("tr").size(), "a row per other column");
-        assertEquals("名前", doc.selectFirst(".table-cards th").text());
+        assertEquals(0, doc.select(".table-cards caption").size(), "the first column is not set apart as a caption");
+        var first = doc.select(".table-cards table").first();
+        assertEquals(3, first.select("tr").size(), "a row per column, the first included");
+        assertEquals("ID", first.select("th").get(0).text(), "the first column keeps its heading");
+        assertEquals("A1", first.select("td").get(0).text());
+        assertEquals("名前", first.select("th").get(1).text());
+        assertEquals("ID", doc.select(".table-cards table").get(1).select("th").get(0).text());
+        assertEquals("A2", doc.select(".table-cards table").get(1).select("td").get(0).text());
         assertEquals(1, doc.select(".table-cards table").first().select("td code").size(), "the cell's markup is kept");
     }
 
