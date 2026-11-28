@@ -166,7 +166,10 @@ class PageRenderer {
         sb.append(PAGE_CSS);
         sb.append("              </style>\n");
         // Print orientation follows the document's tables: landscape only when a table cannot fit portrait.
-        boolean landscape = PrintWidthEstimator.layoutOf(content) == PrintWidthEstimator.Layout.LANDSCAPE;
+        // A table that fits neither orientation gets a reflowed copy, shown only on paper.
+        PrintWidthEstimator.Result printPlan = PrintWidthEstimator.decide(content);
+        content = printPlan.html();
+        boolean landscape = printPlan.layout() == PrintWidthEstimator.Layout.LANDSCAPE;
         sb.append(landscape ? "<style>@page { size: A4 landscape; margin: 16mm; }</style>\n"
                             : "<style>@page { size: A4 portrait; margin: 16mm; }</style>\n");
         // Dev only: bake in the shared palette and the --c-* remap so the portal's theme drives

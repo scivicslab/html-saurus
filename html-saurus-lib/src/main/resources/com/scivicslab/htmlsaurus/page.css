@@ -473,8 +473,16 @@ main details.inline-translation > summary .translation-controls button:hover { b
 
 /* nav.side is a flex item inside .content-wrap (display: flex); hiding it lets
    main (flex: 1) expand into the freed width with no extra margin/width rule needed. */
+/* A table too wide for any A4 orientation has a reflowed copy (one small table per row) that only paper shows. */
+.print-cards { display: none; }
+
 @media print {
   nav.side { display: none; }
+  .print-cards { display: block; }
+  main table.has-cards { display: none !important; }
+  .print-cards table { width: 100%; margin: 0.6rem 0; break-inside: avoid; }
+  .print-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
+  .print-cards th { width: 8em; background: var(--c-bg-alt, #f6f8fa); }
   /* On screen a table scrolls sideways; on paper nothing scrolls, so it must lay out in full and wrap. */
   main table { display: table !important; overflow: visible !important; }
   main td code, main th code { overflow-wrap: anywhere; }
