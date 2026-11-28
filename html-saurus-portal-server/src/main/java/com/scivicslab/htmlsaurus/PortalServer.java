@@ -114,7 +114,7 @@ public class PortalServer implements PortalReads {
      */
     volatile java.util.function.Function<Project, PdfExportJob.HtmlBuild> exportHtmlBuild = proj -> () -> rebuildHtmlOf(proj);
     /** The work directory of each export, so that the ones of jobs the registry forgot can be deleted. */
-    private final ExportWorkDirectories exportWorkDirectories = new ExportWorkDirectories();
+    private final com.scivicslab.pojoactor.core.ActorRef<ExportWorkDirectoryLedger> exportWorkDirectories;
     /** Number of not-yet-completed OCR pages {@link GpuBrokerOcrClient} allows in flight per
      *  backend before {@code client.submit} blocks the calling {@code PdfImportJobActor}'s
      *  thread -- generous relative to this codebase's actual concurrent-import-job count, since
@@ -213,6 +213,7 @@ public class PortalServer implements PortalReads {
         this.chatAsk = new ChatAsk(searcherSystem, System.getenv("AI_WORKSPACE_URL"),
                 System.getProperty("html-saurus.chat-ui-nodes"));
         this.searcherTree = new SearcherTree(searcherSystem);
+        this.exportWorkDirectories = ExportWorkDirectoryLedger.host(searcherSystem);
         this.searchers = searcherTree.view();
         this.batchJobs = new com.scivicslab.jobregistry.JobRegistry(searcherSystem, 60 * 60 * 1000L);
         this.mcpEnabled = mcp;
@@ -422,17 +423,14 @@ public class PortalServer implements PortalReads {
         server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
         server.start();
         // The registry forgets a job an hour after it ended; its PDF is deleted with it.
-        java.util.concurrent.ScheduledExecutorService sweeper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "export-work-directory-sweeper");
-            t.setDaemon(true);
-            return t;
-        });
-        sweeper.scheduleWithFixedDelay(this::deleteWorkDirectoriesOfForgottenExports, 10, 10, java.util.concurrent.TimeUnit.MINUTES);
+        var sweeper = ExportWorkDirectoryLedger.sweepEvery(exportWorkDirectories, this::registryStillKnows,
+                10, java.util.concurrent.TimeUnit.MINUTES);
         var announcing = openNode()
                 ? WorkspaceAnnouncer.start(searcherSystem, System.getenv(WorkspaceAnnouncer.ENV), port)
                 : java.util.Optional.<com.scivicslab.pojoactor.core.scheduler.Scheduler>empty();
         // close, not terminate: it also stops the node's receiver.
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            sweeper.close();
             announcing.ifPresent(com.scivicslab.pojoactor.core.scheduler.Scheduler::close);
             searcherSystem.close();
         }));
@@ -4626,7 +4624,7 @@ public class PortalServer implements PortalReads {
         if (cleared != null && cleared.result() instanceof ExportOutcome out) {
             PdfExportJob.deleteDirectory(out.workDirectory());
         }
-        exportWorkDirectories.forget(jobId);
+        exportWorkDirectories.tell(ledger -> ledger.forget(jobId));
         respond(ex, 200, "application/json", "{\"status\":\"ok\"}");
     }
 
@@ -4690,17 +4688,17 @@ public class PortalServer implements PortalReads {
             exportLocks.computeIfAbsent(proj.name(), name -> new java.util.concurrent.locks.ReentrantLock()));
         String label = proj.name() + (directory.isEmpty() ? "" : "/" + directory);
         com.scivicslab.jobregistry.Job<?> job = batchJobs.submit("export", label, work::exportToPdf, System.currentTimeMillis());
-        exportWorkDirectories.remember(job.id(), workDir);
-        deleteWorkDirectoriesOfForgottenExports();
+        String startedJobId = job.id();
+        exportWorkDirectories.tell(ledger -> ledger.remember(startedJobId, workDir));
+        exportWorkDirectories.tell(ledger -> ledger.sweep(this::registryStillKnows));
         EXPORT_LOGGER.log(java.util.logging.Level.INFO, "Export started: project {0}, directory ''{1}'', job {2}",
             new Object[] {proj.name(), directory, job.id()});
         respond(ex, 202, "application/json", "{\"jobId\":" + jsonStr(job.id()) + "}");
     }
 
-    /** Deletes the work directories of the exports whose jobs the registry no longer lists. */
-    private void deleteWorkDirectoriesOfForgottenExports() {
-        int deleted = exportWorkDirectories.deleteOfForgottenJobs(id -> batchJobs.get(id) != null);
-        if (deleted > 0) EXPORT_LOGGER.log(java.util.logging.Level.INFO, "Deleted {0} export work director(ies) of forgotten jobs", deleted);
+    /** Whether the registry still lists the job; a map read, so the ledger actor may call it without waiting on an actor. */
+    private boolean registryStillKnows(String jobId) {
+        return batchJobs.get(jobId) != null;
     }
 
     /** Answers a request to start an export with an error, and logs it: a press of Make PDF must leave a trace. */
