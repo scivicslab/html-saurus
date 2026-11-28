@@ -57,8 +57,10 @@ public class PortalServer implements PortalReads {
      *  (see {@code BuildParallelization_260822_oo01}); {@code <= 0} keeps {@link SiteBuilder}'s own default. */
     private final int threads;
     private final Path worksDir;
-    /** Guards the search-scopes file: a change reads it, edits it and writes it back as one step. */
-    private final Object scopesLock = new Object();
+    /** The search-scopes file: a change reads it, edits it and writes it back as one step, served one at a time. */
+    private final ActorRef<SearchScopesStore> scopesStore;
+    /** What this server is showing, for {@code GET /api/activity}. */
+    private final ActorRef<ActivityMonitor> activity;
     private McpHandler mcpHandler;
     /**
      * Precomputed semantic (embedding-based) related docs: portalPath -> list of {path,title,summary}.
@@ -214,12 +216,14 @@ public class PortalServer implements PortalReads {
                 System.getProperty("html-saurus.chat-ui-nodes"));
         this.searcherTree = new SearcherTree(searcherSystem);
         this.exportWorkDirectories = ExportWorkDirectoryLedger.host(searcherSystem);
+        this.activity = ActivityMonitor.host(searcherSystem);
         this.searchers = searcherTree.view();
         this.batchJobs = new com.scivicslab.jobregistry.JobRegistry(searcherSystem, 60 * 60 * 1000L);
         this.mcpEnabled = mcp;
         this.base = base;
         this.noticeFile = noticeFile;
         this.worksDir = worksDir;
+        this.scopesStore = SearchScopesStore.host(searcherSystem, scopesFile());
         this.port = port;
         this.threads = threads;
         this.projects = new ArrayList<>();
@@ -1222,29 +1226,10 @@ public class PortalServer implements PortalReads {
         return out;
     }
 
-    /** One document this server sent to a browser: what it was, and when. */
-    private record Served(String path, String title, long at) {}
-
-    /** How many recently served documents are remembered. */
-    private static final int SERVED_LIMIT = 20;
-
-    /**
-     * The documents this server has served, newest first, one entry per document.
-     *
-     * <p>What this server is doing is what it is showing, so this is the answer to
-     * {@code GET /api/activity} ({@code ActivitySummary_260905_oo01}). The portal page has a
-     * {@code Recent} menu, but that lives in the browser's {@code localStorage} and this server
-     * never sees it. Several people reading through one server all feed this one list, which is
-     * right: the question is what this instance is doing, not who asked it to.</p>
-     */
-    private final java.util.Deque<Served> served = new java.util.concurrent.ConcurrentLinkedDeque<>();
-
-    /** Remembers one served document, newest first, without repeating a document already in the list. */
+    /** Remembers one served document ({@link ActivityMonitor}); sent as a message, so a request never waits for it. */
     private void noteServed(String path, String title) {
-        if (title == null || title.isBlank()) return;
-        served.removeIf(v -> v.path().equals(path));
-        served.addFirst(new Served(path, title, System.currentTimeMillis()));
-        while (served.size() > SERVED_LIMIT) served.pollLast();
+        long now = System.currentTimeMillis();
+        activity.tell(m -> m.noteServed(path, title, now));
     }
 
     /** @return the {@code <title>} of a built page, without the site name the builder appends */
@@ -1262,9 +1247,6 @@ public class PortalServer implements PortalReads {
      *  translation call per this interval; a miss outside the window answers with the original
      *  title instead of waiting. */
     private static final long ACTIVITY_TRANSLATE_INTERVAL_MS = 30 * 60 * 1000;
-    /** Epoch millis at which the next activity translation call is allowed. */
-    private final java.util.concurrent.atomic.AtomicLong activityTranslateAllowedAtMs =
-            new java.util.concurrent.atomic.AtomicLong(0);
 
     /**
      * Handles {@code GET /api/activity}. Answers what this server is showing: the document it sent
@@ -1277,7 +1259,7 @@ public class PortalServer implements PortalReads {
      * human's own words.</p>
      */
     private void handleActivity(HttpExchange ex) throws IOException {
-        List<Served> recent = new ArrayList<>(served);
+        List<ActivityMonitor.Served> recent = activity.ask(ActivityMonitor::recent).join();
         String summary = recent.isEmpty()
                 ? "Serving documentation; no document has been opened yet."
                 : activitySummaryEnglish(recent.get(0).title());
@@ -1305,9 +1287,7 @@ public class PortalServer implements PortalReads {
         String cached = translationCache.get(TranslationCache.key(title, "English"));
         if (cached != null) return cached;
         long now = System.currentTimeMillis();
-        long allowedAt = activityTranslateAllowedAtMs.get();
-        if (now < allowedAt
-                || !activityTranslateAllowedAtMs.compareAndSet(allowedAt, now + ACTIVITY_TRANSLATE_INTERVAL_MS)) {
+        if (!activity.ask(m -> m.claimTranslation(now, ACTIVITY_TRANSLATE_INTERVAL_MS)).join()) {
             return title;
         }
         String english = translateCore(title, "English");
@@ -3617,23 +3597,19 @@ public class PortalServer implements PortalReads {
      */
     private org.apache.lucene.search.Query scopeFilter(List<String> ids) throws Exception {
         if (ids.isEmpty()) return null;
-        synchronized (scopesLock) {
-            return SearchScopes.load(scopesFile()).filter(ids, scopeBase());
-        }
+        return SearchScopesStore.call(scopesStore, SearchScopesStore::read).filter(ids, scopeBase());
     }
 
     /** The names of the ticked scopes, for the line that tells a result list what it was narrowed to. */
     private String scopeLabel(List<String> ids) {
         try {
             List<String> names = new ArrayList<>();
-            synchronized (scopesLock) {
-                for (var c : SearchScopes.load(scopesFile()).categories()) {
-                    if (ids.contains(c.id())) names.add(c.name());
-                }
+            for (var c : SearchScopesStore.call(scopesStore, SearchScopesStore::read).categories()) {
+                if (ids.contains(c.id())) names.add(c.name());
             }
             if (ids.contains(SearchScopes.REST_ID)) names.add(SearchScopes.REST_NAME);
             return String.join(", ", names);
-        } catch (IOException e) {
+        } catch (Exception e) {
             return String.join(", ", ids);
         }
     }
@@ -3680,30 +3656,29 @@ public class PortalServer implements PortalReads {
      */
     private void handleSearchScopes(HttpExchange ex) throws IOException {
         try {
-            synchronized (scopesLock) {
-                SearchScopes scopes = SearchScopes.load(scopesFile());
-                switch (ex.getRequestMethod().toUpperCase(Locale.ROOT)) {
-                    case "GET" -> { }
-                    case "POST" -> {
-                        Map<String, Object> body = McpJsonParser.parseObject(
-                                new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-                        scopes = scopes.add(textOf(body.get("name")), textOf(body.get("query")), scopeBase());
-                        scopes.save(scopesFile());
-                    }
-                    case "DELETE" -> {
-                        scopes = scopes.remove(queryParam(ex, "id"));
-                        scopes.save(scopesFile());
-                    }
-                    default -> {
-                        respond(ex, 405, "text/plain", "Method Not Allowed");
-                        return;
-                    }
+            SearchScopes scopes;
+            switch (ex.getRequestMethod().toUpperCase(Locale.ROOT)) {
+                case "GET" -> scopes = SearchScopesStore.call(scopesStore, SearchScopesStore::read);
+                case "POST" -> {
+                    Map<String, Object> body = McpJsonParser.parseObject(
+                            new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                    String name = textOf(body.get("name"));
+                    String query = textOf(body.get("query"));
+                    scopes = SearchScopesStore.call(scopesStore, store -> store.change(c -> c.add(name, query, scopeBase())));
                 }
-                RelatedDocsView.writeJsonText(ex, scopes.toJson());
+                case "DELETE" -> {
+                    String id = queryParam(ex, "id");
+                    scopes = SearchScopesStore.call(scopesStore, store -> store.change(c -> c.remove(id)));
+                }
+                default -> {
+                    respond(ex, 405, "text/plain", "Method Not Allowed");
+                    return;
+                }
             }
+            RelatedDocsView.writeJsonText(ex, scopes.toJson());
         } catch (org.apache.lucene.queryparser.classic.ParseException | IllegalArgumentException e) {
             respond(ex, 400, "application/json; charset=UTF-8", "{\"error\":" + jsonStr(String.valueOf(e.getMessage())) + "}");
-        } catch (IOException e) {
+        } catch (Exception e) {
             respond(ex, 500, "application/json; charset=UTF-8", "{\"error\":" + jsonStr(String.valueOf(e.getMessage())) + "}");
         }
     }
