@@ -139,11 +139,35 @@ class PrintWidthEstimatorTest {
         assertEquals(Verdict.PORTRAIT, verdictOf(table(1, 12, 12)));
         assertEquals(Verdict.LANDSCAPE, verdictOf(table(1, 20, 20, 20, 20)));
         assertEquals(Layout.LANDSCAPE, PrintWidthEstimator.layoutOf(table(1, 20, 20, 20, 20)));
-        // 12 text columns need 2200 px, more than landscape: the table stays a table, in landscape.
-        TableJudgement wide = PrintWidthEstimator.analyze(table(fill(12, 20))).get(0);
-        assertEquals(Rule.NONE, wide.rule());
+    }
+
+    private static List<PrintWidthEstimator.Column> twoColumnsWithMinimums(double a, double b) {
+        return List.of(new PrintWidthEstimator.Column(ColumnKind.TEXT, a, a, 1), new PrintWidthEstimator.Column(ColumnKind.TEXT, b, b, 1));
+    }
+
+    @Test
+    void rule4_aTableWhoseMinimumsExceedTheLandscapeContentIsCards_exactlyThatMuchIsNot() {
+        assertEquals(1001, PrintWidthEstimator.LANDSCAPE_CONTENT_PX, 0);
+        assertEquals(Rule.NONE, PrintWidthEstimator.ruleOf(twoColumnsWithMinimums(500.5, 500.5)), "1001 px exactly fits");
+        assertEquals(Rule.NONE, PrintWidthEstimator.ruleOf(twoColumnsWithMinimums(500.5, 500.49)), "below 1001 px");
+        assertEquals(Rule.WIDER_THAN_LANDSCAPE, PrintWidthEstimator.ruleOf(twoColumnsWithMinimums(500.5, 500.51)), "over 1001 px");
+        assertEquals(Rule.NONE, PrintWidthEstimator.ruleOf(twoColumnsWithMinimums(673, 100)), "fits landscape, not portrait");
+    }
+
+    @Test
+    void rule4_aRealTableOfTwelveTextColumnsIsCards_andDoesNotMakeTheDocumentLandscape() {
+        // 12 text columns need 2200 px, more than the landscape content, and none of rules 1 to 3 applies (20 < 25).
+        String html = table(fill(12, 20));
+        TableJudgement wide = PrintWidthEstimator.analyze(html).get(0);
         assertTrue(wide.sumMin() > PrintWidthEstimator.LANDSCAPE_CONTENT_PX);
-        assertEquals(Verdict.LANDSCAPE, wide.verdict());
+        assertEquals(Rule.WIDER_THAN_LANDSCAPE, wide.rule());
+        assertEquals(Verdict.CARDS, wide.verdict());
+        assertEquals(Layout.PORTRAIT, PrintWidthEstimator.layoutOf(html));
+    }
+
+    @Test
+    void rule4_comesAfterRules1To3_soTheEarlierRuleIsReported() {
+        assertEquals(Rule.TWO_VERY_LONG, ruleOf(table(fill(12, 100))));
     }
 
     @Test

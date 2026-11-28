@@ -32,10 +32,13 @@ import org.jsoup.nodes.TextNode;
  *   <li>({@link Rule#TWO_VERY_LONG}) at least {@link #VERY_LONG_COLUMNS_FOR_CARDS} columns are
  *       {@link #VERY_LONG_COLUMN_CHARS} characters or longer; or</li>
  *   <li>({@link Rule#THREE_LONG}) there are at most {@link #MAX_COLUMNS_FOR_LONG_RULE} columns and at least
- *       {@link #LONG_COLUMNS_FOR_CARDS} of them are {@link #LONG_COLUMN_CHARS} characters or longer.</li>
+ *       {@link #LONG_COLUMNS_FOR_CARDS} of them are {@link #LONG_COLUMN_CHARS} characters or longer; or</li>
+ *   <li>({@link Rule#WIDER_THAN_LANDSCAPE}) the minimum widths of its columns add up to more than
+ *       {@link #LANDSCAPE_CONTENT_PX} px, the content area of A4 landscape. Such a table is cut on paper whatever the
+ *       length of its columns; the estimate does not depend on the orientation, so screen and print agree.</li>
  * </ol>
  * <p>Any other table stays a table: {@link Verdict#PORTRAIT} when its column minimums fit A4 portrait, else
- * {@link Verdict#LANDSCAPE}. A document is landscape when any of its tables is.</p>
+ * {@link Verdict#LANDSCAPE} (it fits, by rule 4). A document is landscape when any of its tables is.</p>
  *
  * <p>Widths imitate the automatic table layout of a browser without laying anything out: the columns share the
  * content width in proportion to {@code max - min}. Full-width characters are 16 px, half-width 0.55 em, half-width
@@ -96,7 +99,7 @@ public final class PrintWidthEstimator {
     public enum Verdict { PORTRAIT, LANDSCAPE, CARDS }
 
     /** Which rule turned a table into cards. */
-    public enum Rule { NONE, MANY_SHORT_COLUMNS, TWO_VERY_LONG, THREE_LONG }
+    public enum Rule { NONE, MANY_SHORT_COLUMNS, TWO_VERY_LONG, THREE_LONG, WIDER_THAN_LANDSCAPE }
 
     /**
      * One column.
@@ -292,6 +295,7 @@ public final class PrintWidthEstimator {
         if (allShort && n >= MANY_SHORT_COLUMNS) return Rule.MANY_SHORT_COLUMNS;
         if (veryLong >= VERY_LONG_COLUMNS_FOR_CARDS) return Rule.TWO_VERY_LONG;
         if (n <= MAX_COLUMNS_FOR_LONG_RULE && long_ >= LONG_COLUMNS_FOR_CARDS) return Rule.THREE_LONG;
+        if (columns.stream().mapToDouble(Column::min).sum() > LANDSCAPE_CONTENT_PX) return Rule.WIDER_THAN_LANDSCAPE;
         return Rule.NONE;
     }
 
