@@ -7,7 +7,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
-import java.util.concurrent.locks.Lock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
@@ -66,7 +65,7 @@ final class PdfExportJob {
     private final Path workDir;
     private final HtmlToPdfPrinter printer;
     private final HtmlBuild rebuild;
-    private final Lock projectLock;
+    private final ProjectBuildGate.Turn projectTurn;
 
     /**
      * @param project     the doc project's name
@@ -76,11 +75,11 @@ final class PdfExportJob {
      * @param workDir     the directory the export works in and keeps its PDF in
      * @param printer     prints the combined HTML
      * @param rebuild     rebuilds the project's HTML
-     * @param projectLock held from the rebuild until the combined HTML is read from the built pages, so that two exports
+     * @param projectTurn held from the rebuild until the combined HTML is read from the built pages, so that two exports
      *                    of one project do not rebuild under each other
      */
     PdfExportJob(String project, Path docsDir, Path staticDir, String dirRel, Path workDir, HtmlToPdfPrinter printer,
-                 HtmlBuild rebuild, Lock projectLock) {
+                 HtmlBuild rebuild, ProjectBuildGate.Turn projectTurn) {
         this.project = project;
         this.docsDir = docsDir;
         this.staticDir = staticDir;
@@ -88,7 +87,7 @@ final class PdfExportJob {
         this.workDir = workDir;
         this.printer = printer;
         this.rebuild = rebuild;
-        this.projectLock = projectLock;
+        this.projectTurn = projectTurn;
     }
 
     /** @return the file name of the PDF: {@code <project>-<directory with / as ->.pdf}, or {@code <project>.pdf} */
@@ -113,7 +112,7 @@ final class PdfExportJob {
             job.progress(0, steps);
             PdfExportPlan plan;
             PdfExportHtml.Prepared combined;
-            projectLock.lockInterruptibly();
+            long ticket = projectTurn.enter();
             try {
                 job.phase(PHASE_BUILDING_THE_HTML);
                 if (!rebuild.rebuildHtml()) {
@@ -128,7 +127,7 @@ final class PdfExportJob {
                 String source = project + "/docs" + (dirRel.isBlank() ? "" : "/" + dirRel.replaceAll("^/+|/+$", ""));
                 combined = PdfExportHtml.prepare(plan, source, staticDir, workDir.resolve("images"));
             } finally {
-                projectLock.unlock();
+                projectTurn.leave(ticket);
             }
             if (job.isTerminal()) return;
 

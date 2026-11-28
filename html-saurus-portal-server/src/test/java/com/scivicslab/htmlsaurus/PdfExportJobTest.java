@@ -17,8 +17,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -48,6 +46,7 @@ class PdfExportJobTest {
     Path dir;
 
     private ActorSystem system;
+    private com.scivicslab.pojoactor.core.ActorRef<ProjectBuildGate> gate;
     private JobRegistry registry;
     private Path docs;
     private Path staticDir;
@@ -56,6 +55,7 @@ class PdfExportJobTest {
     @BeforeEach
     void setUp() throws IOException {
         system = new ActorSystem("pdf-export-job-test");
+        gate = ProjectBuildGate.host(system);
         registry = new JobRegistry(system, 60_000L);
         docs = dir.resolve("docs");
         staticDir = dir.resolve("static-html");
@@ -124,7 +124,14 @@ class PdfExportJobTest {
         }
     }
 
-    private Job<ExportOutcome> run(HtmlToPdfPrinter printer, PdfExportJob.HtmlBuild build, Lock lock) throws Exception {
+    private int turns;
+
+    /** A turn of a key of its own: two of these share nothing. */
+    private ProjectBuildGate.Turn turn() {
+        return new ProjectBuildGate.Turn(gate, "key-" + turns++);
+    }
+
+    private Job<ExportOutcome> run(HtmlToPdfPrinter printer, PdfExportJob.HtmlBuild build, ProjectBuildGate.Turn lock) throws Exception {
         PdfExportJob work = new PdfExportJob("proj", docs, staticDir, "A", this.work, printer, build, lock);
         Job<ExportOutcome> job = registry.submit("export", "proj/A", work::exportToPdf, System.currentTimeMillis());
         long deadline = System.currentTimeMillis() + 20_000;
@@ -145,7 +152,7 @@ class PdfExportJobTest {
         // Two pages of contents while the numbers are placeholders, one once they are real: the parts move up by one page.
         StubPrinter printer = new StubPrinter((html, call) -> html.contains(">000<") ? 2 : 1, true);
 
-        Job<ExportOutcome> job = run(printer, () -> true, new ReentrantLock());
+        Job<ExportOutcome> job = run(printer, () -> true, turn());
 
         assertEquals(Job.State.DONE, job.state(), job.error());
         assertEquals(3, printer.printed.size(), "placeholders, the first pages found, the pages once the contents moved");
@@ -168,7 +175,7 @@ class PdfExportJobTest {
     @Test
     void exportToPdf_whenTheNumbersAlreadyHold_printsTwice() throws Exception {
         StubPrinter printer = new StubPrinter((html, call) -> 1, true);
-        Job<ExportOutcome> job = run(printer, () -> true, new ReentrantLock());
+        Job<ExportOutcome> job = run(printer, () -> true, turn());
         assertEquals(Job.State.DONE, job.state(), job.error());
         assertEquals(2, printer.printed.size());
     }
@@ -178,7 +185,7 @@ class PdfExportJobTest {
         // The contents take one page, then two, then one: the numbers keep being wrong.
         StubPrinter printer = new StubPrinter((html, call) -> 1 + (call % 2), true);
 
-        Job<ExportOutcome> job = run(printer, () -> true, new ReentrantLock());
+        Job<ExportOutcome> job = run(printer, () -> true, turn());
 
         assertEquals(Job.State.ERROR, job.state());
         assertTrue(job.error().contains("did not settle"), job.error());
@@ -190,7 +197,7 @@ class PdfExportJobTest {
     @Test
     void exportToPdf_whenThePrintedPdfDoesNotSayWhereThePartsStart_endsInError() throws Exception {
         StubPrinter printer = new StubPrinter((html, call) -> 1, false);
-        Job<ExportOutcome> job = run(printer, () -> true, new ReentrantLock());
+        Job<ExportOutcome> job = run(printer, () -> true, turn());
         assertEquals(Job.State.ERROR, job.state());
         assertTrue(job.error().contains("does not say which page"), job.error());
     }
@@ -198,7 +205,7 @@ class PdfExportJobTest {
     @Test
     void exportToPdf_whenTheHtmlCannotBeBuilt_endsInErrorWithoutPrinting() throws Exception {
         StubPrinter printer = new StubPrinter((html, call) -> 1, true);
-        Job<ExportOutcome> job = run(printer, () -> false, new ReentrantLock());
+        Job<ExportOutcome> job = run(printer, () -> false, turn());
         assertEquals(Job.State.ERROR, job.state());
         assertTrue(job.error().contains("could not be built"), job.error());
         assertTrue(printer.printed.isEmpty());
@@ -211,7 +218,7 @@ class PdfExportJobTest {
         Files.writeString(staticDir.resolve("A/one/index.html"), "<html><body><main><h1>one</h1><p>The formula $E = mc^2$ here.</p></main></body></html>");
         // The stand-in prints the page text into the PDF as it is, as Chrome does when the KaTeX script did not load.
         HtmlToPdfPrinter printer = new StubPrinter((html, call) -> 1, true, "The formula $E = mc^2$ here.");
-        Job<ExportOutcome> job = run(printer, () -> true, new ReentrantLock());
+        Job<ExportOutcome> job = run(printer, () -> true, turn());
         assertEquals(Job.State.DONE, job.state(), job.error());
         assertTrue(((ExportOutcome) job.result()).warning().contains("KaTeX"), "warning: " + ((ExportOutcome) job.result()).warning());
     }
@@ -227,7 +234,7 @@ class PdfExportJobTest {
         };
     }
 
-    private int mostRebuildingAtOnce(Lock first, Lock second) throws Exception {
+    private int mostRebuildingAtOnce(ProjectBuildGate.Turn first, ProjectBuildGate.Turn second) throws Exception {
         AtomicInteger running = new AtomicInteger();
         AtomicInteger most = new AtomicInteger();
         Path otherWork = Files.createDirectories(dir.resolve("work2"));
@@ -246,14 +253,14 @@ class PdfExportJobTest {
 
     @Test
     void exportToPdf_whenTwoExportsShareAProjectLock_rebuildOneAfterTheOther() throws Exception {
-        ReentrantLock shared = new ReentrantLock();
+        ProjectBuildGate.Turn shared = turn();
         assertEquals(1, mostRebuildingAtOnce(shared, shared));
     }
 
     @Test
     void exportToPdf_whenTheExportsHaveNoLockInCommon_rebuildAtTheSameTime() throws Exception {
         // The check above would pass for a job that never rebuilds at the same time as anything; this one shows it can.
-        assertEquals(2, mostRebuildingAtOnce(new ReentrantLock(), new ReentrantLock()));
+        assertEquals(2, mostRebuildingAtOnce(turn(), turn()));
     }
 
     @Test
@@ -281,7 +288,7 @@ class PdfExportJobTest {
         // Another export, the Projects tab or a build of the MCP rebuilds the project: static-html/ is gone for a while.
         printer.beforeLayingOut = () -> PdfExportJob.deleteDirectory(staticDir);
 
-        Job<ExportOutcome> job = run(printer, () -> true, new ReentrantLock());
+        Job<ExportOutcome> job = run(printer, () -> true, turn());
 
         assertEquals(Job.State.DONE, job.state(), job.error());
         assertFalse(printer.imageUrls.isEmpty(), "the page has an image the printing should read");

@@ -104,9 +104,8 @@ public class PortalServer implements PortalReads {
      *  browser that was away can still collect the outcome. */
     private final com.scivicslab.jobregistry.JobRegistry batchJobs;
     private static final java.util.logging.Logger EXPORT_LOGGER = java.util.logging.Logger.getLogger(PortalServer.class.getName());
-    /** One lock per project, held while an export rebuilds the project's HTML and reads it (ExportToPdf_261119_oo01). */
-    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantLock> exportLocks =
-        new java.util.concurrent.ConcurrentHashMap<>();
+    /** Lets one export rebuild a project's HTML at a time, and one scan of the works directory run at a time. */
+    private final ActorRef<ProjectBuildGate> buildGate;
     /**
      * How an export rebuilds a project's HTML. The builder is the default; a test plugs in a rebuild it can hold up.
      */
@@ -222,6 +221,7 @@ public class PortalServer implements PortalReads {
         this.scopesStore = SearchScopesStore.host(searcherSystem, scopesFile());
         this.port = port;
         this.threads = threads;
+        this.buildGate = ProjectBuildGate.host(searcherSystem);
         this.registry = ProjectRegistry.host(searcherSystem);
         this.derived = DerivedIndexes.host(searcherSystem);
         for (Path p : projectDirs) {
@@ -833,7 +833,24 @@ public class PortalServer implements PortalReads {
      * {@code {total known projects, newly added, removed}}. Shared by {@link #handleScanWorksDir}
      * (REST) and the MCP {@code scan-works-dir} tool.
      */
-    private synchronized int[] scanWorksDirCore() throws IOException {
+    private int[] scanWorksDirCore() throws IOException {
+        // A key no project name can be: a name is a directory name and holds no NUL.
+        var turn = new ProjectBuildGate.Turn(buildGate, "\0scan-works-dir");
+        long ticket;
+        try {
+            ticket = turn.enter();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("interrupted while waiting for another scan", e);
+        }
+        try {
+            return scanWorksDirTurn();
+        } finally {
+            turn.leave(ticket);
+        }
+    }
+
+    private int[] scanWorksDirTurn() throws IOException {
         System.out.println("Scan works dir requested: rescanning " + worksDir);
         List<Path> found = Projects.findProjects(worksDir);
         int added = 0;
@@ -4667,7 +4684,7 @@ public class PortalServer implements PortalReads {
         Path workDir = Files.createTempDirectory(PdfExportJob.WORK_DIRECTORY_PREFIX);
         PdfExportJob work = new PdfExportJob(proj.name(), docs, proj.staticDir(), directory, workDir,
             new ChromePrinter(chrome.get()), exportHtmlBuild.apply(proj),
-            exportLocks.computeIfAbsent(proj.name(), name -> new java.util.concurrent.locks.ReentrantLock()));
+            new ProjectBuildGate.Turn(buildGate, proj.name()));
         String label = proj.name() + (directory.isEmpty() ? "" : "/" + directory);
         com.scivicslab.jobregistry.Job<?> job = batchJobs.submit("export", label, work::exportToPdf, System.currentTimeMillis());
         String startedJobId = job.id();
