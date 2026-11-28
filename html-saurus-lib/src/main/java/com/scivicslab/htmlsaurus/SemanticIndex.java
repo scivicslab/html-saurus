@@ -1,13 +1,16 @@
 package com.scivicslab.htmlsaurus;
 
+import com.scivicslab.pojoactor.core.ManagedThreadPool;
+
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.function.BiFunction;
 import java.util.logging.Logger;
-import java.util.stream.IntStream;
 
 /**
  * Stage B of the embedding-based related-docs feature: the in-memory,
@@ -17,8 +20,8 @@ import java.util.stream.IntStream;
  *
  * <p>Neighbour computation needs all documents' vectors together (a document's
  * nearest neighbour may live in another project), but it is cheap — cosine only,
- * no embedding calls — so it runs in memory at startup (parallelized across
- * documents) rather than from a persisted, easily-stale global file.
+ * no embedding calls — so it runs in memory at startup (spread over a pool of
+ * real threads, one range of documents per task) rather than from a persisted, easily-stale global file.
  *
  * <p>Documents keep their project-relative {@code path}; each server turns a
  * {@code (projectName, path)} pair into the URL it actually serves via the
@@ -30,7 +33,7 @@ final class SemanticIndex {
     private static final Logger logger = Logger.getLogger(SemanticIndex.class.getName());
 
     /** A document plus the project it belongs to. */
-    private record Entry(String projectName, SemanticIndexer.DocVec doc) {}
+    record Entry(String projectName, SemanticIndexer.DocVec doc) {}
 
     private final List<Entry> entries;
     /** For each entry index, the indices of its top-K neighbours (best first). */
@@ -69,48 +72,93 @@ final class SemanticIndex {
         return new SemanticIndex(entries, neighbours);
     }
 
-    /** Computes top-K within-locale neighbours for every entry, in parallel. */
+    /**
+     * Computes top-K within-locale neighbours for every entry on a pool of real threads that lasts for this one call.
+     * Half of the machine's cores, so that a reload of the index does not take the whole machine.
+     */
     private static int[][] computeNeighbours(List<Entry> entries, int topK) {
+        int threads = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
+        ManagedThreadPool pool = new ManagedThreadPool(threads);
+        try {
+            return computeNeighbours(entries, topK, pool);
+        } finally {
+            pool.shutdown();
+        }
+    }
+
+    /**
+     * Computes top-K within-locale neighbours for every entry on the given pool: the entries are cut into contiguous
+     * ranges, one task per range, and the caller waits for all of them. The caller must not be a thread of {@code pool}
+     * (it would wait for work no thread is left to run) and must not be inside an actor's message, which this wait
+     * would hold up; a virtual thread, as a Job's, may wait here.
+     */
+    static int[][] computeNeighbours(List<Entry> entries, int topK, ManagedThreadPool pool) {
         int n = entries.size();
         int[][] result = new int[n][];
         if (n == 0) {
             return result;
         }
-        IntStream.range(0, n).parallel().forEach(i -> {
-            Entry ei = entries.get(i);
-            float[] vi = ei.doc.vec();
-            String localeI = ei.doc.locale();
-            // Bounded top-K by score (parallel arrays kept sorted descending).
-            double[] bestScore = new double[topK];
-            int[] bestIdx = new int[topK];
-            int size = 0;
-            for (int j = 0; j < n; j++) {
-                if (j == i) {
-                    continue;
+        int ranges = Math.min(n, Math.max(1, pool.getCorePoolSize() * 4));
+        List<Future<?>> pending = new ArrayList<>(ranges);
+        for (int r = 0; r < ranges; r++) {
+            int from = (int) ((long) n * r / ranges);
+            int to = (int) ((long) n * (r + 1) / ranges);
+            pending.add(pool.submit(() -> {
+                for (int i = from; i < to; i++) {
+                    result[i] = neighboursOf(entries, i, topK);
                 }
-                Entry ej = entries.get(j);
-                if (!localeI.equals(ej.doc.locale())) {
-                    continue;
-                }
-                double score = EmbeddingClient.cosine(vi, ej.doc.vec());
-                if (size >= topK && score <= bestScore[size - 1]) {
-                    continue;
-                }
-                int pos = size < topK ? size : size - 1;
-                while (pos > 0 && bestScore[pos - 1] < score) {
-                    bestScore[pos] = bestScore[pos - 1];
-                    bestIdx[pos] = bestIdx[pos - 1];
-                    pos--;
-                }
-                bestScore[pos] = score;
-                bestIdx[pos] = j;
-                if (size < topK) {
-                    size++;
-                }
+            }));
+        }
+        try {
+            for (Future<?> f : pending) {
+                f.get();
             }
-            result[i] = java.util.Arrays.copyOf(bestIdx, size);
-        });
+        } catch (InterruptedException e) {
+            pending.forEach(f -> f.cancel(true));
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while computing neighbours", e);
+        } catch (ExecutionException e) {
+            pending.forEach(f -> f.cancel(true));
+            throw new IllegalStateException("Neighbour computation failed", e.getCause());
+        }
         return result;
+    }
+
+    /** The indices of entry {@code i}'s top-K same-locale neighbours, best first (the earlier entry first on a tie). */
+    private static int[] neighboursOf(List<Entry> entries, int i, int topK) {
+        int n = entries.size();
+        Entry ei = entries.get(i);
+        float[] vi = ei.doc.vec();
+        String localeI = ei.doc.locale();
+        // Bounded top-K by score (parallel arrays kept sorted descending).
+        double[] bestScore = new double[topK];
+        int[] bestIdx = new int[topK];
+        int size = 0;
+        for (int j = 0; j < n; j++) {
+            if (j == i) {
+                continue;
+            }
+            Entry ej = entries.get(j);
+            if (!localeI.equals(ej.doc.locale())) {
+                continue;
+            }
+            double score = EmbeddingClient.cosine(vi, ej.doc.vec());
+            if (size >= topK && score <= bestScore[size - 1]) {
+                continue;
+            }
+            int pos = size < topK ? size : size - 1;
+            while (pos > 0 && bestScore[pos - 1] < score) {
+                bestScore[pos] = bestScore[pos - 1];
+                bestIdx[pos] = bestIdx[pos - 1];
+                pos--;
+            }
+            bestScore[pos] = score;
+            bestIdx[pos] = j;
+            if (size < topK) {
+                size++;
+            }
+        }
+        return java.util.Arrays.copyOf(bestIdx, size);
     }
 
     /**
