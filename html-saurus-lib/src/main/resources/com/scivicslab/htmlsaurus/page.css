@@ -485,7 +485,7 @@ main.force-cards table.rule-table { display: none; }
 main.force-cards table.rule-table + .table-cards { display: block; }
 .table-cards table { width: 100%; margin: 0.6rem 0; display: table; }
 .table-cards th { width: 8em; background: var(--c-bg-alt, #f6f8fa); }
-.table-mode { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 1rem; font-size: 0.875rem; }
+.table-mode { display: flex; align-items: center; gap: 0.4rem; margin: 0.8rem 0 0.4rem; font-size: 0.875rem; }
 .table-mode button { background: var(--c-sidebar-bg); border: 1px solid var(--c-border); border-radius: 4px;
   padding: 0.2rem 0.7rem; cursor: pointer; color: inherit; font: inherit; }
 .table-mode button[aria-pressed="true"] { background: #2e8555; color: #fff; border-color: #2e8555; }
