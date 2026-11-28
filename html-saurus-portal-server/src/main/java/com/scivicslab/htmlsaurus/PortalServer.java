@@ -257,7 +257,8 @@ public class PortalServer implements PortalReads {
                 : semanticIndex.servedMap((projectName, path) -> "/" + projectName + path);
         this.semanticIndex = semanticIndex;
         this.embed = new EmbeddingClient(System.getenv("EMBEDDING_SERVER_URL"));
-        this.translate = new TranslationClient(System.getenv("TRANSLATION_SERVER_URL"));
+        this.translate = new TranslationClient(System.getenv("TRANSLATION_SERVER_URL"),
+                TranslationEndpointState.host(searcherSystem));
         this.revision = new RevisionService(worksDir, translate::chatForRevision);
         this.translationCache = TranslationCache.load(worksDir);
         // Asked through the same broker queue (or translation server) the page translation uses, and

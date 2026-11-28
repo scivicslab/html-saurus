@@ -4,6 +4,7 @@ import com.scivicslab.gpubroker.client.GpuBrokerClient;
 import com.scivicslab.gpubroker.client.GpuBrokerClientException;
 import com.scivicslab.gpubroker.client.JobResult;
 import com.scivicslab.gpubroker.client.Priority;
+import com.scivicslab.pojoactor.core.ActorRef;
 
 import java.io.IOException;
 import java.net.URI;
@@ -15,7 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -59,10 +59,12 @@ public class TranslationClient {
     /** AI workspace's address ({@code AI_WORKSPACE_URL}), or {@code null} when not launched by it. */
     private final String workspaceUrl;
     private final HttpClient httpClient;
-    private volatile String cachedModel;
-    private volatile long cachedAtMs;
-    /** Epoch millis until which {@link #translate} should not attempt a connection; 0 = up. */
-    private final AtomicLong downUntilMs = new AtomicLong(0);
+    /**
+     * The model cache and the down period. Reads are {@code ask(...).join()} from the calling thread and writes are
+     * {@code tell}: one caller's messages are served in the order sent, so a read after its own write sees it. The state
+     * is a leaf that asks no one, so the wait cannot be part of a cycle.
+     */
+    private final ActorRef<TranslationEndpointState> state;
 
     /**
      * Creates a client for the given generation server base URL.
@@ -70,16 +72,18 @@ public class TranslationClient {
      * @param baseUrl base URL of the generation server (no trailing slash), e.g.
      *                {@code http://192.168.5.21:30805}; blank/null uses {@code GPU_BROKER_URL}
      *                when set, otherwise {@link #DEFAULT_BASE_URL}
+     * @param state   the actor holding what the client remembers, see {@link TranslationEndpointState#host}
      */
-    public TranslationClient(String baseUrl) {
-        this(baseUrl, System.getenv("AI_WORKSPACE_URL"));
+    public TranslationClient(String baseUrl, ActorRef<TranslationEndpointState> state) {
+        this(baseUrl, System.getenv("AI_WORKSPACE_URL"), state);
     }
 
     /**
      * @param workspaceUrl AI workspace's base URL, asked for the model chosen on its Settings
      *                     screen at each translation; {@code null}/blank never asks
      */
-    TranslationClient(String baseUrl, String workspaceUrl) {
+    TranslationClient(String baseUrl, String workspaceUrl, ActorRef<TranslationEndpointState> state) {
+        this.state = state;
         this.workspaceUrl = workspaceUrl == null || workspaceUrl.isBlank() ? null
                 : workspaceUrl.replaceAll("/+$", "");
         String brokerUrl = System.getenv("GPU_BROKER_URL");
@@ -133,7 +137,7 @@ public class TranslationClient {
                 return null;
             }
             String content = parseContent(response.body());
-            downUntilMs.set(0);
+            state.tell(TranslationEndpointState::markUp);
             return content;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -156,8 +160,8 @@ public class TranslationClient {
             return fallbackModel;
         }
         long now = System.currentTimeMillis();
-        String cached = cachedModel;
-        if (cached != null && now - cachedAtMs < MODEL_CACHE_MS) {
+        String cached = state.ask(s -> s.cachedModel(now, MODEL_CACHE_MS)).join();
+        if (cached != null) {
             return cached;
         }
         String chosen = null;
@@ -176,8 +180,7 @@ public class TranslationClient {
             logger.log(Level.FINE, "Could not ask " + workspaceUrl + " for the translation model", e);
         }
         String model = chosen == null || chosen.isBlank() ? fallbackModel : chosen.trim();
-        cachedModel = model;
-        cachedAtMs = now;
+        state.tell(s -> s.cacheModel(model, now));
         return model;
     }
 
@@ -318,11 +321,12 @@ public class TranslationClient {
 
     /** Whether {@link #translate} should skip attempting a connection at time {@code nowMs}. */
     boolean isDown(long nowMs) {
-        return nowMs < downUntilMs.get();
+        return state.ask(s -> s.isDown(nowMs)).join();
     }
 
     void markDown() {
-        downUntilMs.set(System.currentTimeMillis() + DOWN_BACKOFF_MS);
+        long until = System.currentTimeMillis() + DOWN_BACKOFF_MS;
+        state.tell(s -> s.markDown(until));
     }
 
     /**

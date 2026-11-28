@@ -1,5 +1,7 @@
 package com.scivicslab.htmlsaurus;
 
+import com.scivicslab.pojoactor.core.ActorSystem;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import com.sun.net.httpserver.HttpServer;
@@ -16,6 +18,20 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class TranslationClientTest {
 
+    private final java.util.List<ActorSystem> systems = new java.util.ArrayList<>();
+
+    /** A client whose state actor lives in a system of its own, closed after the test. */
+    private TranslationClient client(String baseUrl, String workspaceUrl) {
+        ActorSystem system = new ActorSystem("translation-client-test");
+        systems.add(system);
+        return new TranslationClient(baseUrl, workspaceUrl, TranslationEndpointState.host(system));
+    }
+
+    @AfterEach
+    void closeSystems() {
+        systems.forEach(ActorSystem::terminate);
+    }
+
     @Test
     void parseContent_validResponse_returnsContent() {
         String body = "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Hello\"}}]}";
@@ -30,20 +46,20 @@ class TranslationClientTest {
 
     @Test
     void isDown_freshClient_isUp() {
-        TranslationClient client = new TranslationClient(null);
+        TranslationClient client = client(null, System.getenv("AI_WORKSPACE_URL"));
         assertFalse(client.isDown(System.currentTimeMillis()));
     }
 
     @Test
     void isDown_immediatelyAfterMarkDown_isTrue() {
-        TranslationClient client = new TranslationClient(null);
+        TranslationClient client = client(null, System.getenv("AI_WORKSPACE_URL"));
         client.markDown();
         assertTrue(client.isDown(System.currentTimeMillis()));
     }
 
     @Test
     void isDown_afterBackoffWindowElapses_isFalse() {
-        TranslationClient client = new TranslationClient(null);
+        TranslationClient client = client(null, System.getenv("AI_WORKSPACE_URL"));
         client.markDown();
         assertFalse(client.isDown(System.currentTimeMillis() + 31_000),
                 "backoff window (30s) should have elapsed");
@@ -57,7 +73,7 @@ class TranslationClientTest {
 
     @Test
     void currentModel_withoutWorkspace_usesTheFallback() {
-        TranslationClient client = new TranslationClient(null, null);
+        TranslationClient client = client(null, null);
         assertFalse(client.currentModel().isBlank());
     }
 
@@ -65,7 +81,7 @@ class TranslationClientTest {
     void currentModel_takesTheModelAiWorkspaceNames() throws Exception {
         HttpServer server = answering("{\"model\":\"chosen-model\"}");
         try {
-            TranslationClient client = new TranslationClient(null, "http://localhost:" + server.getAddress().getPort());
+            TranslationClient client = client(null, "http://localhost:" + server.getAddress().getPort());
             assertEquals("chosen-model", client.currentModel());
         } finally {
             server.stop(0);
@@ -76,8 +92,8 @@ class TranslationClientTest {
     void currentModel_blankAnswerKeepsTheFallback() throws Exception {
         HttpServer server = answering("{\"model\":\"\"}");
         try {
-            TranslationClient client = new TranslationClient(null, "http://localhost:" + server.getAddress().getPort());
-            assertEquals(new TranslationClient(null, null).currentModel(), client.currentModel());
+            TranslationClient client = client(null, "http://localhost:" + server.getAddress().getPort());
+            assertEquals(client(null, null).currentModel(), client.currentModel());
         } finally {
             server.stop(0);
         }
@@ -88,8 +104,8 @@ class TranslationClientTest {
         HttpServer closed = answering("{}");
         int port = closed.getAddress().getPort();
         closed.stop(0);
-        TranslationClient client = new TranslationClient(null, "http://localhost:" + port);
-        assertEquals(new TranslationClient(null, null).currentModel(), client.currentModel());
+        TranslationClient client = client(null, "http://localhost:" + port);
+        assertEquals(client(null, null).currentModel(), client.currentModel());
     }
 
     private static HttpServer answering(String json) throws Exception {
