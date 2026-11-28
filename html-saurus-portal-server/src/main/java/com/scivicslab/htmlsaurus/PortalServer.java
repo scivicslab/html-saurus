@@ -439,7 +439,8 @@ public class PortalServer implements PortalReads {
         PdfExportJob.deleteStaleWorkDirectories(Path.of(System.getProperty("java.io.tmpdir")), java.time.Duration.ofDays(1));
         var server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
         server.createContext("/", this::handleAll);
-        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+        // One virtual thread per request: a handler waits on actors and sockets, and none of it should hold a real thread.
+        server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
         server.start();
         // The registry forgets a job an hour after it ended; its PDF is deleted with it.
         var sweeper = ExportWorkDirectoryLedger.sweepEvery(exportWorkDirectories, this::registryStillKnows,
