@@ -473,16 +473,23 @@ main details.inline-translation > summary .translation-controls button:hover { b
 
 /* nav.side is a flex item inside .content-wrap (display: flex); hiding it lets
    main (flex: 1) expand into the freed width with no extra margin/width rule needed. */
-/* A table too wide for any A4 orientation has a reflowed copy (one small table per row) that only paper shows. */
+/* A table too wide for any A4 orientation has a reflowed copy (one small table per row, name over value).
+   Paper always shows the copy. A screen shows it only when main is narrower than 1000px (the A4 landscape
+   width the print decision used); a wider screen keeps the table. There is no switch. */
+main { container-type: inline-size; }
 .print-cards { display: none; }
+.print-cards table { width: 100%; margin: 0.6rem 0; break-inside: avoid; }
+.print-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
+.print-cards th { width: 8em; background: var(--c-bg-alt, #f6f8fa); }
+@container (max-width: 1000px) {
+  .print-cards { display: block; }
+  main table.has-cards { display: none !important; }
+}
 
 @media print {
   nav.side { display: none; }
   .print-cards { display: block; }
   main table.has-cards { display: none !important; }
-  .print-cards table { width: 100%; margin: 0.6rem 0; break-inside: avoid; }
-  .print-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
-  .print-cards th { width: 8em; background: var(--c-bg-alt, #f6f8fa); }
   /* A heading must not be left alone at the foot of a page when the block after it moves on. */
   main h1, main h2, main h3, main h4, main h5, main h6 { break-after: avoid; }
   /* On screen a table scrolls sideways; on paper nothing scrolls, so it must lay out in full and wrap. */
