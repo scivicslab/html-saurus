@@ -146,19 +146,19 @@
             <dependency>
                 <groupId>com.scivicslab</groupId>
                 <artifactId>pojo-actor</artifactId>
-                <version>4.8.0</version>
+                <version>5.0.0</version>
             </dependency>
             <!-- The portal's actor system is a node of the distributed actor system
                  (ActorNodesForWorkspaceAndPortal_261118_oo01): the versions AI-workspace and chat-ui run. -->
             <dependency>
                 <groupId>com.scivicslab</groupId>
                 <artifactId>turing-workflow</artifactId>
-                <version>4.8.0</version>
+                <version>5.0.0</version>
             </dependency>
             <dependency>
                 <groupId>com.scivicslab</groupId>
                 <artifactId>pojo-actor-distributed</artifactId>
-                <version>1.1.0</version>
+                <version>5.0.0</version>
             </dependency>
             <dependency>
                 <groupId>com.scivicslab</groupId>
