@@ -39,6 +39,42 @@ class PageScripts {
         return (diagramAndMathScripts("var BASE = 'YADOC_BASE_PATH';") + """
             <script>
             (function() {
+              // Screen-only choice of how this document shows its tables. The rules (rule-cards / rule-table on each
+              // table) are the default; print never reads this choice.
+              var main = document.querySelector('main');
+              if (!main || !main.querySelector('table.rule-cards, table.rule-table')) return;
+              var key = 'hs-table-mode:' + location.pathname;
+              var modes = [['rule', 'By rule (default)'], ['table', 'Force table'], ['cards', 'Force cards']];
+              var bar = document.createElement('div');
+              bar.className = 'table-mode';
+              bar.appendChild(document.createTextNode('Tables: '));
+              function apply(mode) {
+                main.classList.remove('force-table', 'force-cards');
+                if (mode === 'table') main.classList.add('force-table');
+                if (mode === 'cards') main.classList.add('force-cards');
+                bar.querySelectorAll('button').forEach(function(b) {
+                  b.setAttribute('aria-pressed', b.dataset.mode === mode ? 'true' : 'false');
+                });
+              }
+              modes.forEach(function(m) {
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.dataset.mode = m[0];
+                b.textContent = m[1];
+                b.addEventListener('click', function() {
+                  if (m[0] === 'rule') localStorage.removeItem(key); else localStorage.setItem(key, m[0]);
+                  apply(m[0]);
+                });
+                bar.appendChild(b);
+              });
+              var h1 = main.querySelector('h1');
+              var after = main.querySelector('.copy-bar') || h1;
+              if (after) after.insertAdjacentElement('afterend', bar); else main.insertBefore(bar, main.firstChild);
+              apply(localStorage.getItem(key) || 'rule');
+            })();
+            </script>
+            <script>
+            (function() {
               var toggle = document.getElementById('menu-toggle');
               var sidebar = document.getElementById('sidebar');
               var overlay = document.getElementById('sidebar-overlay');

@@ -22,10 +22,20 @@ import org.jsoup.nodes.TextNode;
  *       characters.</li>
  * </ul>
  *
- * <p>A table whose column minimums fit A4 portrait is {@link Verdict#PORTRAIT}; failing that, one that fits A4 landscape
- * is {@link Verdict#LANDSCAPE}; one that fits neither is {@link Verdict#REFLOW}. A table that fits but would wrap into
- * too many tall rows (see {@link #TALL_ROW_LINES} and {@link #TALL_ROW_SHARE}) is {@code REFLOW} too: each of its rows
- * becomes a small two-column table of heading, name and value. A document is landscape when any of its tables is.</p>
+ * <p>Whether a table is shown as a table or as one small table per row (a card) depends on the table alone, not on the
+ * screen or the paper. The length of a column is the length of its longest body cell in full-width characters
+ * (a half-width character counts 0.55; one in {@code code} a little less). A table of two or more
+ * columns is {@link Verdict#CARDS} when</p>
+ * <ol>
+ *   <li>({@link Rule#MANY_SHORT_COLUMNS}) every column is {@link ColumnKind#SHORT} and there are at least
+ *       {@link #MANY_SHORT_COLUMNS} of them; or</li>
+ *   <li>({@link Rule#TWO_VERY_LONG}) at least {@link #VERY_LONG_COLUMNS_FOR_CARDS} columns are
+ *       {@link #VERY_LONG_COLUMN_CHARS} characters or longer; or</li>
+ *   <li>({@link Rule#THREE_LONG}) there are at most {@link #MAX_COLUMNS_FOR_LONG_RULE} columns and at least
+ *       {@link #LONG_COLUMNS_FOR_CARDS} of them are {@link #LONG_COLUMN_CHARS} characters or longer.</li>
+ * </ol>
+ * <p>Any other table stays a table: {@link Verdict#PORTRAIT} when its column minimums fit A4 portrait, else
+ * {@link Verdict#LANDSCAPE}. A document is landscape when any of its tables is.</p>
  *
  * <p>Widths imitate the automatic table layout of a browser without laying anything out: the columns share the
  * content width in proportion to {@code max - min}. Full-width characters are 16 px, half-width 0.55 em, half-width
@@ -40,10 +50,18 @@ public final class PrintWidthEstimator {
     public static final int IDENTIFIER_MIN_CHARS = 6;
     /** Narrowest a {@link ColumnKind#TEXT} column may get, in full-width characters. */
     public static final int TEXT_MIN_CHARS = 10;
-    /** A row estimated at more lines than this is tall. */
-    public static final int TALL_ROW_LINES = 6;
-    /** A table is reflowed when more than this share of its rows are tall. */
-    public static final double TALL_ROW_SHARE = 0.3;
+    /** Rule 1: a table whose columns are all short is cards from this many columns on. */
+    public static final int MANY_SHORT_COLUMNS = 13;
+    /** Rule 2: a column this long, in full-width characters, is very long. */
+    public static final int VERY_LONG_COLUMN_CHARS = 100;
+    /** Rule 2: this many very long columns make cards, whatever the number of columns. */
+    public static final int VERY_LONG_COLUMNS_FOR_CARDS = 2;
+    /** Rule 3: a column this long, in full-width characters, is long. */
+    public static final int LONG_COLUMN_CHARS = 25;
+    /** Rule 3: this many long columns make cards ... */
+    public static final int LONG_COLUMNS_FOR_CARDS = 3;
+    /** Rule 3: ... in a table of at most this many columns. */
+    public static final int MAX_COLUMNS_FOR_LONG_RULE = 12;
     /** A column is {@link ColumnKind#IDENTIFIER} when more than this share of its cells are mostly {@code code}. */
     public static final double IDENTIFIER_CELL_SHARE = 0.5;
 
@@ -59,10 +77,12 @@ public final class PrintWidthEstimator {
     /** Padding (12 px twice) and border (1 px) of a cell. */
     static final double CELL_EXTRA_PX = 25;
 
-    /** Class that marks a table that has a reflowed copy. */
-    public static final String HAS_CARDS_CLASS = "has-cards";
-    /** Class of the block that holds the reflowed copy. */
-    public static final String CARDS_CLASS = "print-cards";
+    /** Class of a table the rules turn into cards. */
+    public static final String HAS_CARDS_CLASS = "rule-cards";
+    /** Class of a table the rules keep as a table (it still has cards, shown only when the reader forces them). */
+    public static final String KEPT_TABLE_CLASS = "rule-table";
+    /** Class of the block of cards that follows every table of two or more columns. */
+    public static final String CARDS_CLASS = "table-cards";
 
     private PrintWidthEstimator() {}
 
@@ -73,7 +93,10 @@ public final class PrintWidthEstimator {
     public enum ColumnKind { SHORT, IDENTIFIER, TEXT }
 
     /** How one table is printed. */
-    public enum Verdict { PORTRAIT, LANDSCAPE, REFLOW }
+    public enum Verdict { PORTRAIT, LANDSCAPE, CARDS }
+
+    /** Which rule turned a table into cards. */
+    public enum Rule { NONE, MANY_SHORT_COLUMNS, TWO_VERY_LONG, THREE_LONG }
 
     /**
      * One column.
@@ -81,24 +104,24 @@ public final class PrintWidthEstimator {
      * @param kind what it holds
      * @param min  narrowest width in px, with padding
      * @param max  width in px with its longest cell on one line
+     * @param chars length of its longest body cell in full-width characters
      */
-    public record Column(ColumnKind kind, double min, double max) {}
+    public record Column(ColumnKind kind, double min, double max, double chars) {}
 
     /**
      * The estimate for one table.
      *
      * @param columns         its columns, left to right
      * @param sumMin          sum of the columns' minimum widths
-     * @param tallShare       share of rows estimated as tall, on the orientation the table would print in
-     *                        (portrait when it fits portrait, else landscape; 0 when it fits neither)
-     * @param verdict         how it prints
+     * @param rule            the rule that made it cards, or {@link Rule#NONE}
+     * @param verdict         how it is shown
      */
-    public record TableJudgement(List<Column> columns, double sumMin, double tallShare, Verdict verdict) {}
+    public record TableJudgement(List<Column> columns, double sumMin, Rule rule, Verdict verdict) {}
 
     /**
      * @param layout orientation of the document
-     * @param html   the content to put on the page: the input, or the input with a reflowed copy after each table
-     *               that needs one
+     * @param html   the content to put on the page: the input with a block of cards after each table of two or more
+     *               columns, each table marked with the verdict of the rules
      */
     public record Result(Layout layout, String html) {}
 
@@ -107,18 +130,17 @@ public final class PrintWidthEstimator {
         if (html == null || !html.contains("<table")) return new Result(Layout.PORTRAIT, html);
         Document doc = Jsoup.parseBodyFragment(html);
         doc.outputSettings().prettyPrint(false);
-        boolean landscape = false, reflow = false;
+        boolean landscape = false, marked = false;
         for (Element table : topLevelTables(doc)) {
             Table t = read(table);
+            if (t.columns() < 2) continue;
             TableJudgement j = judge(t);
             if (j.verdict() == Verdict.LANDSCAPE) landscape = true;
-            if (j.verdict() == Verdict.REFLOW) {
-                reflow = true;
-                table.addClass(HAS_CARDS_CLASS);
-                table.after(cardsOf(t));
-            }
+            marked = true;
+            table.addClass(j.verdict() == Verdict.CARDS ? HAS_CARDS_CLASS : KEPT_TABLE_CLASS);
+            table.after(cardsOf(t));
         }
-        return new Result(landscape ? Layout.LANDSCAPE : Layout.PORTRAIT, reflow ? doc.body().html() : html);
+        return new Result(landscape ? Layout.LANDSCAPE : Layout.PORTRAIT, marked ? doc.body().html() : html);
     }
 
     /** @return the orientation of a document whose content is {@code html} */
@@ -136,7 +158,7 @@ public final class PrintWidthEstimator {
     private static List<Element> topLevelTables(Document doc) {
         List<Element> tables = new ArrayList<>();
         for (Element table : doc.select("table")) {
-            if (table.parents().stream().noneMatch(p -> p.tagName().equals("table")) && !table.hasClass(HAS_CARDS_CLASS)
+            if (table.parents().stream().noneMatch(p -> p.tagName().equals("table")) && !table.hasClass(HAS_CARDS_CLASS) && !table.hasClass(KEPT_TABLE_CLASS)
                     && table.parents().stream().noneMatch(p -> p.hasClass(CARDS_CLASS))) tables.add(table);
         }
         return tables;
@@ -254,79 +276,53 @@ public final class PrintWidthEstimator {
         List<Column> columns = new ArrayList<>();
         for (int c = 0; c < t.columns(); c++) columns.add(classify(t, c));
         double sumMin = columns.stream().mapToDouble(Column::min).sum();
-        Verdict verdict;
-        double tall = 0;
-        if (sumMin <= PORTRAIT_CONTENT_PX) {
-            tall = tallShare(t, columns, PORTRAIT_CONTENT_PX);
-            verdict = tall > TALL_ROW_SHARE ? Verdict.REFLOW : Verdict.PORTRAIT;
-        } else if (sumMin <= LANDSCAPE_CONTENT_PX) {
-            tall = tallShare(t, columns, LANDSCAPE_CONTENT_PX);
-            verdict = tall > TALL_ROW_SHARE ? Verdict.REFLOW : Verdict.LANDSCAPE;
-        } else {
-            verdict = Verdict.REFLOW;
-        }
-        return new TableJudgement(columns, sumMin, tall, verdict);
+        Rule rule = ruleOf(columns);
+        Verdict verdict = rule != Rule.NONE ? Verdict.CARDS
+                : sumMin <= PORTRAIT_CONTENT_PX ? Verdict.PORTRAIT : Verdict.LANDSCAPE;
+        return new TableJudgement(columns, sumMin, rule, verdict);
+    }
+
+    /** @return the rule that turns a table with these columns into cards, or {@link Rule#NONE} */
+    static Rule ruleOf(List<Column> columns) {
+        int n = columns.size();
+        if (n < 2) return Rule.NONE;
+        long veryLong = columns.stream().filter(c -> c.chars() >= VERY_LONG_COLUMN_CHARS).count();
+        long long_ = columns.stream().filter(c -> c.chars() >= LONG_COLUMN_CHARS).count();
+        boolean allShort = columns.stream().allMatch(c -> c.kind() == ColumnKind.SHORT);
+        if (allShort && n >= MANY_SHORT_COLUMNS) return Rule.MANY_SHORT_COLUMNS;
+        if (veryLong >= VERY_LONG_COLUMNS_FOR_CARDS) return Rule.TWO_VERY_LONG;
+        if (n <= MAX_COLUMNS_FOR_LONG_RULE && long_ >= LONG_COLUMNS_FOR_CARDS) return Rule.THREE_LONG;
+        return Rule.NONE;
     }
 
     private static Column classify(Table t, int c) {
-        double longest = 0;
+        double longest = 0, longestTotal = 0;
         int cells = 0, codeCells = 0;
         for (List<Cell> row : t.rows()) {
             Cell cell = c < row.size() ? row.get(c) : null;
             if (cell == null || cell.empty()) continue;
             longest = Math.max(longest, cell.oneLine());
+            longestTotal = Math.max(longestTotal, cell.totalWidth());
             cells++;
             if (cell.mostlyCode()) codeCells++;
         }
         if (cells == 0) {                       // no body cell: the header alone decides
             Cell h = c < t.headers().size() ? t.headers().get(c) : null;
             longest = h == null ? 0 : h.oneLine();
+            longestTotal = h == null ? 0 : h.totalWidth();
         }
+        double chars = longestTotal / BODY_FONT_PX;
         double max = longest + CELL_EXTRA_PX;
         double header = c < t.headers().size() && t.headers().get(c) != null ? t.headers().get(c).oneLine() : 0;
         if (longest <= SHORT_MAX_CHARS * BODY_FONT_PX) {
             // Kept on one line, but never narrower than a header that is itself a short word.
             double min = max;
-            return new Column(ColumnKind.SHORT, min, Math.max(max, Math.min(header, SHORT_MAX_CHARS * BODY_FONT_PX) + CELL_EXTRA_PX));
+            return new Column(ColumnKind.SHORT, min, Math.max(max, Math.min(header, SHORT_MAX_CHARS * BODY_FONT_PX) + CELL_EXTRA_PX), chars);
         }
         if (codeCells > cells * IDENTIFIER_CELL_SHARE) {
-            return new Column(ColumnKind.IDENTIFIER, Math.min(max, IDENTIFIER_MIN_CHARS * BODY_FONT_PX + CELL_EXTRA_PX), max);
+            return new Column(ColumnKind.IDENTIFIER, Math.min(max, IDENTIFIER_MIN_CHARS * BODY_FONT_PX + CELL_EXTRA_PX), max, chars);
         }
-        return new Column(ColumnKind.TEXT, Math.min(max, TEXT_MIN_CHARS * BODY_FONT_PX + CELL_EXTRA_PX), max);
-    }
-
-    /** Shares {@code width} among the columns like automatic table layout. */
-    private static double[] allocate(List<Column> columns, double width) {
-        double sumMin = columns.stream().mapToDouble(Column::min).sum();
-        double sumMax = columns.stream().mapToDouble(Column::max).sum();
-        double[] w = new double[columns.size()];
-        for (int i = 0; i < w.length; i++) {
-            Column c = columns.get(i);
-            if (sumMax <= width) w[i] = c.max();
-            else if (sumMin >= width || sumMax == sumMin) w[i] = c.min();
-            else w[i] = c.min() + (width - sumMin) * (c.max() - c.min()) / (sumMax - sumMin);
-        }
-        return w;
-    }
-
-    /** @return the share of body rows estimated at more than {@link #TALL_ROW_LINES} lines */
-    private static double tallShare(Table t, List<Column> columns, double width) {
-        if (t.rows().isEmpty()) return 0;
-        double[] alloc = allocate(columns, width);
-        int tall = 0;
-        for (List<Cell> row : t.rows()) {
-            int lines = 1;
-            for (int c = 0; c < columns.size() && c < row.size(); c++) {
-                Cell cell = row.get(c);
-                if (cell == null || cell.empty() || columns.get(c).kind() == ColumnKind.SHORT) continue;
-                double avail = Math.max(BODY_FONT_PX, alloc[c] - CELL_EXTRA_PX);
-                int n = 0;
-                for (double line : cell.lines()) n += Math.max(1, (int) Math.ceil(line / avail));
-                lines = Math.max(lines, n);
-            }
-            if (lines > TALL_ROW_LINES) tall++;
-        }
-        return tall / (double) t.rows().size();
+        return new Column(ColumnKind.TEXT, Math.min(max, TEXT_MIN_CHARS * BODY_FONT_PX + CELL_EXTRA_PX), max, chars);
     }
 
     // ---------------------------------------------------------------- the reflowed copy

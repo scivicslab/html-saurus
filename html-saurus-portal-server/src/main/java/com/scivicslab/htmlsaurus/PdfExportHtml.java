@@ -350,11 +350,13 @@ final class PdfExportHtml {
         pre, pre code { white-space: pre-wrap !important; word-break: break-all; overflow: visible !important; }
         main table { display: table !important; overflow: visible !important; }
         main td code, main th code { overflow-wrap: anywhere; }
-        .print-cards { display: block; }
-        main table.has-cards { display: none !important; }
-        .print-cards table { width: 100%; margin: 0.6rem 0; break-inside: avoid; }
-        .print-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
-        .print-cards th { width: 8em; }
+        .table-cards { display: none; }
+        main table.rule-cards { display: none !important; }
+        main table.rule-cards + .table-cards { display: block !important; }
+        main table.rule-table + .table-cards { display: none !important; }
+        .table-cards table { width: 100%; margin: 0.6rem 0; break-inside: avoid; }
+        .table-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
+        .table-cards th { width: 8em; }
         h1, h2, h3, h4, h5, h6 { break-after: avoid; }
         table { break-inside: auto; } tr, img, pre, .katex-display { break-inside: avoid; }
         img { max-width: 100% !important; height: auto; }

@@ -473,16 +473,31 @@ main details.inline-translation > summary .translation-controls button:hover { b
 
 /* nav.side is a flex item inside .content-wrap (display: flex); hiding it lets
    main (flex: 1) expand into the freed width with no extra margin/width rule needed. */
-/* A table too wide for any A4 orientation has a reflowed copy (one small table per row) that only paper shows. */
-.print-cards { display: none; }
+/* Every table of two or more columns is followed by a block of cards, one small table per row. The rules
+   (PrintWidthEstimator) mark the table rule-cards or rule-table; the reader's choice is a class on main:
+   force-table or force-cards. Print ignores the choice and follows the rules. */
+.table-cards { display: none; }
+main table.rule-cards { display: none; }
+main table.rule-cards + .table-cards { display: block; }
+main.force-table table.rule-cards { display: block; }
+main.force-table table.rule-cards + .table-cards { display: none; }
+main.force-cards table.rule-table { display: none; }
+main.force-cards table.rule-table + .table-cards { display: block; }
+.table-cards table { width: 100%; margin: 0.6rem 0; display: table; }
+.table-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
+.table-cards th { width: 8em; background: var(--c-bg-alt, #f6f8fa); }
+.table-mode { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 1rem; font-size: 0.875rem; }
+.table-mode button { background: var(--c-sidebar-bg); border: 1px solid var(--c-border); border-radius: 4px;
+  padding: 0.2rem 0.7rem; cursor: pointer; color: inherit; font: inherit; }
+.table-mode button[aria-pressed="true"] { background: #2e8555; color: #fff; border-color: #2e8555; }
 
 @media print {
+  .table-mode { display: none; }
+  main table.rule-cards { display: none !important; }
+  main table.rule-cards + .table-cards { display: block !important; }
+  main table.rule-table + .table-cards { display: none !important; }
+  .table-cards table { break-inside: avoid; }
   nav.side { display: none; }
-  .print-cards { display: block; }
-  main table.has-cards { display: none !important; }
-  .print-cards table { width: 100%; margin: 0.6rem 0; break-inside: avoid; }
-  .print-cards caption { text-align: left; font-weight: 700; padding: 4px 0; }
-  .print-cards th { width: 8em; background: var(--c-bg-alt, #f6f8fa); }
   /* A heading must not be left alone at the foot of a page when the block after it moves on. */
   main h1, main h2, main h3, main h4, main h5, main h6 { break-after: avoid; }
   /* On screen a table scrolls sideways; on paper nothing scrolls, so it must lay out in full and wrap. */

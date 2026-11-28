@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.scivicslab.htmlsaurus.PrintWidthEstimator.ColumnKind;
 import com.scivicslab.htmlsaurus.PrintWidthEstimator.Layout;
 import com.scivicslab.htmlsaurus.PrintWidthEstimator.Result;
+import com.scivicslab.htmlsaurus.PrintWidthEstimator.Rule;
 import com.scivicslab.htmlsaurus.PrintWidthEstimator.TableJudgement;
 import com.scivicslab.htmlsaurus.PrintWidthEstimator.Verdict;
 import java.util.Arrays;
@@ -15,27 +16,13 @@ import java.util.List;
 import org.jsoup.Jsoup;
 import org.junit.jupiter.api.Test;
 
-/** How a table prints on A4, decided from what its columns hold. */
+/** Whether a table is shown as a table or as cards, and how a table that stays prints on A4. */
 class PrintWidthEstimatorTest {
 
     private static String row(String tag, String... cells) {
         StringBuilder sb = new StringBuilder("<tr>");
         for (String c : cells) sb.append('<').append(tag).append('>').append(c).append("</").append(tag).append('>');
         return sb.append("</tr>\n").toString();
-    }
-
-    /** A table of {@code columns} text columns, each body cell {@code chars} full-width characters long. */
-    private static String textTable(int columns, int rows, int chars) {
-        String[] head = new String[columns];
-        String[] cells = new String[columns];
-        for (int i = 0; i < columns; i++) { head[i] = "列" + i; cells[i] = "あ".repeat(chars); }
-        StringBuilder sb = new StringBuilder("<table>\n").append(row("th", head));
-        for (int r = 0; r < rows; r++) {
-            String[] own = cells.clone();
-            own[0] = "行" + r;
-            sb.append(row("td", own));
-        }
-        return sb.append("</table>").toString();
     }
 
     private static Verdict verdictOf(String html) {
@@ -51,11 +38,31 @@ class PrintWidthEstimatorTest {
         assertEquals(Layout.PORTRAIT, PrintWidthEstimator.layoutOf(null));
     }
 
+    /** A table of {@code columns} columns whose first column is short and whose others hold {@code chars[i]} characters. */
+    private static String table(int... chars) {
+        String[] head = new String[chars.length];
+        String[] cells = new String[chars.length];
+        for (int i = 0; i < chars.length; i++) { head[i] = "列" + i; cells[i] = "あ".repeat(chars[i]); }
+        return "<table>\n" + row("th", head) + row("td", cells) + "</table>";
+    }
+
+    private static int[] fill(int columns, int value) {
+        int[] a = new int[columns];
+        Arrays.fill(a, value);
+        return a;
+    }
+
+    private static Rule ruleOf(String html) {
+        return PrintWidthEstimator.analyze(html).get(0).rule();
+    }
+
     @Test
-    void aTwoColumnTableIsPortrait_evenWithALongSecondColumn() {
-        String html = "<table>" + row("th", "項目", "内容") + row("td", "名前", "あ".repeat(60)) + "</table>";
+    void aSingleLongColumnIsNeverCards_aTwoColumnTableStaysATable() {
+        String html = "<table>" + row("th", "項目", "内容") + row("td", "名前", "あ".repeat(300)) + "</table>";
         assertEquals(Verdict.PORTRAIT, verdictOf(html));
-        assertSame(html, PrintWidthEstimator.decide(html).html(), "a portrait table is not rewritten");
+        var doc = Jsoup.parseBodyFragment(PrintWidthEstimator.decide(html).html());
+        assertEquals(1, doc.select("table.rule-table").size(), "marked as kept");
+        assertEquals(0, doc.select("table.rule-cards").size());
     }
 
     @Test
@@ -70,6 +77,7 @@ class PrintWidthEstimatorTest {
         assertEquals(2 * 8.8 + 25, c.get(0).min(), 0.01, "a short column's minimum is its longest cell on one line");
         assertEquals(PrintWidthEstimator.IDENTIFIER_MIN_CHARS * 16 + 25, c.get(1).min(), 0.01);
         assertEquals(PrintWidthEstimator.TEXT_MIN_CHARS * 16 + 25, c.get(2).min(), 0.01);
+        assertEquals(40, c.get(2).chars(), 0.01);
     }
 
     @Test
@@ -81,64 +89,99 @@ class PrintWidthEstimatorTest {
     }
 
     @Test
-    void aTableWhoseMinimumsFitPortraitIsPortrait_oneThatFitsOnlyLandscapeIsLandscape() {
+    void theLengthOfAColumnIsItsLongestCell_halfWidthCountsAsAboutHalf() {
+        String html = "<table>" + row("th", "A", "B") + row("td", "x", "a".repeat(46)) + row("td", "y", "b".repeat(10)) + "</table>";
+        assertEquals(46 * 8.8 / 16, PrintWidthEstimator.analyze(html).get(0).columns().get(1).chars(), 0.01);
+        // 46 half-width characters are 25.3 full-width ones, 45 are 24.75: the border of rule 3.
+        assertTrue(46 * 8.8 / 16 >= PrintWidthEstimator.LONG_COLUMN_CHARS);
+        assertTrue(45 * 8.8 / 16 < PrintWidthEstimator.LONG_COLUMN_CHARS);
+    }
+
+    @Test
+    void rule1_thirteenOrMoreAllShortColumnsAreCards_twelveAreNot() {
+        assertEquals(Rule.MANY_SHORT_COLUMNS, ruleOf(table(fill(13, 1))));
+        assertEquals(Verdict.CARDS, verdictOf(table(fill(13, 1))));
+        assertEquals(Rule.NONE, ruleOf(table(fill(12, 1))));
+        assertEquals(Verdict.PORTRAIT, verdictOf(table(fill(12, 1))), "12 * 41 px fits portrait");
+        int[] oneNotShort = fill(13, 1);
+        oneNotShort[5] = 9;
+        assertEquals(Rule.NONE, ruleOf(table(oneNotShort)), "one column that is not short is not rule 1");
+    }
+
+    @Test
+    void rule2_twoVeryLongColumnsAreCardsWhateverTheNumberOfColumns() {
+        assertEquals(Rule.TWO_VERY_LONG, ruleOf(table(1, 100, 100)));
+        assertEquals(Rule.TWO_VERY_LONG, ruleOf(table(100, 100)));
+        int[] many = fill(14, 1);
+        many[2] = 100;
+        many[9] = 150;
+        assertEquals(Rule.TWO_VERY_LONG, ruleOf(table(many)), "more than 12 columns: rule 2 still applies");
+        assertEquals(Rule.NONE, ruleOf(table(1, 100, 99)), "99 is not very long");
+        assertEquals(Rule.NONE, ruleOf(table(1, 300)), "one very long column is not enough");
+    }
+
+    @Test
+    void rule3_threeLongColumnsInAtMostTwelveColumnsAreCards() {
+        assertEquals(Rule.THREE_LONG, ruleOf(table(1, 25, 25, 25)));
+        int[] twelve = fill(12, 1);
+        twelve[1] = 25; twelve[2] = 30; twelve[3] = 40;
+        assertEquals(Rule.THREE_LONG, ruleOf(table(twelve)));
+        int[] thirteen = fill(13, 1);
+        thirteen[1] = 25; thirteen[2] = 30; thirteen[3] = 40;
+        assertEquals(Rule.NONE, ruleOf(table(thirteen)), "13 columns: rule 3 does not apply");
+        assertEquals(Rule.NONE, ruleOf(table(1, 25, 25, 24)), "24 is not long");
+        assertEquals(Rule.NONE, ruleOf(table(1, 25, 25)), "two long columns are not enough");
+    }
+
+    @Test
+    void aTableThatMatchesNoRuleStaysATable_portraitWhenItsMinimumsFit_elseLandscape() {
         // A text column needs 185 px and the short first column 50 px: 3 columns need 420 px, 5 need 790 px.
-        assertEquals(Verdict.PORTRAIT, verdictOf(textTable(3, 3, 12)));
-        assertEquals(Verdict.LANDSCAPE, verdictOf(textTable(5, 3, 30)));
-        assertEquals(Layout.LANDSCAPE, PrintWidthEstimator.layoutOf(textTable(5, 3, 30)));
+        assertEquals(Verdict.PORTRAIT, verdictOf(table(1, 12, 12)));
+        assertEquals(Verdict.LANDSCAPE, verdictOf(table(1, 20, 20, 20, 20)));
+        assertEquals(Layout.LANDSCAPE, PrintWidthEstimator.layoutOf(table(1, 20, 20, 20, 20)));
+        // 12 text columns need 2200 px, more than landscape: the table stays a table, in landscape.
+        TableJudgement wide = PrintWidthEstimator.analyze(table(fill(12, 20))).get(0);
+        assertEquals(Rule.NONE, wide.rule());
+        assertTrue(wide.sumMin() > PrintWidthEstimator.LANDSCAPE_CONTENT_PX);
+        assertEquals(Verdict.LANDSCAPE, wide.verdict());
     }
 
     @Test
-    void aTableThatFitsNeitherIsReflowed_andDoesNotMakeTheDocumentLandscape() {
-        String html = textTable(7, 3, 30);       // 50 + 6 * 185 = 1160 px > 1001 px
-        assertEquals(Verdict.REFLOW, verdictOf(html));
+    void everyTableOfTwoOrMoreColumnsGetsCards_markedByTheVerdict_andACardTableIsNotLandscape() {
+        String html = table(1, 12, 12) + table(1, 100, 100) + "<table>" + row("th", "x") + row("td", "y") + "</table>";
         Result r = PrintWidthEstimator.decide(html);
-        assertEquals(Layout.PORTRAIT, r.layout());
+        assertEquals(Layout.PORTRAIT, r.layout(), "a table that is cards does not make the document landscape");
         var doc = Jsoup.parseBodyFragment(r.html());
-        assertEquals(1, doc.select("table.has-cards").size(), "the original table stays, marked");
-        assertEquals(3, doc.select(".print-cards table.print-card").size(), "one small table per row");
-        assertEquals("行0", doc.selectFirst(".print-cards caption").text(), "headed by the first column's value");
-        assertEquals(6, doc.select(".print-cards table").first().select("tr").size(), "a row per other column");
-        assertEquals("列1", doc.selectFirst(".print-cards th").text());
+        assertEquals(1, doc.select("table.rule-table").size());
+        assertEquals(1, doc.select("table.rule-cards").size());
+        assertEquals(2, doc.select(".table-cards").size(), "one block per table of two or more columns");
+        assertEquals(1, doc.select("table.rule-table + .table-cards").size(), "the block follows its table");
+        assertEquals(1, doc.select("table.rule-cards + .table-cards").size());
     }
 
     @Test
-    void aTableThatFitsButWrapsIntoManyTallRowsIsReflowed() {
-        // 3 text columns fit portrait, but 200-character cells wrap into far more than 6 lines each.
-        TableJudgement j = PrintWidthEstimator.analyze(textTable(3, 4, 200)).get(0);
-        assertTrue(j.sumMin() <= PrintWidthEstimator.PORTRAIT_CONTENT_PX);
-        assertTrue(j.tallShare() > PrintWidthEstimator.TALL_ROW_SHARE);
-        assertEquals(Verdict.REFLOW, j.verdict());
-    }
-
-    @Test
-    void aFewTallRowsAreKept() {
-        // One tall row of ten is under the 30% limit.
-        StringBuilder sb = new StringBuilder(textTable(3, 0, 10).replace("</table>", ""));
-        sb.append(row("td", "行0", "あ".repeat(300), "あ".repeat(300)));
-        for (int i = 1; i < 10; i++) sb.append(row("td", "行" + i, "あ".repeat(10), "あ".repeat(10)));
-        sb.append("</table>");
-        assertEquals(Verdict.PORTRAIT, verdictOf(sb.toString()));
+    void theCardsHaveOneSmallTablePerRowHeadedByTheFirstColumn() {
+        String html = "<table>" + row("th", "ID", "名前", "説明")
+                + row("td", "A1", "あ", "説<code>明</code>1") + row("td", "A2", "い", "説明2") + "</table>";
+        var doc = Jsoup.parseBodyFragment(PrintWidthEstimator.decide(html).html());
+        assertEquals(2, doc.select(".table-cards table.print-card").size());
+        assertEquals("A1", doc.selectFirst(".table-cards caption").text());
+        assertEquals(2, doc.select(".table-cards table").first().select("tr").size(), "a row per other column");
+        assertEquals("名前", doc.selectFirst(".table-cards th").text());
+        assertEquals(1, doc.select(".table-cards table").first().select("td code").size(), "the cell's markup is kept");
     }
 
     @Test
     void anyLandscapeTableMakesTheDocumentLandscape() {
-        String html = textTable(3, 2, 12) + textTable(5, 3, 30) + textTable(7, 3, 30);
-        Result r = PrintWidthEstimator.decide(html);
-        assertEquals(Layout.LANDSCAPE, r.layout());
-        assertTrue(r.html().contains("print-cards"), "the table that fits neither is still reflowed");
+        String html = table(1, 12, 12) + table(1, 20, 20, 20, 20) + table(1, 100, 100);
+        assertEquals(Layout.LANDSCAPE, PrintWidthEstimator.decide(html).layout());
     }
 
     @Test
-    void thirteenShortColumnsFitLandscapeOnTheirWidth() {
-        String[] head = new String[13];
-        String[] cells = new String[13];
-        Arrays.fill(head, "高");
-        Arrays.fill(cells, "中");
-        String html = "<table>" + row("th", head) + row("td", cells) + "</table>";
-        TableJudgement j = PrintWidthEstimator.analyze(html).get(0);
-        assertEquals(13 * 41, j.sumMin(), 0.01);
-        assertEquals(Verdict.PORTRAIT, j.verdict(), "13 * 41 px = 533 px");
+    void decidingTwiceDoesNotAddCardsToTheCards() {
+        String once = PrintWidthEstimator.decide(table(1, 100, 100)).html();
+        var doc = Jsoup.parseBodyFragment(PrintWidthEstimator.decide(once).html());
+        assertEquals(1, doc.select(".table-cards").size());
     }
 
     @Test
