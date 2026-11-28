@@ -49,6 +49,11 @@
             </exclusions>
         </dependency>
 
+        <!-- Reads the <table> elements of a built page to decide its print orientation (PrintWidthEstimator) -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-core</artifactId>

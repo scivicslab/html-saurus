@@ -38,8 +38,9 @@ final class PdfExportHtml {
      * @param plan   what the PDF holds
      * @param source where the chosen directory is, shown on the cover, for example {@code doc_AASG1/docs/AAS-G1}
      * @param bodies the body of each part in the order of {@code plan.parts()}; {@code null} for a part with no page
+     * @param landscape for each part, whether its page was built for A4 landscape (its {@code <main>} has {@value #LANDSCAPE_CLASS})
      */
-    record Prepared(PdfExportPlan plan, String source, List<String> bodies) {
+    record Prepared(PdfExportPlan plan, String source, List<String> bodies, List<Boolean> landscape) {
 
     /**
      * @param pages the page each part starts on, by part number; empty on the first printing, when the table of
@@ -83,7 +84,7 @@ final class PdfExportHtml {
             // every other part starts a new one.
             boolean sharesPage = previous != null && previous.folder() && previous.href() == null && p.level() == previous.level() + 1;
             int h = Math.min(p.level(), 6);
-            sb.append("<section class=\"hs-part").append(sharesPage ? "" : " hs-break").append("\" id=\"").append(p.anchor()).append("\">\n");
+            sb.append("<section class=\"hs-part").append(landscape.get(index) ? " hs-landscape" : "").append(sharesPage ? "" : " hs-break").append("\" id=\"").append(p.anchor()).append("\">\n");
             sb.append("<h").append(h).append(" class=\"hs-part-title").append(p.folder() ? " hs-folder-title" : "").append("\">")
               .append(esc(p.title())).append("</h").append(h).append(">\n");
             // Wrapped in <main> so the page's own "main ..." styles apply as they do on screen.
@@ -111,8 +112,23 @@ final class PdfExportHtml {
             if (p.href() != null) anchorOfHref.putIfAbsent(normalize(p.href()), p.anchor());
         }
         List<String> bodies = new ArrayList<>();
-        for (PdfExportPlan.Part p : plan.parts()) bodies.add(p.href() == null ? null : bodyOfPage(staticDir, p, anchorOfHref, imagesDirectory));
-        return new Prepared(plan, source, bodies);
+        List<Boolean> landscape = new ArrayList<>();
+        for (PdfExportPlan.Part p : plan.parts()) {
+            bodies.add(p.href() == null ? null : bodyOfPage(staticDir, p, anchorOfHref, imagesDirectory));
+            landscape.add(p.href() != null && isLandscapePage(staticDir, p.href()));
+        }
+        return new Prepared(plan, source, bodies, landscape);
+    }
+
+    /** The class the page builder puts on {@code <main>} of a document that prints on A4 landscape. */
+    static final String LANDSCAPE_CLASS = "print-landscape";
+
+    /** @return whether the built page was marked for A4 landscape by the page builder */
+    static boolean isLandscapePage(Path staticDir, String href) throws IOException {
+        Path file = builtPageFile(staticDir, href);
+        if (!Files.isRegularFile(file)) return false;
+        Element main = Jsoup.parse(file.toFile(), StandardCharsets.UTF_8.name()).selectFirst("main");
+        return main != null && main.hasClass(LANDSCAPE_CLASS);
     }
 
     /** @return the combined HTML of a plan, read from the built pages and written with the given page numbers */
@@ -311,6 +327,8 @@ final class PdfExportHtml {
         html, body { background: #fff !important; color: #1f2328 !important; }
         body { display: block !important; margin: 0 !important; padding: 0 !important; max-width: none !important;
                font-family: 'Noto Sans JP', 'Noto Sans CJK JP', sans-serif; }
+        @page wide { size: A4 landscape; margin: 18mm 16mm 20mm 16mm; }
+        .hs-landscape { page: wide; }
         .hs-break { break-before: page; }
         main.hs-main { display: block !important; margin: 0 !important; padding: 0 !important; max-width: none !important;
                        width: auto !important; grid-column: auto !important; }
@@ -330,6 +348,8 @@ final class PdfExportHtml {
         .hs-toc-l5 { padding-left: 6em; } .hs-toc-l6 { padding-left: 7.5em; }
         .hs-part-title { border-bottom: 1px solid #d0d7de; padding-bottom: 4pt; }
         pre, pre code { white-space: pre-wrap !important; word-break: break-all; overflow: visible !important; }
+        main table { display: table !important; overflow: visible !important; }
+        main td code, main th code { overflow-wrap: anywhere; }
         table { break-inside: auto; } tr, img, pre, .katex-display { break-inside: avoid; }
         img { max-width: 100% !important; height: auto; }
         .hs-missing { color: #cf222e; }

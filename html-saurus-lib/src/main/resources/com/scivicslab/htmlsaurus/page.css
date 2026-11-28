@@ -475,4 +475,7 @@ main details.inline-translation > summary .translation-controls button:hover { b
    main (flex: 1) expand into the freed width with no extra margin/width rule needed. */
 @media print {
   nav.side { display: none; }
+  /* On screen a table scrolls sideways; on paper nothing scrolls, so it must lay out in full and wrap. */
+  main table { display: table !important; overflow: visible !important; }
+  main td code, main th code { overflow-wrap: anywhere; }
 }

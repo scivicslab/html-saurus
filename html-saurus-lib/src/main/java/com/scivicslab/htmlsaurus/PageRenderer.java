@@ -165,6 +165,10 @@ class PageRenderer {
         sb.append("  <style>\n");
         sb.append(PAGE_CSS);
         sb.append("              </style>\n");
+        // Print orientation follows the document's tables: landscape only when a table cannot fit portrait.
+        boolean landscape = PrintWidthEstimator.layoutOf(content) == PrintWidthEstimator.Layout.LANDSCAPE;
+        sb.append(landscape ? "<style>@page { size: A4 landscape; margin: 16mm; }</style>\n"
+                            : "<style>@page { size: A4 portrait; margin: 16mm; }</style>\n");
         // Dev only: bake in the shared palette and the --c-* remap so the portal's theme drives
         // this page. The data-hs-theme marker makes the portal's serve-time injection skip pages
         // that already carry it. Omitted in production, where page.css keeps its original colours.
@@ -363,7 +367,7 @@ class PageRenderer {
         }
         sb.append("</nav>\n");
 
-        sb.append("<main>\n<h1>").append(escapeHtml(title)).append("</h1>\n");
+        sb.append(landscape ? "<main class=\"print-landscape\">\n<h1>" : "<main>\n<h1>").append(escapeHtml(title)).append("</h1>\n");
         if (!production) {
             String mdSourcePath = projectDirName + "/docs/" + rawRelPath;
             sb.append("<div class=\"copy-bar\">");

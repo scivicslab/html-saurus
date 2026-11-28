@@ -217,6 +217,27 @@ class PdfExportTest {
     }
 
     @Test
+    void renderCombinedHtml_printsOnlyThePagesBuiltForLandscapeOnA4Landscape() throws Exception {
+        Path staticDir = dir.resolve("static-html");
+        PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "", "doc_AASG1");
+        PdfExportPlan.Part wide = plan.parts().stream().filter(p -> "/AAS-G1/CHM13-expr1/Plan/".equals(p.href())).findFirst().orElseThrow();
+        for (PdfExportPlan.Part p : plan.parts()) {
+            if (p.href() == null) continue;
+            page(staticDir, p.href(), "<p>body of " + p.title() + "</p>");
+            if (p == wide) {
+                Path file = PdfExportHtml.builtPageFile(staticDir, p.href());
+                Files.writeString(file, Files.readString(file).replace("<main>", "<main class=\"print-landscape\">"));
+            }
+        }
+        String html = PdfExportHtml.renderCombinedHtml(plan, "doc_AASG1/docs", staticDir, dir.resolve("images"), Map.of());
+        assertTrue(html.contains("@page wide { size: A4 landscape;"), "a named landscape page is declared");
+        int at = html.indexOf("id=\"" + wide.anchor() + "\"");
+        assertTrue(html.substring(html.lastIndexOf("<section", at), at).contains("hs-landscape"), "the marked page prints landscape");
+        int landscapeParts = html.split("hs-part hs-landscape", -1).length - 1;
+        assertEquals(1, landscapeParts, "no other part is landscape");
+    }
+
+    @Test
     void renderCombinedHtml_whenADirectoryIsFollowedByASubdirectory_putsTheirHeadingsOnOnePage() throws Exception {
         Path staticDir = dir.resolve("static-html");
         PdfExportPlan plan = PdfExportPlan.planOfDirectory(tree(), "", "doc_AASG1");
