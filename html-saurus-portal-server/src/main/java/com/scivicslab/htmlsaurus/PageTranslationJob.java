@@ -2,11 +2,10 @@ package com.scivicslab.htmlsaurus;
 
 import com.scivicslab.jobregistry.Job;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.HashMap;
+import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.pojoactor.core.ActorSystem;
+
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -42,17 +41,20 @@ class PageTranslationJob {
         CompletableFuture<String> translate(String text, String lang) throws Exception;
     }
 
-    private record Pending(String key, CompletableFuture<String> future) {}
-
     private final List<Block> blocks;
     private final TranslationCache cache;
     private final BlockTranslator translator;
+    private final ActorSystem system;
 
-    PageTranslationJob(List<Block> blocks, TranslationCache cache, BlockTranslator translator) {
+    PageTranslationJob(List<Block> blocks, TranslationCache cache, BlockTranslator translator, ActorSystem system) {
         this.blocks = blocks;
         this.cache = cache;
         this.translator = translator;
+        this.system = system;
     }
+
+    /** Set by every translation that ends; the job's loop swaps it before it reads the counts, so no end is missed. */
+    private volatile CompletableFuture<Void> wake = new CompletableFuture<>();
 
     /**
      * Translates every block that is not cached yet.
@@ -66,58 +68,50 @@ class PageTranslationJob {
         job.result(ImportOutcome.NOTHING_YET);
         job.phase("Translating");
 
-        Deque<Pending> pending = new ArrayDeque<>();
-        Map<String, CompletableFuture<String>> inFlight = new HashMap<>();
-        int[] finished = {0};
-        int[] failed = {0};
-
-        for (Block block : blocks) {
-            if (job.isTerminal()) {
-                return;   // stop() got here first; what is already translated stays cached
+        String[] name = new String[1];
+        ActorRef<PageProgress> progress = PageProgress.host(system, cache, total, name);
+        try {
+            for (Block block : blocks) {
+                if (job.isTerminal()) {
+                    return;   // stop() got here first; what is already translated stays cached
+                }
+                String key = TranslationCache.key(block.text(), block.lang());
+                PageProgress.Admission admission = progress.ask(p -> p.admit(key)).join();
+                if (admission == PageProgress.Admission.TRANSLATE) {
+                    // May hold the caller: the broker's queue paces the page here, outside the actor.
+                    CompletableFuture<String> future = translator.translate(block.text(), block.lang());
+                    future.whenComplete((text, error) -> {
+                        if (error != null) logger.log(Level.WARNING, "Page translation: a block failed", error);
+                        String translated = error == null ? text : null;
+                        // The next message of this actor answers after this one, so a read after the wake sees it.
+                        progress.ask(p -> { p.settle(key, translated); return 0; })
+                                .whenComplete((ignored, e) -> wake.complete(null));
+                    });
+                }
+                job.progress(progress.ask(PageProgress::counts).join().finished(), total);
             }
-            String key = TranslationCache.key(block.text(), block.lang());
-            if (cache.get(key) != null) {
-                finished[0]++;
-                job.progress(finished[0], total);
-                continue;
+            while (true) {
+                if (job.isTerminal()) {
+                    return;
+                }
+                wake = new CompletableFuture<>();
+                PageProgress.Counts counts = progress.ask(PageProgress::counts).join();
+                job.progress(counts.finished(), total);
+                if (counts.complete()) {
+                    job.phase(counts.failed() == 0 ? "" : counts.failed() + " block(s) failed");
+                    return;
+                }
+                try {
+                    // A stop carries no message to this job, so the wait is bounded and the stop looked for again.
+                    wake.get(1, TimeUnit.SECONDS);
+                } catch (TimeoutException e) {
+                    // look again
+                } catch (ExecutionException e) {
+                    // wake is only ever completed normally
+                }
             }
-            // The same text twice on a page is translated once; both blocks wait for that one.
-            CompletableFuture<String> future = inFlight.get(key);
-            if (future == null) {
-                future = translator.translate(block.text(), block.lang());
-                inFlight.put(key, future);
-            }
-            pending.add(new Pending(key, future));
-            settleDone(pending, finished, failed, job, total);
-        }
-        while (!pending.isEmpty()) {
-            if (job.isTerminal()) {
-                return;
-            }
-            try {
-                pending.peekFirst().future().get(1, TimeUnit.SECONDS);
-            } catch (TimeoutException e) {
-                continue;
-            } catch (ExecutionException e) {
-                // counted by settleDone below
-            }
-            settleDone(pending, finished, failed, job, total);
-        }
-        job.phase(failed[0] == 0 ? "" : failed[0] + " block(s) failed");
-    }
-
-    /** Takes the blocks at the head that have finished off the queue, caching what was translated. */
-    private void settleDone(Deque<Pending> pending, int[] finished, int[] failed, Job<ImportOutcome> job, int total) {
-        while (!pending.isEmpty() && pending.peekFirst().future().isDone()) {
-            Pending p = pending.pollFirst();
-            try {
-                cache.put(p.key(), p.future().join());
-            } catch (RuntimeException e) {
-                failed[0]++;
-                logger.log(Level.WARNING, "Page translation: a block failed", e);
-            }
-            finished[0]++;
-            job.progress(finished[0], total);
+        } finally {
+            system.removeActor(name[0]);
         }
     }
 }

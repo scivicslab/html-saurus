@@ -36,6 +36,11 @@ class PageTranslationJobTest {
         system.terminate();
     }
 
+    private PageTranslationJob job(List<PageTranslationJob.Block> blocks, TranslationCache cache,
+                                   PageTranslationJob.BlockTranslator translator) {
+        return new PageTranslationJob(blocks, cache, translator, system);
+    }
+
     private Job<ImportOutcome> run(PageTranslationJob work) throws Exception {
         Job<ImportOutcome> job = registry.submit("translate", "page", work::run, System.currentTimeMillis());
         long deadline = System.currentTimeMillis() + 10_000;
@@ -58,7 +63,7 @@ class PageTranslationJobTest {
     void everyBlockIsTranslatedAndCached() throws Exception {
         TranslationCache cache = TranslationCache.load(dir);
         List<String> asked = Collections.synchronizedList(new ArrayList<>());
-        PageTranslationJob work = new PageTranslationJob(List.of(block("one"), block("two"), block("three")), cache,
+        PageTranslationJob work = job(List.of(block("one"), block("two"), block("three")), cache,
             (text, lang) -> { asked.add(text); return CompletableFuture.completedFuture("T:" + text); });
 
         Job<ImportOutcome> job = run(work);
@@ -76,7 +81,7 @@ class PageTranslationJobTest {
         TranslationCache cache = TranslationCache.load(dir);
         cache.put(TranslationCache.key("one", "Japanese"), "already");
         List<String> asked = Collections.synchronizedList(new ArrayList<>());
-        PageTranslationJob work = new PageTranslationJob(List.of(block("one"), block("two")), cache,
+        PageTranslationJob work = job(List.of(block("one"), block("two")), cache,
             (text, lang) -> { asked.add(text); return CompletableFuture.completedFuture("T:" + text); });
 
         Job<ImportOutcome> job = run(work);
@@ -90,7 +95,7 @@ class PageTranslationJobTest {
     void sameTextTwiceIsAskedOnce() throws Exception {
         TranslationCache cache = TranslationCache.load(dir);
         List<String> asked = Collections.synchronizedList(new ArrayList<>());
-        PageTranslationJob work = new PageTranslationJob(List.of(block("same"), block("other"), block("same")), cache,
+        PageTranslationJob work = job(List.of(block("same"), block("other"), block("same")), cache,
             (text, lang) -> { asked.add(text); return CompletableFuture.completedFuture("T:" + text); });
 
         Job<ImportOutcome> job = run(work);
@@ -102,7 +107,7 @@ class PageTranslationJobTest {
     @Test
     void aFailedBlockIsLeftUncachedAndTheRestGoOn() throws Exception {
         TranslationCache cache = TranslationCache.load(dir);
-        PageTranslationJob work = new PageTranslationJob(List.of(block("good"), block("bad"), block("fine")), cache,
+        PageTranslationJob work = job(List.of(block("good"), block("bad"), block("fine")), cache,
             (text, lang) -> text.equals("bad")
                 ? CompletableFuture.<String>failedFuture(new java.io.IOException("no"))
                 : CompletableFuture.completedFuture("T:" + text));
@@ -120,7 +125,7 @@ class PageTranslationJobTest {
     void aBlockThatFinishesLaterIsWaitedFor() throws Exception {
         TranslationCache cache = TranslationCache.load(dir);
         CompletableFuture<String> slow = new CompletableFuture<>();
-        PageTranslationJob work = new PageTranslationJob(List.of(block("slow")), cache, (text, lang) -> slow);
+        PageTranslationJob work = job(List.of(block("slow")), cache, (text, lang) -> slow);
         Job<ImportOutcome> job = registry.submit("translate", "page", work::run, System.currentTimeMillis());
 
         Thread.sleep(300);
@@ -138,7 +143,7 @@ class PageTranslationJobTest {
     @Test
     void stoppingEndsTheJobWithoutWaitingForTheBroker() throws Exception {
         TranslationCache cache = TranslationCache.load(dir);
-        PageTranslationJob work = new PageTranslationJob(List.of(block("never")), cache,
+        PageTranslationJob work = job(List.of(block("never")), cache,
             (text, lang) -> new CompletableFuture<>());
         Job<ImportOutcome> job = registry.submit("translate", "page", work::run, System.currentTimeMillis());
 

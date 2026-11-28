@@ -4268,7 +4268,7 @@ public class PortalServer implements PortalReads {
             return;
         }
         String label = body.get("label") instanceof String l && !l.isBlank() ? l : "page";
-        PageTranslationJob work = new PageTranslationJob(blocks, translationCache, blockTranslator());
+        PageTranslationJob work = new PageTranslationJob(blocks, translationCache, blockTranslator(), searcherSystem);
         var job = batchJobs.submit("translate", label, work::run, System.currentTimeMillis());
         respond(ex, 200, "application/json",
             "{\"jobId\":" + jsonStr(job.id()) + ",\"total\":" + blocks.size() + "}");
@@ -4301,9 +4301,7 @@ public class PortalServer implements PortalReads {
 
     /** The most candidate pairs one page may ask about. */
     private static final int MAX_JOIN_PAIRS = 3000;
-    /** Runs the blocking calls to the translation server when no broker is set; one thread per question. */
-    private static final java.util.concurrent.ExecutorService JOIN_CALLS =
-            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+    private static final java.util.concurrent.atomic.AtomicLong JOIN_CALL_NAMES = new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * How a paragraph-join question reaches the local LLM: through quarkus-gpu-broker's queue when
@@ -4313,16 +4311,14 @@ public class PortalServer implements PortalReads {
         if (GPU_BROKER != null) {
             return (system, user) -> translate.chatViaBroker(GPU_BROKER, system, user);
         }
-        return (system, user) -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            try {
-                return translate.chat(system, user, (int) ParagraphJoinJudge.ANSWER_TIMEOUT_SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new java.util.concurrent.CompletionException(e);
-            } catch (IOException e) {
-                throw new java.util.concurrent.CompletionException(e);
-            }
-        }, JOIN_CALLS);
+        // One actor per question: the blocking call runs on its virtual thread, and questions run side by side.
+        return (system, user) -> {
+            String name = "join-chat-" + JOIN_CALL_NAMES.incrementAndGet();
+            var call = searcherSystem.actorOf(name, new ChatCall(translate::chat));
+            var answer = call.ask(c -> c.chat(system, user, (int) ParagraphJoinJudge.ANSWER_TIMEOUT_SECONDS));
+            answer.whenComplete((a, e) -> searcherSystem.removeActor(name));
+            return answer;
+        };
     }
 
     /**
